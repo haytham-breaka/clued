@@ -364,7 +364,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       if (reply) foot.push({ text: ctx.unread.has(reply) ? '● answered  ' : '↪ answered  ', style: { fg: ctx.unread.has(reply) ? C.magenta : C.cyan }, action: () => ctx.jump(`part:${reply}`) })
       // Everything that replies to it, down the replies: one click opens the whole chain.
       const chain = ctx.chainOf(turn)
-      if (chain > 1) foot.push({ text: `⛓ chain · ${chain}  `, style: { fg: C.cyan }, action: () => ctx.openChain(turn) })
+      if (chain > 0) foot.push({ text: `⛓ chain · ${chain}  `, style: { fg: C.cyan }, action: () => ctx.openChain(turn) })
       // Sent while Claude worked, and Claude hasn't got to it yet.
       if (turn.queued && !turn.isDone && !turn.steps.length && !turn.live) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
       while (foot.length && foot.at(-1)!.text.trim() === '') foot.pop()

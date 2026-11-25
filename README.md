@@ -110,7 +110,7 @@ Claude reacts too, only where it means something: 👀 seen (for a message sent 
 
 ### Chains
 
-The `⛓` button on a message opens everything connected to it: the replies, your follow-ups, the corrections, and the replies to those.
+The `⛓ chain` link under a message (as soon as it has a reply), or a click on its mark in the panel, opens everything connected to it: the replies, your follow-ups, the corrections, and the replies to those. Chains come from the session file and what clued keeps in `~/.clued/`, not from Claude's context, so they stay whole when Claude Code compacts the conversation.
 
 ### Live views of Claude and its agents
 

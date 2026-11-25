@@ -41,9 +41,12 @@ describe('chat', () => {
       assert.ok(lines[one - 1]!.includes('↩ “first message”'), 'part one quotes the first message')
       assert.ok(lines[two - 1]!.includes('↩ “please split”'), 'part two quotes the second')
       assert.ok(!s.includes('<<reply'), 'the marks are not shown')
-      assert.match(s, /3 next ▸/)
+      // The unread count can trail the reply by a frame: wait for it rather than read it at once.
+      const after = await app.waitFor(/3 next ▸/)
       // The first message now has a chain: its own reply and the part answering it later.
-      assert.match(rowOf(s, '⛓ chain'), /● answered {2}⛓ chain · 2/)
+      assert.match(rowOf(after, '⛓ chain · 2'), /● answered {2}⛓ chain · 2/)
+      // A message with a single reply has its chain link too: one click reads the whole chain.
+      assert.match(after, /● answered {2}⛓ chain · 1/)
     }))
 
   test('streams the reply as it is written, with a caret, then the final bubble', () =>
