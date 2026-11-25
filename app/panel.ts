@@ -250,7 +250,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
   if (p.isFolded || width < MIN_FULL) {
     const open = () => p.fold(false)
     const L: Line[] = [
-      row(width, [{ text: '☰', style: { bold: true, fg: C.cyan }, action: open }], [
+      row(width, [{ text: '≡', style: { bold: true, fg: C.cyan }, action: open }], [
         p.isWorking ? { text: '●', style: { fg: C.cyan } } : { text: '○', style: { fg: C.faint } },
       ]),
       rule(width),
@@ -269,7 +269,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
   }
 
   const L: Line[] = []
-  L.push(row(width, [{ text: '☰ Overview', style: { bold: true, fg: C.cyan }, action: () => p.fold(true) }], [
+  L.push(row(width, [{ text: '≡ Overview', style: { bold: true, fg: C.cyan }, action: () => p.fold(true) }], [
     p.isWorking ? { text: '● working', style: { fg: C.cyan } } : { text: '○ idle', style: { fg: C.faint } },
   ]))
   L.push(row(width, [

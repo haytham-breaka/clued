@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
 import { cellText, cells, charCells, clip, clipLine, lineCells, markCells, pad, sgr, wrap } from '../../app/text.ts'
 import type { Line } from '../../app/text.ts'
 
@@ -23,6 +24,12 @@ describe('cell widths', () => {
     assert.equal(lineCells([{ text: 'ab' }, { text: '漢字' }]), 6)
     assert.equal(cells(''), 0)
   })
+})
+
+test('the app draws no symbol terminals disagree on: Unicode 16 made the trigrams (☰) two cells wide', () => {
+  // Windows Terminal draws them wide, the app counts one cell: the rest of that row shifted right.
+  for (const f of readdirSync('app').filter(f => f.endsWith('.ts')))
+    assert.ok(!/[\u2630-\u2637\u268A-\u268F]/.test(readFileSync(`app/${f}`, 'utf8')), f)
 })
 
 describe('sgr', () => {
