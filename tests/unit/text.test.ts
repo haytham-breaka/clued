@@ -104,3 +104,18 @@ describe('selection cells', () => {
     assert.equal(cellText(line, 0, Infinity), 'abcd⏳e')
   })
 })
+
+describe('remember', () => {
+  test('keeps the newest entries up to the limit', async () => {
+    const { remember } = await import('../../app/text.ts')
+    const m = new Map<string, number>()
+    for (let i = 0; i < 5; i++) remember(m, `k${i}`, i, 3)
+    assert.deepEqual([...m.keys()], ['k2', 'k3', 'k4'])
+  })
+  test('cells: plain ASCII takes one cell a character, wide and joining characters as before', async () => {
+    const { cells } = await import('../../app/text.ts')
+    assert.equal(cells('hello world'), 11)
+    assert.equal(cells('日本'), 4)
+    assert.equal(cells('á'), 1)
+  })
+})

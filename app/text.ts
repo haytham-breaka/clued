@@ -46,6 +46,8 @@ const isWide = (cp: number) =>
   (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1f64f) || (cp >= 0x1f680 && cp <= 0x1f6ff) ||
   (cp >= 0x1f900 && cp <= 0x1faff) || (cp >= 0x20000 && cp <= 0x3fffd)
 
+const ASCII = /^[\x20-\x7e]*$/
+
 /** Cells one character takes. */
 export function charCells(ch: string): number {
   const cp = ch.codePointAt(0) ?? 0
@@ -55,6 +57,8 @@ export function charCells(ch: string): number {
 }
 
 export function cells(text: string): number {
+  // Most text is plain ASCII: one cell a character.
+  if (ASCII.test(text)) return text.length
   let n = 0
   for (const ch of text) n += charCells(ch)
   return n
@@ -206,4 +210,10 @@ export function cellText(line: Line, from: number, to: number): string {
       at += charCells(ch)
     }
   return s
+}
+
+/** Keeps `value` under `key`, forgetting the oldest entries past `max`. */
+export function remember<K, V>(cache: Map<K, V>, key: K, value: V, max = 5000) {
+  cache.set(key, value)
+  if (cache.size > max) for (const k of [...cache.keys()].slice(0, cache.size - max)) cache.delete(k)
 }

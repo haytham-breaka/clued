@@ -4,6 +4,7 @@
 import { stripTag } from '../hooks/model.ts'
 import type { Board } from '../types/index.d.ts'
 import type { Turn } from './session.ts'
+import { remember } from './text.ts'
 
 /** One reply in Claude's answer: `to` holds the topic ids (your messages) it answers. */
 export type Part = { to: string[]; text: string; id?: string; subs?: string[] }
@@ -13,9 +14,16 @@ export type Part = { to: string[]; text: string; id?: string; subs?: string[] }
  * Claude can answer one of them by number (T90.2 is the second question of T90).
  */
 export function questionsOf(text: string): string[] {
-  const qs = [...text.matchAll(/[^.?!\n]*[^.?!\n\s][^.?!\n]*\?/g)].map(m => m[0].trim()).filter(q => q.split(/\s+/).length >= 2)
-  return qs.length > 1 ? qs : []
+  // Asked of every message on every frame: worked out once per text.
+  const known = questionsCache.get(text)
+  if (known) return known
+  const all = [...text.matchAll(/[^.?!\n]*[^.?!\n\s][^.?!\n]*\?/g)].map(m => m[0].trim()).filter(q => q.split(/\s+/).length >= 2)
+  const qs = all.length > 1 ? all : []
+  remember(questionsCache, text, qs)
+  return qs
 }
+const questionsCache = new Map<string, string[]>()
+
 
 /** A line Claude starts a reply part with: <<reply T43,T44>> */
 const MARK = /^[ \t]*<<reply\s+([^>]*)>>[ \t]*$/gim
@@ -140,7 +148,7 @@ export type Live = { isWorking: boolean; busy: ReadonlySet<string>; now: number;
 export const STALE_MS = 60 * 1000
 
 /** A message, or a part, as one plain line. */
-export function preview(text: string, max = 80): string {
+function previewOnce(text: string, max: number): string {
   const plain = stripMarks(stripTag(text))
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+[.)]|>)\s+/gm, '')
@@ -150,6 +158,15 @@ export function preview(text: string, max = 80): string {
     .trim()
   return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain
 }
+
+/** A message, or a part, as one plain line (the panel asks for each on every frame: kept). */
+export function preview(text: string, max = 80): string {
+  const key = `${max}\0${text}`
+  let p = previews.get(key)
+  if (p == null) remember(previews, key, (p = previewOnce(text, max)))
+  return p
+}
+const previews = new Map<string, string>()
 
 /** The last question in a part, if it ends on one (what "waiting on you" shows). */
 export function questionOf(text: string): string | undefined {
