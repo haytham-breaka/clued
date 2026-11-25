@@ -8,9 +8,9 @@ import type { App } from './harness.ts'
 /** Two messages, the second answered in two parts. */
 async function split(app: App) {
   await app.send('first message')
-  await app.waitFor('Echo: first message')
+  await app.waitIdle('Echo: first message')
   await app.send('please split')
-  await app.waitFor('And this part answers the split request.')
+  await app.waitIdle('And this part answers the split request.')
 }
 
 describe('mouse', () => {
@@ -90,22 +90,22 @@ describe('mouse', () => {
   test('a reply to a message from before a compaction brings its request\'s chain to Claude; a recent one does not', () =>
     withApp({ unfocused: true, height: 70 }, async app => {
       await app.send('deploy the api on port 8137')
-      await app.waitFor('Echo: deploy the api on port 8137')
+      await app.waitIdle('Echo: deploy the api on port 8137')
       await app.send('compact now')
       await app.waitFor('Compacted.')
       await app.send('fresh one')
-      await app.waitFor('Echo: fresh one')
+      await app.waitIdle('Echo: fresh one')
       // A recent message: the note is the plain one.
       await app.hover('fresh one', { area: 'chat' })
       await app.click('↩ reply', { area: 'chat' })
       await app.send('about the fresh one')
-      await app.waitFor('Echo: about the fresh one')
+      await app.waitIdle('Echo: about the fresh one')
       assert.ok(!app.sent().at(-1)!.note.includes('Earlier in this request'))
       // From before the compaction: its chain comes along, the app's copy.
       await app.hover('Echo: deploy the api on port 8137', { area: 'chat' })
       await app.click('↩ reply', { area: 'chat' })
       await app.send('same for staging')
-      await app.waitFor('Echo: same for staging')
+      await app.waitIdle('Echo: same for staging')
       const note = app.sent().at(-1)!.note
       assert.match(note, /The user is replying to your message:/)
       assert.match(note, /Earlier in this request \(the conversation was compacted since: this is the app's copy, in order\):\n- You \(its first message\): deploy the api on port 8137/)
@@ -114,7 +114,7 @@ describe('mouse', () => {
   test('hover on your message: copy it, or reply to it', () =>
     withApp({ unfocused: true }, async app => {
       await app.send('my own words')
-      await app.waitFor('Echo: my own words')
+      await app.waitIdle('Echo: my own words')
       await app.hover('my own words', { area: 'chat' })
       let s = await app.waitFor('⧉ copy  ↩ reply')
       await app.click('⧉ copy', { area: 'chat' })
@@ -134,7 +134,7 @@ describe('mouse', () => {
       await app.hover('my own words', { area: 'chat' })
       await app.click('↩ reply', { area: 'chat' })
       await app.send('a follow-up')
-      s = await app.waitFor('Echo: a follow-up')
+      s = await app.waitIdle('Echo: a follow-up')
       assert.match(s, /↩ you: “my own words”/)
       assert.match(app.sent().at(-1)!.note, /The user is replying to their own message:\n> my own words/)
       // The quote goes back to the message it quotes.
@@ -144,7 +144,7 @@ describe('mouse', () => {
   test("hover on Claude's reply: react, reply, copy, mark unread", () =>
     withApp({ unfocused: true }, async app => {
       await app.send('tell me')
-      await app.waitFor('Echo: tell me')
+      await app.waitIdle('Echo: tell me')
       await app.hover('Echo: tell me', { area: 'chat' })
       let s = await app.waitFor('↩ reply  ⧉ copy  ✓ mark read  ☆ save  👍 👎 ❓ 👀')
       // 👀 on finished work is only heard: it goes with your next message.
@@ -161,7 +161,7 @@ describe('mouse', () => {
       await app.click('● mark unread', { area: 'chat' })
       await app.waitFor('1 next ▸')
       await app.send('next one')
-      await app.waitFor('Echo: next one')
+      await app.waitIdle('Echo: next one')
       assert.match(app.sent().at(-1)!.note, /Since your last reply the user reacted: 👀 on your message “Echo: tell me”/)
       // A second click takes a reaction back.
       await app.hover('Echo: tell me', { area: 'chat' })
@@ -173,7 +173,7 @@ describe('mouse', () => {
       await app.click('↩ reply', { area: 'chat' })
       s = await app.waitFor('↩ Replying to Claude')
       await app.send('thanks')
-      s = await app.waitFor('Echo: thanks')
+      s = await app.waitIdle('Echo: thanks')
       assert.match(s, /↩ Claude: “Echo: tell me”/)
       assert.match(s, /⛓ 1 reply · chain/)
       await app.click('⛓ 1 reply · chain', { area: 'chat' })
@@ -183,14 +183,14 @@ describe('mouse', () => {
   test('👍 on a question is a yes: it goes to Claude as a go-ahead; 👎 asks what to change', () =>
     withApp({ unfocused: true }, async app => {
       await app.send('ask me which')
-      await app.waitFor('Which one do you want?')
+      await app.waitIdle('Which one do you want?')
       await app.hover('Which one do you want?', { area: 'chat' })
       await app.click('👍', { area: 'chat' })
       let s = await app.waitFor('you reacted 👍 on')
       const go = await app.waitLog(e => e.type === 'user' && JSON.stringify(e.message.content).includes('[clued reaction]'))
       assert.match(JSON.stringify(go.message.content), /\[clued reaction\] 👍 on your message “I can do it two ways\. Which one do you want\?”\. The user is saying yes: go ahead as you proposed\. Topics: T1\./)
-      s = await app.waitFor('Echo: [clued reaction]')
-      // Claude's answer quotes the reaction it answers.
+      // Claude's answer quotes the reaction it answers (once its turn is over: see waitIdle).
+      s = await app.waitIdle('Echo: [clued reaction]')
       assert.match(s, /↩ your 👍 on “I can do it two ways/)
       await app.hover('Echo: [clued reaction]', { area: 'chat' })
       await app.click('👎', { area: 'chat' })
@@ -221,7 +221,7 @@ describe('mouse', () => {
       await app.click('↩ reply to all 2', { area: 'chat' })
       await app.waitFor("↩ Replying to 2 of Claude's replies")
       await app.send('answering both')
-      s = await app.waitFor('Echo: answering both')
+      s = await app.waitIdle('Echo: answering both')
       // Each part it answers is quoted on its own line.
       assert.match(s, /│ ↩ Claude: “More about your first message: part one\.” │\n.*│ ↩ Claude: “And this part answers the split request\.” │/)
       assert.match(app.sent().at(-1)!.note, /The user is answering 2 of these messages at once/)
@@ -242,7 +242,7 @@ describe('mouse', () => {
   test('a click on a quote goes to the message it quotes', () =>
     withApp({ unfocused: true, height: 20 }, async app => {
       await app.send('the very first')
-      await app.waitFor('Echo: the very first')
+      await app.waitIdle('Echo: the very first')
       for (const m of ['x one', 'x two', 'x three']) {
         await app.send(m)
         await app.waitFor(`Echo: ${m}`)

@@ -419,40 +419,44 @@ function openAgent(id: string) {
  * rebuilt from the session file. A later message to it there is a task arriving.
  */
 function followBackgroundAgents() {
-  if (!S.sessionId) return
   let moved = false
   for (const a of S.agents.values()) {
-    if (!a.taskId || !(a.isBackground || a.isPast || a.tasks.length > 1)) continue
     if (a.state !== 'running' && a.fileAt != null && (a.endedAt ?? 0) < Date.now() - 5000) continue
-    // Steps the stream already gave (a foreground agent's first run) are not added twice.
-    const isStreamed = !a.isBackground && a.fileAt == null && a.log.length > 0
-    const { entries, next } = readAgentFile(cwd, S.sessionId, a.taskId, a.fileAt ?? 0)
-    a.fileAt = next
-    for (const e of entries) {
-      moved = true
-      if (e.kind !== 'prompt') touch(a, e.at)
-      if (e.kind === 'step') {
-        if (a.log.some(x => 'step' in x && x.step.tool.id === e.tool.id)) continue
-        a.steps++
-        a.last = stepLabel({ tool: e.tool }, cwd).text
-        a.log.push({ step: { tool: e.tool, at: e.at } })
-      } else if (e.kind === 'text') {
-        if (isStreamed && a.log.some(x => 'text' in x && x.text === e.text)) continue
-        a.log.push({ text: e.text })
-      } else if (e.kind === 'prompt') taskArrived(a, e.text)
-      else {
-        const hit = a.log.find(x => 'step' in x && x.step.tool.id === e.id)
-        if (hit && 'step' in hit) {
-          hit.step.result = e.text
-          hit.step.isError = e.isError
-        }
-      }
-    }
+    if (followAgent(a)) moved = true
   }
   // Their "last step … ago" moves even when nothing else does.
   if (moved || [...S.agents.values()].some(a => a.state === 'running')) draw()
 }
 setInterval(followBackgroundAgents, 1000).unref()
+
+/** Reads what is new in one agent's transcript, if it is one the app follows; true when there was some. */
+function followAgent(a: Agent): boolean {
+  if (!S.sessionId || !a.taskId || !(a.isBackground || a.isPast || a.tasks.length > 1)) return false
+  // Steps the stream already gave (a foreground agent's first run) are not added twice.
+  const isStreamed = !a.isBackground && a.fileAt == null && a.log.length > 0
+  const { entries, next } = readAgentFile(cwd, S.sessionId, a.taskId, a.fileAt ?? 0)
+  a.fileAt = next
+  for (const e of entries) {
+    if (e.kind !== 'prompt') touch(a, e.at)
+    if (e.kind === 'step') {
+      if (a.log.some(x => 'step' in x && x.step.tool.id === e.tool.id)) continue
+      a.steps++
+      a.last = stepLabel({ tool: e.tool }, cwd).text
+      a.log.push({ step: { tool: e.tool, at: e.at } })
+    } else if (e.kind === 'text') {
+      if (isStreamed && a.log.some(x => 'text' in x && x.text === e.text)) continue
+      a.log.push({ text: e.text })
+    } else if (e.kind === 'prompt') taskArrived(a, e.text)
+    else {
+      const hit = a.log.find(x => 'step' in x && x.step.tool.id === e.id)
+      if (hit && 'step' in hit) {
+        hit.step.result = e.text
+        hit.step.isError = e.isError
+      }
+    }
+  }
+  return entries.length > 0
+}
 
 /** An agent that finished and was continued: running again, from now. */
 const resumeAgent = (a: Agent) => resumeRun(a, Date.now())
@@ -790,13 +794,19 @@ function preview(text: string, max = 80): string {
   return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain
 }
 
+/**
+ * How long a toast stays: 3.5 s, or CLUED_TOAST_MS. Its row sits under the chat, so its going moves
+ * the chat down a row: the tests keep it up, so that never happens under a click on its way.
+ */
+const TOAST_MS = Number(process.env.CLUED_TOAST_MS) || 3500
+
 function toast(text: string) {
   S.toast = text
   clearTimeout(S.toastTimer)
   S.toastTimer = setTimeout(() => {
     S.toast = ''
     draw()
-  }, 3500)
+  }, TOAST_MS)
   draw()
 }
 
@@ -1116,6 +1126,9 @@ function onEvent(e: ClaudeEvent) {
       if (e.phase !== 'done' && a.state !== 'running') resumeAgent(a)
       if (e.phase === 'progress' && e.lastTool) a.last = e.lastTool
       if (e.phase === 'done') {
+        // Its transcript is read once a second: what it did last is read now, so the view never has
+        // it handed back before the steps that came first.
+        followAgent(a)
         if (!t) endedIdle ??= e.taskId || e.toolUseId
         endRun(a, e.status === 'failed' ? 'failed' : e.status === 'stopped' || e.status === 'killed' ? 'stopped' : 'done', Date.now())
         if (e.text) {
@@ -1553,7 +1566,13 @@ function pump() {
   const now = Date.now()
   let isSent = false
   for (const h of [...S.held]) {
-    if (h.until > now) break
+    if (h.until > now) {
+      // Its timer can fire a millisecond before Date.now() gets to `until` (the timer keeps its own
+      // clock): set it again for what is left, or the message would wait for Claude's next event.
+      clearTimeout(h.timer)
+      h.timer = setTimeout(pump, h.until - now)
+      break
+    }
     if (waitsForClaude(h)) continue
     takeHeld(h)
     submit(h.text, {}, h.from)

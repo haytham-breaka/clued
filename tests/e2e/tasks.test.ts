@@ -18,7 +18,8 @@ const widePanel = ({ home }: { home: string }) => {
 
 describe('agent tasks', () => {
   test('one agent, three tasks: queued, then running, then done; the panel says which it is on', () =>
-    withApp({ setup: widePanel, width: 160, height: 50 }, async app => {
+    // Tall enough for the whole view once all three are done, its Tasks block at the top included.
+    withApp({ setup: widePanel, width: 160, height: 56 }, async app => {
       await app.send('give the agent tasks')
       let s = await app.waitFor('Started it and sent it more work.')
       // Under Agents: how many tasks, and the one it is on.
@@ -77,9 +78,9 @@ describe('agent tasks', () => {
       // The view opens at its end; the Tasks block is at its top.
       let s = await app.waitFor('✓ handed back to Claude')
       for (let i = 0; i < 6 && !s.includes('Tasks  3 · 3 done'); i++) {
+        const before = app.screen()
         app.keys('PageUp')
-        await new Promise(r => setTimeout(r, 150))
-        s = await app.waitFor(() => true)
+        s = await app.waitFor(now => now !== before)
       }
       assert.match(s, /Tasks {2}3 · 3 done/)
       await app.click('3. Now write the release notes', { area: 'chat' })

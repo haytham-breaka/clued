@@ -61,6 +61,9 @@ export async function launch(opts: LaunchOpts = {}) {
     CLUED_HOLD_MS: '0',
     // And a message sent while Claude works goes at once too (Claude Code folds it in), unless a test sets it.
     CLUED_QUEUE: '0',
+    // A toast stays up (it goes after 3.5 s in the app): its row going moves the chat down a row, and
+    // a click on its way, at a place looked up a moment before, would land a row off.
+    CLUED_TOAST_MS: '600000',
     FAKE_DIR: dir,
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
@@ -80,6 +83,19 @@ export async function launch(opts: LaunchOpts = {}) {
   tmux('pipe-pane', '-O', `cat > ${q(join(dir, 'output.log'))}`)
 
   const screen = () => tmux('capture-pane', '-p').replace(/\s+$/gm, '')
+  /**
+   * The screen, and whether it is a whole frame. The app writes each frame at once, top row to bottom
+   * row with the cursor hidden, then shows the cursor in the input box (none while a permission prompt
+   * or the session picker is up: it stays on the last row). But tmux takes a big frame in in pieces,
+   * so a capture can catch one half drawn (this frame's rows above, the last one's below), its cursor
+   * hidden on a row above the last. Both come from one tmux command: tmux takes in nothing between.
+   */
+  const capture = () => {
+    const o = tmux('display-message', '-p', '#{cursor_flag} #{cursor_y} #{pane_height}', ';', 'capture-pane', '-p')
+    const nl = o.indexOf('\n')
+    const [shown, y, h] = o.slice(0, nl).split(' ').map(Number)
+    return { isWhole: shown === 1 || y === h! - 1, screen: o.slice(nl + 1).replace(/\s+$/gm, '') }
+  }
   const lines = () => screen().split('\n')
 
   let lastClick = { row: 0, col: 0, at: 0 }
@@ -113,11 +129,21 @@ export async function launch(opts: LaunchOpts = {}) {
       const until = Date.now() + ms
       let s = ''
       while (Date.now() < until) {
-        s = screen()
-        if (test(s)) return s
+        const c = capture()
+        s = c.screen
+        // Only a whole frame counts.
+        if (c.isWhole && test(s)) return s
         await sleep(50)
       }
       throw new Error(`Timed out waiting for ${String(what)}. Screen:\n${s}`)
+    },
+    /**
+     * Waits until the screen shows `what` and Claude's turn is over (○ idle, atop the panel). A reply's
+     * words show while Claude writes them ("Claude is typing…"); its quote, its actions on hover and
+     * the footer of the message it answers come once the turn ends, and can move what is on screen.
+     */
+    async waitIdle(what: string, ms = WAIT_MS) {
+      return app.waitFor(s => s.includes(what) && s.includes('○ idle'), ms)
     },
     /** Waits until the screen no longer shows `what`. */
     async waitGone(what: string | RegExp, ms = WAIT_MS) {
@@ -198,18 +224,18 @@ export async function launch(opts: LaunchOpts = {}) {
       return undefined
     },
     /**
-     * Waits for the screen to hold still (two equal captures in a row), at most `ms`: a toast or a redraw
-     * still on its way can move the layout under a position about to be clicked. A spinner never holds
-     * still, hence the limit.
+     * Waits for the screen to hold still (two equal captures in a row, the second a whole frame), at
+     * most `ms`: a toast or a redraw still on its way can move the layout under a position about to be
+     * clicked. A spinner never holds still, hence the limit.
      */
     async settle(ms = 400) {
       const until = Date.now() + ms
       let last = screen()
       while (Date.now() < until) {
         await sleep(40)
-        const now = screen()
-        if (now === last) return
-        last = now
+        const now = capture()
+        if (now.screen === last && now.isWhole) return
+        last = now.screen
       }
     },
     /** Where `text` is, once the screen holds still (or a given position); throws when it isn't there. */
