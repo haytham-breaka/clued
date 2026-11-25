@@ -171,7 +171,10 @@ function previewOnce(text: string, max: number): string {
   const plain = stripMarks(stripTag(text))
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+[.)]|>)\s+/gm, '')
-    .replace(/[*_`~]+/g, '')
+    // Emphasis marks go; what is inside `code` stays as written (a ~/path, a snake_case name).
+    .split(/`+([^`]*)`+/)
+    .map((x, i) => (i % 2 ? x : x.replace(/\*+|~~|(^|[^\p{L}\p{N}_])_+|_+(?=[^\p{L}\p{N}_]|$)/gu, '$1')))
+    .join('')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()

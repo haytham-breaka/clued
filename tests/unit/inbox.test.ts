@@ -73,6 +73,9 @@ describe('questions', () => {
   test('preview makes one plain line', () => {
     assert.equal(preview('# Title\n- **bold** and `code` [link](https://example.com)\n```\ncode\n```\n<clued>{}</clued>'), 'Title bold and code link')
     assert.equal(preview('x'.repeat(100), 10), 'xxxxxxxxx…')
+    // Inside code, and within words, the marks are the text: a home path, a snake_case name.
+    assert.equal(preview('The list is in `~/tinytodo.json`, set by `load_file`.'), 'The list is in ~/tinytodo.json, set by load_file.')
+    assert.equal(preview('Use snake_case, ~~not this~~, and _this_ or __that__.'), 'Use snake_case, not this, and this or that.')
   })
   test('matches needs every word, any case', () => {
     assert.equal(matches('Fix the Login bug', 'login fix'), true)
