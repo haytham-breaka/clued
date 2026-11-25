@@ -255,7 +255,7 @@ function ctx(turns: Turn[], extra: Partial<ChatCtx> = {}): ChatCtx {
 }
 
 describe('tasks: drawn', () => {
-  test('under Agents: "· N tasks" on its row, and the task it is on under it, within the panel', () => {
+  test('under Agents: "· N tasks running" on its row (or "· N tasks"), and the task it is on under it, within the panel', () => {
     const { a, turns } = threeTasks()
     const p = {
       isResultsOnly: false, isWorking: false, isFolded: false, hscroll: 0, results: noop, fold: noop, side: noop,
@@ -269,7 +269,8 @@ describe('tasks: drawn', () => {
       const lines = panelLines(p, width).lines.map(plain)
       assert.ok(lines.every(l => l.length <= width), `within ${width}`)
       const at = lines.findIndex(l => l.includes('James'))
-      if (width === 60) assert.match(lines[at]!, /◐ James \(implementer\) · 3 tasks · Fix the build bg/)
+      // Two of its three tasks run now: how many run.
+      if (width === 60) assert.match(lines[at]!, /◐ James \(implementer\) · 2 tasks running · Fix the/)
       assert.match(lines[at + 1]!, /↳ task 2 of 3: Lint/)
     }
     // One task: the message it is on, as before.
@@ -370,6 +371,14 @@ describe('not started', () => {
     lines[at + 1]!.find(sp => sp.text.includes('Write the docs'))!.action!()
     assert.deepEqual(started, [owed])
     assert.deepEqual(opened, [owed.turn])
+    // Claude busy: it can't start now, so "+ queue" sends it to wait its turn.
+    const queueing = panelLines({ ...p, isWorking: true } as PanelCtx, 44).lines
+    const qt = queueing.map(plain)
+    const qa = qt.findIndex(l => l.startsWith('Not started'))
+    assert.match(qt[qa + 1]!, /▷ Write the docs +\+ queue 12m$/)
+    assert.ok(!qt.some(l => l.includes('▶ start')))
+    queueing[qa + 1]!.find(sp => sp.text === '+ queue')!.action!()
+    assert.deepEqual(started, [owed, owed])
     // Claude's turn on it (or on a message sent about it): not listed.
     const about = turn('go on', { aboutRequest: owed.turn.key })
     const busy = { ...p, main: { for: [about.key, plainOne.turn.key], last: '' }, turnOf: (k: string) => (k === about.key ? about : undefined) } as PanelCtx

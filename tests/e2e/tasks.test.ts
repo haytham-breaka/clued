@@ -176,6 +176,23 @@ describe('not started', () => {
       s = await app.waitFor('The later work is done.')
     }))
 
+  test('while Claude works on something else, "+ queue" instead of ▶ start: the request waits its turn', () =>
+    withApp({ setup: widePanel, width: 160, height: 44 }, async app => {
+      await app.send('please do it later')
+      let s = await app.waitFor('▷ Topic T1')
+      assert.match(rowOf(s, '▷ Topic T1'), /▶ start/)
+      // Claude busy with another message: it can't start now.
+      await app.send('hold on')
+      s = await app.waitFor(/▷ Topic T1 +\+ queue \d+s│/)
+      assert.ok(!rowOf(s, '▷ Topic T1').includes('▶ start'))
+      await app.click('+ queue', { area: 'panel' })
+      s = await app.waitFor('↳ “Please start on T1 now.”')
+      assert.equal(app.sent().at(-1)!.text, 'Please start on T1 now.')
+      app.release('slow')
+      app.release('later')
+      app.release('later-agent')
+    }))
+
   test('a running agent: the tool it waits on, then quiet once nothing comes; ▶ continue asks Claude to check on it', () =>
     withApp({ setup: ({ home }) => {
       mkdirSync(join(home, '.clued'), { recursive: true })

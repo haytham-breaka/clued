@@ -6,12 +6,14 @@ import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
 import type { Step, Turn, Work } from './session.ts'
-import { canContinue, currentTask, cutLabel, pulseOf } from './tasks.ts'
+import { canContinue, currentTask, cutLabel, pulseOf, workingFor } from './tasks.ts'
 import type { AgentTask, Pulse } from './tasks.ts'
 import { C, cells, clip } from './text.ts'
 import type { Line, Span } from './text.ts'
 
 export const MIN_FULL = 24
+/** A message row keeps at least this many cells for the message's own words. */
+const MIN_TEXT = 12
 
 /** A subagent Claude started: what it is, which of your messages (turn keys) it works for, how it is going. */
 export type Agent = {
@@ -75,6 +77,26 @@ export function who(a: Agent, all: Iterable<Agent>): string {
     a.person = name
   }
   return `${a.person} (${roleOf(a.type)})`
+}
+
+/**
+ * Who is on a message now: Claude (its turn is for it), then each running agent working for it, or for
+ * a message of the same request (one merged into it), as "Maya", or "Maya · task 2" when it has several
+ * tasks and this message is in that one.
+ */
+export function workersOf(m: MessageRef, main: { for: string[] } | undefined, agents: Agent[], messages: MessageRef[]): string[] {
+  const home = m.homeId
+  const group = new Set(home ? messages.filter(x => x.homeId === home).map(x => x.turn.key) : [])
+  group.add(m.turn.key)
+  const out: string[] = []
+  if (main?.for.some(k => group.has(k))) out.push('Claude')
+  for (const a of agents) {
+    if (a.state !== 'running' || !workingFor(a).some(k => group.has(k))) continue
+    who(a, agents)
+    const n = a.tasks.length > 1 ? a.tasks.findIndex(t => t.state === 'running' && t.for.some(k => group.has(k))) : -1
+    out.push(n >= 0 ? `${a.person} · task ${n + 1}` : a.person!)
+  }
+  return out
 }
 
 /** One thing in an agent's own chat: words it wrote, or a tool it used. */
@@ -186,6 +208,7 @@ function legendLines(width: number, close: () => void): Line[] {
     item(mark.claude, markFg.claude, 'Claude is on it, no reply yet'),
     item(mark.progress, markFg.progress, 'replied, still owes work'),
     item('⠋', C.cyan, 'in progress: being worked on'),
+    row(width, [{ text: '    Maya · task 2', style: { fg: C.cyan }, action: close }, { text: '  who is on it (Claude or an agent)', style: { fg: C.gray }, action: close }]),
     item(mark.claude, markFg.claude, 'in queue: sent while Claude works, not taken up yet'),
     item(mark.me, markFg.me, 'waiting on you'),
     item(mark.done, C.gray, 'done'),
@@ -376,6 +399,8 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       { text: '✻ ', style: { fg: C.claude }, action: open },
       { text: 'Claude', style: { bold: true }, action: open },
       { text: ' (lead)', style: { fg: C.faint }, action: open },
+      // While it works: how many of your messages its turn is on.
+      { text: p.main?.for.length ? ` · on ${p.main.for.length} message${p.main.for.length > 1 ? 's' : ''}` : '', style: { fg: C.magenta }, action: open },
     ], [{ text: !p.main ? 'idle' : pulseText(p.main.pulse, now, 'working'), style: { fg: p.main?.pulse?.kind === 'quiet' ? C.yellow : p.main ? C.cyan : C.faint }, action: open }]))
     if (p.main) about(rows, p.main.for, p.main.last, false, open)
     const running = shownAgents.filter(a => a.state === 'running').length + (p.main ? 1 : 0)
@@ -387,8 +412,11 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       // Running: the tool it waits on, else how long since its last step; quiet (yellow) after QUIET_MS.
       const pulse = a.state === 'running' ? pulseOf(a, now) : undefined
       const tasks = a.tasks.length
+      // Several tasks: how many run now (more than one), else how many it was given.
+      const runningTasks = a.state === 'running' ? a.tasks.filter(t => t.state === 'running').length : 0
+      const taskNote = runningTasks > 1 ? ` · ${runningTasks} tasks running` : tasks > 1 ? ` · ${tasks} tasks` : ''
       // The long note only when the name and what it does still fit whole beside it.
-      const named = 4 + cells(who(a, p.agents)) + (tasks > 1 ? cells(` · ${tasks} tasks`) : 0) + cells(` · ${a.name}`) + (a.isBackground ? 3 : 0)
+      const named = 4 + cells(who(a, p.agents)) + cells(taskNote) + cells(` · ${a.name}`) + (a.isBackground ? 3 : 0)
       // Else the short one, else (a tool) just how long; quiet always says so.
       const fits = (t: string) => named + 1 + cells(t) <= iw
       const notes = pulse ? [pulseText(pulse, now), pulseText(pulse, now, undefined, true), ago(now - pulse.since)] : []
@@ -398,7 +426,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         { text: `${icon.t} `, style: { fg: icon.fg }, action: open },
         { text: who(a, p.agents), style: { bold: a.state === 'running' || isOn, dim: a.state !== 'running' && !isOn, fg: isOn ? C.magenta : undefined }, action: open },
         // Several tasks (Claude sent it more work): how many, before the first one's name.
-        { text: tasks > 1 ? ` · ${tasks} tasks` : '', style: { fg: C.magenta, dim: a.state !== 'running' }, action: open },
+        { text: taskNote, style: { fg: C.magenta, dim: a.state !== 'running' }, action: open },
         { text: slide(` · ${a.name}`, p.hscroll), style: { fg: C.gray, dim: a.state !== 'running' }, action: open },
         { text: a.isBackground ? ' bg' : '', style: { fg: C.faint } },
       ], [{ text: right, style: { fg: pulse?.kind === 'quiet' ? C.yellow : pulse ? C.cyan : C.faint } }]))
@@ -445,7 +473,9 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
           { text: ' ▷ ', style: { fg: C.yellow }, action: open },
           { text: slide(title, p.hscroll), action: open },
         ], [
-          ...(p.startRequest ? [{ text: '▶ start', style: { fg: C.cyan }, action: () => p.startRequest!(m) }, { text: ' ' }] : []),
+          // Claude idle: ▶ start begins it now. Claude busy: + queue sends it to wait its turn (Claude reads
+          // it at its next step).
+          ...(p.startRequest ? [p.isWorking ? { text: '+ queue', style: { fg: C.gray }, action: () => p.startRequest!(m) } : { text: '▶ start', style: { fg: C.cyan }, action: () => p.startRequest!(m) }, { text: ' ' }] : []),
           { text: waited(now - m.updatedAt), style: { fg: C.faint }, action: open },
         ])
       }),
@@ -496,12 +526,21 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         const chain = () => p.openRequest(m.turn)
         const isOn = p.requestView === m.turn.key
         const isPicked = p.picked === m.turn.key
+        // In progress: who is on it ("Maya · task 2", "Claude +1"), shortened (or left out) before the
+        // message's own words get too narrow to read.
+        let busyNote = 'in progress'
+        if (m.active) {
+          const on = workersOf(m, p.main, p.agents, messages)
+          const more = on.length > 1 ? ` +${on.length - 1}` : ''
+          const fits = (t: string) => 3 + MIN_TEXT + 1 + cells(t) <= iw
+          busyNote = on.length ? [`${on[0]}${more}`, `${on[0]!.split(' · ')[0]}${more}`, on[0]!.split(' · ')[0]!].find(fits) ?? '' : fits(busyNote) ? busyNote : ''
+        }
         return row(iw, [
           { text: isOn ? '▸' : isPicked ? '›' : ' ', style: { fg: isPicked ? C.yellow : C.blue, bold: true }, action: open },
           { text: m.active ? (p.spin ?? mark[m.state]) : mark[m.state], style: { fg: markFg[m.state] }, action: chain },
           { text: ' ', action: open },
           { text: slide(preview(m.turn.text, 200), p.hscroll), style: { dim: m.state === 'done' && !isOn && !isPicked, bold: isOn || isPicked, fg: isOn ? C.blue : isPicked ? C.yellow : undefined }, action: open },
-        ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? 'in progress' : m.queued ? 'in queue' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active || m.queued ? C.cyan : C.faint }, action: open }])
+        ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? busyNote : m.queued ? 'in queue' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active || m.queued ? C.cyan : C.faint }, action: open }])
       }),
       // Under the newest answered messages, the answer's gist (→ 8137); a click opens the reply.
       extra: found.map((m, i) => {

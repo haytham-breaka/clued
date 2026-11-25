@@ -136,8 +136,8 @@ describe('panel', () => {
       assert.match(s, /✻ Claude \(lead\) +idle/)
       assert.match(s, /◐ James \(explorer\) · Explore…/)
       assert.match(s, /↳ “first message”/)
-      // An agent is on it: its message is in progress, with a spinner.
-      assert.match(s, new RegExp(`${SPIN} first message +in progress`))
+      // An agent is on it: its message is in progress, with a spinner and its name.
+      assert.match(s, new RegExp(`${SPIN} first message +James│`))
       await app.click('James', { area: 'panel' })
       s = await app.waitFor('← back to chat')
       assert.match(s, /◇ James \(explorer\) · Explore the codebase {3}↳ “first message”/)
@@ -170,7 +170,7 @@ describe('panel', () => {
       let s = await app.waitFor('· Grep')
       assert.match(s, /Agents +2 working/)
       assert.match(s, /◐ James \(explorer\) · Explore the code/)
-      assert.match(s, /✻ Claude \(lead\) +working/)
+      assert.match(s, /✻ Claude \(lead\) · on 1 message +working/)
       assert.match(s, /Working \d+s · Agent: Explore the c… {2}1 step ▸/)
       // Claude's own live view, from the panel.
       await app.click('Claude', { area: 'panel' })
@@ -209,7 +209,7 @@ describe('panel', () => {
       let s = await app.waitFor('Started it in the background.')
       assert.match(s, /Long job bg/)
       // The agent in the background is on it.
-      assert.match(s, new RegExp(`${SPIN} background agent please +in progress`))
+      assert.match(s, new RegExp(`${SPIN} background agent please +James│`))
       // Its steps come from its own transcript: under Agents, and in its view.
       s = await app.waitFor('· Build the project')
       await app.click('Long job', { area: 'panel' })
@@ -396,8 +396,8 @@ describe('panel', () => {
       // A request still open has "ask for status".
       await app.send('hold on')
       await app.waitFor('Slow work')
-      // Claude is on it: a spinner (its mark, just left of the text) and "in progress".
-      s = await app.waitFor(new RegExp(`${SPIN} hold on +in progress`))
+      // Claude is on it: a spinner (its mark, just left of the text) and who is on it: Claude.
+      s = await app.waitFor(new RegExp(`${SPIN} hold on +Claude│`))
       // Sent while it works: in queue, under what is in progress and above what is answered.
       await app.send('and this too')
       s = await app.waitFor(/⏳ and this too +in queue/)

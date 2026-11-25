@@ -2,8 +2,8 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { keyOf } from '../../hooks/model.ts'
 import type { MessageRef } from '../../app/inbox.ts'
-import { panelLines } from '../../app/panel.ts'
-import type { PanelCtx } from '../../app/panel.ts'
+import { panelLines, workersOf } from '../../app/panel.ts'
+import type { Agent, PanelCtx } from '../../app/panel.ts'
 import type { Turn } from '../../app/session.ts'
 import { C } from '../../app/text.ts'
 import type { Job } from '../../app/scheduled.ts'
@@ -37,6 +37,40 @@ describe('your recent messages', () => {
     assert.equal(rowWith(p, 'in progress').find(s => s.text === 'in progress')!.style?.fg, C.cyan)
     // With no spinner frame given, its usual mark.
     assert.match(text(ctx([ref('on it now', { active: true })])).find(l => l.includes('on it now'))!, /▶ on it now +in progress/)
+  })
+
+  test('who is on a message in progress: Claude, an agent (its task when it has several), "+1" for more; short when narrow', () => {
+    const mine = ref('fix the build', { active: true, homeId: 'T1' })
+    const follow = ref('also the tests', { active: true, homeId: 'T1' })
+    const other = ref('write docs', { active: true, homeId: 'T2' })
+    const task = (n: number, state: 'running' | 'done', keys: string[]) => ({ toolId: `t${n}`, title: `task ${n}`, text: '', at: NOW, for: keys, state })
+    const maya: Agent = {
+      id: 'a1', name: 'Fix it', type: 'fork', isBackground: true, for: [mine.turn.key], startedAt: NOW, state: 'running', steps: 1, last: '', prompt: '', log: [], person: 'Maya',
+      // Its second task is for a follow-up merged into T1: it is on T1's messages.
+      tasks: [task(1, 'done', [other.turn.key]), task(2, 'running', [follow.turn.key])] as Agent['tasks'],
+    }
+    const all = [mine, follow, other]
+    assert.deepEqual(workersOf(mine, undefined, [maya], all), ['Maya · task 2'])
+    assert.deepEqual(workersOf(other, { for: [other.turn.key] }, [maya], all), ['Claude'])
+    assert.deepEqual(workersOf(mine, { for: [follow.turn.key] }, [maya], all), ['Claude', 'Maya · task 2'])
+    const p = ctx(all, { spin: '⠙', agents: [maya], main: { for: [follow.turn.key], last: '' } })
+    assert.match(text(p, 50).find(l => l.includes('fix the build'))!, /⠙ fix the build +Claude \+1$/)
+    assert.match(text({ ...p, main: undefined }, 50).find(l => l.includes('fix the build'))!, /⠙ fix the build +Maya · task 2$/)
+    // Narrow: just the name, then nothing, before the message gets too short to read.
+    assert.match(text({ ...p, main: undefined }, 26).find(l => l.includes('fix the'))!, /⠙ fix the bu.* Maya$/)
+    assert.ok(!text({ ...p, main: undefined }, 18).some(l => l.includes('Maya') && l.includes('fix')))
+    // Nobody known (from history): "in progress".
+    assert.match(text(ctx([ref('on it', { active: true })]), 40).find(l => l.includes('on it'))!, /on it +in progress$/)
+  })
+
+  test('the legend says the name on a row in progress is who is on it', () => {
+    assert.ok(text(ctx([ref('a', {})], { isLegend: true }), 60).some(l => /Maya · task 2 +who is on it \(Claude or an agent\)/.test(l)))
+  })
+
+  test('Claude (lead) says how many of your messages its turn is on', () => {
+    const lines = text(ctx([], { main: { for: ['k1', 'k2'], last: 'thinking' } }), 60)
+    assert.ok(lines.some(l => /✻ Claude \(lead\) · on 2 messages +working/.test(l)))
+    assert.ok(text(ctx([], { main: { for: ['k1'], last: '' } }), 60).some(l => l.includes('· on 1 message ')))
   })
 
   test('a message Claude still owes with nothing running on it: "waiting", not ⚠ no update', () => {
