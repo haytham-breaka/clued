@@ -57,6 +57,55 @@ describe('saved messages', () => {
       await app.waitFor('Unsaved.')
     }))
 
+  test('hovering ★ saved moves nothing: it and what follows it keep their columns, and so does a click on it', () =>
+    withApp({ unfocused: true, height: 40 }, async app => {
+      await app.send('first message')
+      await app.waitIdle('Echo: first message')
+      await app.send('please split')
+      await app.waitIdle('And this part answers the split request.')
+      const away = { row: 1, col: 110 }
+      /** Where each of `texts` is on the row of `on` (the action row), as columns. */
+      const cols = async (on: string, texts: string[]) => {
+        await app.settle()
+        const row = (await app.at(on, { area: 'chat' })).row
+        return texts.map(t => {
+          for (let n = 0; ; n++) {
+            const p = app.find(t, { area: 'chat', nth: n })
+            if (!p) return -1
+            if (p.row === row) return p.col
+          }
+        })
+      }
+      /** Saves the message under `text`, reacts `emoji` (when given), then hovers ★ saved itself. */
+      const check = async (text: string, after: string[], emoji?: string) => {
+        await app.hover(text, { area: 'chat' })
+        await app.click('☆ save', { area: 'chat' })
+        if (emoji) {
+          await app.hover(text, { area: 'chat' })
+          await app.click(emoji, { area: 'chat' })
+        }
+        await app.hover(away)
+        await app.waitFor(s => chatRowsWith(s, '★ saved') === 1)
+        const before = await cols('★ saved', ['★ saved', ...after])
+        assert.ok(before.every(c => c > 0), `all on the row before hover: ${before} ${after}`)
+        await app.hover('★ saved', { area: 'chat' })
+        await app.waitFor('⧉ copy')
+        assert.deepEqual(await cols('★ saved', ['★ saved', ...after]), before, `${text}: hovering ★ saved moved the row\n${app.screen()}`)
+        // Unsaving it (a click) moves nothing either.
+        await app.click('★ saved', { area: 'chat' })
+        await app.waitFor(s => chatRowsWith(s, '★ saved') === 0)
+        assert.deepEqual(await cols('☆ save', ['☆ save', ...after]), before, `${text}: unsaving moved the row\n${app.screen()}`)
+        await app.hover(away)
+        await app.settle()
+      }
+      // Your message: ★ saved and its delivery mark after it.
+      await check('please split', ['✓✓'])
+      // One part of a reply in parts, with a reaction of yours after ★ saved.
+      await check('And this part answers', ['❓'], '❓')
+      // A reply in one part.
+      await check('Echo: first message', ['👀'], '👀')
+    }))
+
   test('saved messages are still saved after a resume, and a click opens them', async () => {
     let kept = ''
     const setup = (a: { home: string; work: string }) => {

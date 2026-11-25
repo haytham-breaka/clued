@@ -146,7 +146,7 @@ describe('mouse', () => {
       await app.send('tell me')
       await app.waitIdle('Echo: tell me')
       await app.hover('Echo: tell me', { area: 'chat' })
-      let s = await app.waitFor('↩ reply  ⧉ copy  ✓ mark read  ☆ save  👍 👎 ❓ 👀')
+      let s = await app.waitFor('☆ save   👍 👎 ❓ 👀  ↩ reply  ⧉ copy  ✓ mark read')
       // 👀 on finished work is only heard: it goes with your next message.
       await app.click('👀', { area: 'chat' })
       await app.hover({ row: 3, col: 60 })

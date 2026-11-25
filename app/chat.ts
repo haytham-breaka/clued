@@ -279,10 +279,31 @@ function bubble(body: Line[], inner: number, left: number, border: Style, header
   return out
 }
 
-/** ☆ save on hover, ★ saved once saved (a click unsaves): under every message. */
-const saveSpan = (ctx: ChatCtx, anchor: string, who: 'me' | 'claude', text: string): Span => {
+/** `text` padded to the widest of `all`: a label that flips (☆ save, ★ saved) keeps its width, so a click moves nothing after it. */
+const fit = (text: string, ...all: string[]) => text + ' '.repeat(Math.max(0, ...all.map(cells)) - cells(text))
+
+/** An action in a row that shows more on hover; `keep`: it shows off hover too (★ saved, your reactions). */
+type Slot = Span & { keep?: boolean }
+
+/**
+ * A row of actions laid out once, for hover: off hover, what isn't kept is blank space as wide as it,
+ * so what stays is in the same column either way and the pointer coming onto the row moves nothing.
+ * What is kept goes first, so off hover the blanks are mostly after it, trimmed.
+ */
+const steady = (row: Slot[], hovered: boolean): Span[] => {
+  const out = row.map(({ keep, ...s }) => (hovered || keep ? s : pad(cells(s.text))))
+  while (out.length && !out.at(-1)!.action && out.at(-1)!.text.trim() === '') out.pop()
+  return out
+}
+
+/** Your reactions to Claude's, one slot each in QUICK's order (a click gives or takes one back). */
+const reactSlots = (given: string[], react: (e: string) => void): Slot[] =>
+  QUICK.flatMap(e => [{ text: e, style: given.includes(e) ? { bg: C.meBg } : {}, action: () => react(e), keep: given.includes(e) }, pad(1)])
+
+/** ☆ save on hover, ★ saved once saved (a click unsaves): under every message. Saved, it is kept off hover. */
+const saveSpan = (ctx: ChatCtx, anchor: string, who: 'me' | 'claude', text: string): Slot => {
   const on = !!ctx.kept.saved?.some(x => x.anchor === anchor)
-  return { text: on ? '★ saved' : '☆ save', style: { fg: on ? C.yellow : C.gray }, action: () => ctx.save?.(anchor, who, text) }
+  return { text: fit(on ? '★ saved' : '☆ save', '★ saved', '☆ save'), style: { fg: on ? C.yellow : C.gray }, action: () => ctx.save?.(anchor, who, text), keep: on }
 }
 
 /** The widest line of `text` wrapped at `max`, so short messages get snug bubbles. */
@@ -444,9 +465,6 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       if (chain > 0) foot.push({ text: `⛓ chain · ${chain}  `, style: { fg: C.cyan }, action: () => ctx.openChain(turn) })
       // Sent while Claude worked, and Claude hasn't got to it yet.
       if (turn.queued && turn.delivery && !turn.isDone && !turn.steps.length && !turn.live && !turn.pending && !turn.early?.length) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
-      // Saved to get back to later: shown always, so it is easy to spot.
-      const isSaved = !!ctx.kept.saved?.some(x => x.anchor === `me:${turn.key}`)
-      if (isSaved && ctx.hover !== `me:${turn.key}`) foot.push(saveSpan(ctx, `me:${turn.key}`, 'me', turn.text), { text: '  ' })
       // Written to Claude Code but not taken in yet: it can still be deleted.
       if (turn.delivery === 'sent' && !turn.deleting && !!turn.topicId && ctx.unsend) foot.push({ text: '✕ delete', style: { fg: C.red }, action: () => ctx.unsend!(turn) }, { text: ' · ', style: { fg: C.faint } })
       // Where it is on its way, last: the app has it, it went to Claude Code, Claude Code took it in.
@@ -454,12 +472,12 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       while (foot.length && foot.at(-1)!.text.trim() === '') foot.pop()
       // Actions show while the pointer is on this message, on the left of the row: what is on the
       // right (answered, replies) keeps its place, so a click never lands on something that moved.
-      const acts: Span[] = ctx.hover === `me:${turn.key}`
-        ? [{ text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(turn.text) }, pad(2), { text: '↩ reply', style: { fg: C.gray }, action: () => ctx.reply('me', turn) }, pad(2), saveSpan(ctx, `me:${turn.key}`, 'me', turn.text)]
-        : []
+      // ★ saved shows always, so it is easy to spot, in the place it has on hover.
+      const acts: Slot[] = [saveSpan(ctx, `me:${turn.key}`, 'me', turn.text), pad(2), { text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(turn.text) }, pad(2), { text: '↩ reply', style: { fg: C.gray }, action: () => ctx.reply('me', turn) }]
       const rightAt = width - lineCells(foot) - 1
       const actsAt = Math.max(0, Math.min(left + 1, rightAt - lineCells(acts) - 3))
-      out.push(acts.length ? [pad(actsAt), ...acts, pad(Math.max(1, rightAt - actsAt - lineCells(acts))), ...foot] : [pad(rightAt), ...foot])
+      const shown = steady(acts, ctx.hover === `me:${turn.key}`)
+      out.push(shown.length ? [pad(actsAt), ...shown, pad(Math.max(1, rightAt - actsAt - lineCells(shown))), ...foot] : [pad(rightAt), ...foot])
       mark(`me:${turn.key}`)
     }
 
@@ -621,19 +639,16 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
           const root = part.to.map(t => ctx.messageOf(t, turn)).find((m): m is Turn => !!m)
           const replies = Object.values(ctx.kept.links).filter(l => (l.all?.map(a => a.anchor) ?? [l.anchor]).includes(key)).length
           if (replies && root) row.push({ text: `⛓ ${replies} repl${replies > 1 ? 'ies' : 'y'} · chain`, style: { fg: C.cyan }, action: () => ctx.openChain(root) }, pad(2))
-          if (ctx.hover === key) {
-            row.push({ text: isPicked ? '✓ in your reply' : '↩ reply', style: { fg: isPicked ? C.cyan : C.gray }, action: () => ctx.reply('claude', turn, [i]) }, pad(2))
-            row.push({ text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(part.text) }, pad(2))
-            row.push(saveSpan(ctx, key, 'claude', part.text), pad(2))
-            for (const e of QUICK) row.push({ text: e, style: given.includes(e) ? { bg: C.meBg } : {}, action: () => ctx.react(turn, e, i) }, pad(1))
-            row.push(pad(1), { text: isUnread ? '✓ mark read' : '● mark unread', style: { fg: C.faint }, action: () => ctx.setRead([id], isUnread) })
-          } else {
-            if (ctx.kept.saved?.some(x => x.anchor === key)) row.push(saveSpan(ctx, key, 'claude', part.text), pad(2))
-            if (given.length) {
-              for (const e of given) row.push({ text: e, style: { bg: C.meBg }, action: () => ctx.react(turn, e, i) }, pad(1))
-              row.push({ text: 'you', style: { fg: C.faint } })
-            }
-          }
+          // Laid out once: off hover only ★ saved and your reactions stay, each in its hover column.
+          const hovered = ctx.hover === key
+          row.push(...steady([
+            saveSpan(ctx, key, 'claude', part.text), pad(2),
+            ...reactSlots(given, e => ctx.react(turn, e, i)), pad(1),
+            { text: fit(isPicked ? '✓ in your reply' : '↩ reply', '✓ in your reply', '↩ reply'), style: { fg: isPicked ? C.cyan : C.gray }, action: () => ctx.reply('claude', turn, [i]) }, pad(2),
+            { text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(part.text) }, pad(2),
+            { text: fit(isUnread ? '✓ mark read' : '● mark unread', '✓ mark read', '● mark unread'), style: { fg: C.faint }, action: () => ctx.setRead([id], isUnread) },
+          ], hovered))
+          if (!hovered && given.length) row.push(pad(1), { text: 'you', style: { fg: C.faint } })
           out.push(row)
           mark(key)
         }
@@ -650,28 +665,25 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
         if (answeredBy.length)
           foot.push({ text: `⛓ ${answeredBy.length > 1 ? `${answeredBy.length} replies` : '1 reply'} · chain`, style: { fg: C.cyan }, action: () => (root ? ctx.openChain(root) : ctx.jump(`me:${answeredBy.at(-1)}`)) }, pad(2))
         const given = QUICK.filter(e => theirs?.some(r => r.emoji === e && r.by === 'me'))
-        if (ctx.hover === `claude:${turn.key}`) {
-          const all = parts.map((_, i) => i)
-          foot.push(parts.length > 1
-            ? { text: `↩ reply to all ${parts.length}`, style: { fg: C.gray }, action: () => ctx.reply('claude', turn, all) }
-            : { text: '↩ reply', style: { fg: C.gray }, action: () => ctx.reply('claude', turn) }, pad(2))
-          foot.push({ text: parts.length > 1 ? '⧉ copy all' : '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(stripMarks(turn.answer ?? '')) }, pad(2))
-          // Read by hand: the app only counts a reply read once you had it all on screen long enough.
-          const ids = parts.map((pt, i) => pt.id ?? `${turn.key}:${i}`)
-          const anyUnread = ids.some(id => ctx.unread.has(id))
-          foot.push({ text: anyUnread ? '✓ mark read' : '● mark unread', style: { fg: anyUnread ? C.gray : C.faint }, action: () => ctx.setRead(ids, anyUnread) }, pad(2))
+        // Laid out once, like a part's row: off hover only ★ saved and your reactions stay (a click
+        // takes one back), each in its hover column, so the pointer coming onto them moves nothing.
+        const hovered = ctx.hover === `claude:${turn.key}`
+        const all = parts.map((_, i) => i)
+        // Read by hand: the app only counts a reply read once you had it all on screen long enough.
+        const ids = parts.map((pt, i) => pt.id ?? `${turn.key}:${i}`)
+        const anyUnread = ids.some(id => ctx.unread.has(id))
+        foot.push(...steady([
           // A single reply is saved as its one part (several parts: each has its own ☆ save).
-          if (parts.length === 1) foot.push(saveSpan(ctx, `part:${ids[0]}`, 'claude', parts[0]!.text), pad(2))
-          for (const e of QUICK) foot.push({ text: e, style: given.includes(e) ? { bg: C.meBg } : {}, action: () => ctx.react(turn, e) }, pad(1))
-        } else {
-          const one = parts.length === 1 ? `part:${parts[0]!.id ?? `${turn.key}:0`}` : ''
-          if (one && ctx.kept.saved?.some(x => x.anchor === one)) foot.push(saveSpan(ctx, one, 'claude', parts[0]!.text), pad(2))
-          if (given.length) {
-            // Your reactions stay; a click takes one back.
-            for (const e of given) foot.push({ text: e, style: { bg: C.meBg }, action: () => ctx.react(turn, e) }, pad(1))
-            foot.push({ text: 'you', style: { fg: C.faint } })
-          }
-        }
+          ...(parts.length === 1 ? [saveSpan(ctx, `part:${ids[0]}`, 'claude', parts[0]!.text), pad(2)] : []),
+          ...reactSlots(given, e => ctx.react(turn, e)), pad(1),
+          parts.length > 1
+            ? { text: `↩ reply to all ${parts.length}`, style: { fg: C.gray }, action: () => ctx.reply('claude', turn, all) }
+            : { text: '↩ reply', style: { fg: C.gray }, action: () => ctx.reply('claude', turn) },
+          pad(2),
+          { text: parts.length > 1 ? '⧉ copy all' : '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(stripMarks(turn.answer ?? '')) }, pad(2),
+          { text: fit(anyUnread ? '✓ mark read' : '● mark unread', '✓ mark read', '● mark unread'), style: { fg: anyUnread ? C.gray : C.faint }, action: () => ctx.setRead(ids, anyUnread) },
+        ], hovered))
+        if (!hovered && given.length) foot.push(pad(1), { text: 'you', style: { fg: C.faint } })
         out.push(foot)
       }
       mark(`claude:${turn.key}`)
