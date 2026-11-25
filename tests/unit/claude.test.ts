@@ -30,6 +30,9 @@ const events = [
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'out' }, { type: 'tool_result', tool_use_id: 'u2', content: [{ type: 'text', text: 'a' }, { type: 'image' }, { type: 'text', text: 'b' }], is_error: true }, { type: 'tool_result', tool_use_id: 'u3' }, { type: 'text', text: 'not a result' }] } },
   { type: 'user', parent_tool_use_id: 'a1', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'hit' }] } },
   { type: 'user', message: { content: 'plain' } },
+  // Claude Code's echo of a message it took in (--replay-user-messages); one without an id says nothing.
+  { type: 'user', isReplay: true, uuid: 'u-1', message: { content: 'hi' } },
+  { type: 'user', isReplay: true, message: { content: [{ type: 'text', text: 'hi' }] } },
   // A scheduling call's result, with its structured form; a job firing (only "started" with a source counts).
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'Scheduled recurring job 72deb24a (Every minute).' }] }, tool_use_result: { id: '72deb24a', nextFireAt: 5 } },
   { type: 'user', parent_tool_use_id: 'a1', message: { content: [{ type: 'tool_result', tool_use_id: 'c2', content: 'Cancelled job 72deb24a.' }] }, tool_use_result: { id: '72deb24a' } },
@@ -78,7 +81,8 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   })
   // Wait for the last event, then talk back.
   while (!got.some(e => e.kind === 'result' && e.isError)) await new Promise(r => setTimeout(r, 20))
-  claude.send('plain')
+  let written = 0
+  claude.send('plain', undefined, [], 'u-1', () => written++)
   claude.send('with note', 'hidden note', [{ media: 'image/png', data: 'AAAA' }])
   claude.interrupt()
   claude.answerPermission('p1', true, { command: 'rm x' })
@@ -92,7 +96,7 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   assert.deepEqual(kinds, [
     'init', 'init', 'status', 'status', 'task', 'task', 'task', 'task', 'text-delta', 'output-tokens',
     'usage', 'text', 'tool', 'tool', 'agent-step', 'agent-text', 'tool-result', 'tool-result', 'tool-result',
-    'agent-tool-result', 'tool-result', 'agent-tool-result', 'fired', 'rate', 'rate', 'permission', 'permission', 'result', 'result', 'exit',
+    'agent-tool-result', 'received', 'tool-result', 'agent-tool-result', 'fired', 'rate', 'rate', 'permission', 'permission', 'result', 'result', 'exit',
   ])
   const by = <K extends ClaudeEvent['kind']>(k: K, n = 0) => got.filter(e => e.kind === k)[n] as Extract<ClaudeEvent, { kind: K }>
   assert.deepEqual(by('init'), { kind: 'init', sessionId: 's9', model: 'm', cwd: '/tmp/w', commands: ['compact', '7'], permissionMode: 'plan' })
@@ -111,6 +115,8 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   assert.deepEqual(by('agent-tool-result'), { kind: 'agent-tool-result', parent: 'a1', id: 's1', text: 'hit', isError: false })
   assert.deepEqual(by('tool-result', 3), { kind: 'tool-result', id: 'c1', text: 'Scheduled recurring job 72deb24a (Every minute).', isError: false, data: { id: '72deb24a', nextFireAt: 5 } })
   assert.deepEqual(by('agent-tool-result', 1), { kind: 'agent-tool-result', parent: 'a1', id: 'c2', text: 'Cancelled job 72deb24a.', isError: false, data: { id: '72deb24a' } })
+  assert.deepEqual(by('received'), { kind: 'received', uuid: 'u-1' })
+  assert.equal(written, 1, 'told once it was written')
   assert.deepEqual(by('fired'), { kind: 'fired', source: 'schedule_wakeup' })
   assert.deepEqual(by('rate', 1), { kind: 'rate', info: {} })
   assert.deepEqual(by('permission', 1), { kind: 'permission', requestId: 'p2', tool: 'Read', input: {} })
@@ -134,6 +140,9 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   // The hook callback it doesn't handle gets an empty success.
   assert.deepEqual(sent[1], { type: 'control_response', response: { subtype: 'success', request_id: 'h1', response: {} } })
   assert.equal(sent[2].message.content, 'plain')
+  assert.equal(sent[2].uuid, 'u-1')
+  assert.equal(sent[3].uuid, undefined)
+  assert.ok(args.includes('--replay-user-messages'))
   assert.deepEqual(sent[3].message.content, [
     { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
     { type: 'text', text: 'with note' },

@@ -11,6 +11,8 @@ export type ToolUse = { id: string; name: string; input: Record<string, unknown>
 export type ClaudeEvent =
   | { kind: 'init'; sessionId: string; model: string; cwd: string; commands: string[]; permissionMode: string }
   | { kind: 'text-delta'; text: string }
+  /** Claude Code took one of your messages into the conversation (its echo, with the uuid sent). */
+  | { kind: 'received'; uuid: string }
   | { kind: 'text'; text: string }
   | { kind: 'tool'; tool: ToolUse }
   /** `data`: the result's structured form, when Claude Code sends one (tool_use_result: CronCreate's id and next run). */
@@ -52,6 +54,9 @@ export class Claude {
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
+      // Each message you send comes back once Claude Code takes it in: at once when idle, at
+      // Claude's next step when sent mid-turn. The app's "received" mark.
+      '--replay-user-messages',
       '--permission-prompts', 'host',
       // Without these, Claude Code refuses a tool that needs a yes instead of asking the app (seen in
       // default permission mode): the prompts come over stdio, after the SDK's initialize request.
@@ -70,20 +75,23 @@ export class Claude {
     this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'initialize', hooks: null } })
   }
 
-  private write(obj: unknown) {
+  /** `done`: once it is written to Claude Code (never when Claude Code is gone). */
+  private write(obj: unknown, done?: () => void) {
     if (!this.proc.stdin.writable) return
-    this.proc.stdin.write(JSON.stringify(obj) + '\n')
+    this.proc.stdin.write(JSON.stringify(obj) + '\n', err => {
+      if (!err) done?.()
+    })
   }
 
   /** A user message; `hidden` goes along as a second text block Claude reads and the app never shows. */
-  send(text: string, hidden?: string, images: { media: string; data: string }[] = []) {
+  send(text: string, hidden?: string, images: { media: string; data: string }[] = [], uuid?: string, sent?: () => void) {
     const blocks = [
       ...images.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.media, data: i.data } })),
       { type: 'text', text },
       ...(hidden ? [{ type: 'text', text: hidden }] : []),
     ]
     const content = blocks.length > 1 ? blocks : text
-    this.write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' })
+    this.write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '', ...(uuid ? { uuid } : {}) }, sent)
   }
 
   /** default, acceptEdits, plan, bypassPermissions…: Claude Code answers with a status event. */
@@ -187,6 +195,10 @@ export class Claude {
         return
       }
       case 'user': {
+        if (e.isReplay) {
+          if (e.uuid) emit({ kind: 'received', uuid: String(e.uuid) })
+          return
+        }
         const content = e.message?.content
         if (!Array.isArray(content)) return
         for (const b of content) {

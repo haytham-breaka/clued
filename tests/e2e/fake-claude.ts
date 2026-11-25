@@ -18,7 +18,21 @@ const sessionId = resumeAt >= 0 ? args[resumeAt + 1]! : 's1'
 const MODEL = 'claude-fake-1-0'
 log({ args, cwd: process.cwd() })
 
-type Msg = { text: string; topic: string; images: number }
+type Msg = { text: string; topic: string; images: number; raw?: any }
+/**
+ * With --replay-user-messages, Claude Code echoes each message once it takes it in (as seen with a
+ * real one): at once when idle; one sent mid-turn only at Claude's next step, after a tool result.
+ * FAKE_NO_ECHO=1 keeps them (a message still "sent").
+ */
+const replays = args.includes('--replay-user-messages') && !process.env.FAKE_NO_ECHO
+let unechoed: Msg[] = []
+const echo = (m: Msg) => {
+  if (replays && m.raw) out({ type: 'user', message: m.raw.message, session_id: sessionId, parent_tool_use_id: null, ...(m.raw.uuid ? { uuid: m.raw.uuid } : {}), timestamp: new Date().toISOString(), isReplay: true })
+}
+const echoJoined = () => {
+  for (const m of unechoed) echo(m)
+  unechoed = []
+}
 let interrupted = false
 const permissions = new Map<string, (allow: boolean) => void>()
 /** AskUserQuestion requests waiting for the app's answer: the whole response. */
@@ -41,12 +55,17 @@ const say = (text: string) => out({ type: 'assistant', message: { content: [{ ty
 const tool = (id: string, name: string, input: Record<string, unknown>, parent?: string) =>
   out({ type: 'assistant', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_use', id, name, input }], ...(parent ? {} : { usage }) } })
 /** `data`: the structured result Claude Code sends beside the text (tool_use_result). */
-const toolResult = (id: string, content: unknown, isError = false, parent?: string, data?: unknown) =>
+const toolResult = (id: string, content: unknown, isError = false, parent?: string, data?: unknown) => {
   out({ type: 'user', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] }, ...(data ? { tool_use_result: data } : {}) })
+  // Claude's next step: the messages that came meanwhile reach it now.
+  if (!parent) echoJoined()
+}
 const init = () => out({ type: 'system', subtype: 'init', session_id: sessionId, model: MODEL, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default' })
 const hhmm = (at: number) => new Date(at).toTimeString().slice(0, 5)
-const result = (extra: Record<string, unknown> = {}) =>
+const result = (extra: Record<string, unknown> = {}) => {
+  echoJoined()
   out({ type: 'result', subtype: 'success', is_error: false, result: '', usage, total_cost_usd: 0.0123, duration_ms: 1500, session_id: sessionId, modelUsage: { [MODEL]: { contextWindow: 200_000 } }, ...extra })
+}
 
 let previous = ''
 /** Every message's topic so far, oldest first. */
@@ -336,6 +355,7 @@ async function run() {
   busy = true
   while (queue.length) {
     const m = queue.shift()!
+    echo(m)
     await scenario(m)
     if (!m.text.toLowerCase().includes('please split')) previous = m.topic
     topics.push(m.topic)
@@ -376,16 +396,19 @@ createInterface({ input: process.stdin }).on('line', line => {
   const c = e.message?.content
   const blocks: any[] = Array.isArray(c) ? c : [{ type: 'text', text: String(c) }]
   const texts = blocks.filter(b => b.type === 'text').map(b => String(b.text))
-  const m: Msg = { text: texts[0] ?? '', topic: (texts.join('\n').match(/This message is topic (T\d+)/) ?? [])[1] ?? 'T0', images: blocks.filter(b => b.type === 'image').length }
+  const m: Msg = { text: texts[0] ?? '', topic: (texts.join('\n').match(/This message is topic (T\d+)/) ?? [])[1] ?? 'T0', images: blocks.filter(b => b.type === 'image').length, raw: e }
   const about = aboutTag(m)
   if (about) {
+    echo(m)
     // Answered at once, with "about" in its tag.
     say(`Linked to your earlier message.\n${tag([{ id: m.topic, status: 'done', about }])}`)
     result()
     previous = m.topic
     return
   }
-  if (busy) joined.push(m)
-  else queue.push(m)
+  if (busy) {
+    joined.push(m)
+    unechoed.push(m)
+  } else queue.push(m)
   void run()
 })

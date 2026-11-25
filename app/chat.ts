@@ -277,6 +277,13 @@ export const COMPACT_LINES = 2
 /** The widest line of `text` wrapped at `max`, so short messages get snug bubbles. */
 const snug = (lines: Line[], max: number) => Math.min(max, Math.max(8, ...lines.map(lineCells)))
 
+/** Your message's way to Claude: ◌ sending (the app has it), ✓ sent (written to Claude Code), ✓✓ (Claude Code took it in). */
+export function delivered(turn: Turn): Span {
+  return turn.delivery === 'sending'
+    ? { text: '◌ sending', style: { fg: C.faint, italic: true } }
+    : turn.delivery === 'sent' ? { text: '✓ sent', style: { fg: C.gray } } : { text: '✓✓', style: { fg: C.cyan } }
+}
+
 export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
   const out: Line[] = []
   const anchors: Record<string, number> = {}
@@ -334,9 +341,10 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     } else if (turn.reaction) {
       // On which reply: a click goes there.
       const on = ctx.kept.links[turn.key]
-      const t = on ? `you reacted ${turn.reaction} on “${clip(on.text, Math.max(10, meMax - 20))}”` : `you reacted ${turn.reaction}`
+      const t = on ? `you reacted ${turn.reaction} on “${clip(on.text, Math.max(10, meMax - 24))}”` : `you reacted ${turn.reaction}`
       const go = on?.anchor ? () => ctx.jump(on.anchor!) : undefined
-      out.push([pad(width - cells(t) - 1), { text: t, style: { fg: C.gray, italic: true, ...(go ? { underline: true } : {}) }, ...(go ? { action: go } : {}) }])
+      const way = delivered(turn)
+      out.push([pad(width - cells(t) - 2 - cells(way.text)), { text: t, style: { fg: C.gray, italic: true, ...(go ? { underline: true } : {}) }, ...(go ? { action: go } : {}) }, pad(1), way])
     } else {
       out.push([])
       const link = ctx.kept.links[turn.key]
@@ -371,7 +379,9 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       const chain = ctx.chainOf(turn)
       if (chain > 0) foot.push({ text: `⛓ chain · ${chain}  `, style: { fg: C.cyan }, action: () => ctx.openChain(turn) })
       // Sent while Claude worked, and Claude hasn't got to it yet.
-      if (turn.queued && !turn.isDone && !turn.steps.length && !turn.live) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
+      if (turn.queued && turn.delivery && !turn.isDone && !turn.steps.length && !turn.live) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
+      // Where it is on its way, last: the app has it, it went to Claude Code, Claude Code took it in.
+      if (!turn.text.startsWith('/')) foot.push(delivered(turn))
       while (foot.length && foot.at(-1)!.text.trim() === '') foot.pop()
       // Actions show while the pointer is on this message, on the left of the row: what is on the
       // right (answered, replies) keeps its place, so a click never lands on something that moved.

@@ -10,6 +10,7 @@
 // plugins, MCP and the session file are all Claude Code's. This file only draws and takes input.
 
 import './migrate.ts'
+import { randomUUID } from 'node:crypto'
 import { execFile, spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -811,6 +812,11 @@ function onEvent(e: ClaudeEvent) {
   let t = openTurn()
   if (!t && !quitting && (e.kind === 'text-delta' || e.kind === 'text' || e.kind === 'tool')) t = followUpTurn()
   switch (e.kind) {
+    case 'received': {
+      const sent = S.turns.findLast(x => x.uuid === e.uuid)
+      if (sent) delete sent.delivery
+      break
+    }
     case 'init':
       if (!S.sessionId) {
         S.sessionId = e.sessionId
@@ -1197,7 +1203,14 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   })
   S.images = []
   logSend('sent', { topic: turn.topicId, text, ...(hidden ? { note: hidden } : {}), ...(images.length ? { images: images.length } : {}) })
-  S.claude!.send(text, hidden, images)
+  // On its way: sending, sent once written, received when Claude Code echoes it back.
+  turn.uuid = randomUUID()
+  turn.delivery = 'sending'
+  S.claude!.send(text, hidden, images, turn.uuid, () => {
+    if (turn.delivery !== 'sending') return
+    turn.delivery = 'sent'
+    draw()
+  })
   statusSoon()
   if (S.isDemo && !opts.reaction && !text.startsWith('/')) demoAgents(turn)
   keep()

@@ -25,7 +25,7 @@ clued makes no API calls of its own. Claude Code runs underneath, headless, with
 
 - **Nothing you ask gets lost.** In a plain terminal session, a question you typed while Claude was busy can be answered in the middle of a tool run, or not at all. clued gives every message a mark: ⏳ Claude is on it, ✋ waiting on you, ✓ done. A message whose reply never arrived says so, with a button to ask again.
 - **Every reply says what it answers.** A reply quotes the message, or each of the several messages, it answers. Click a quote to jump to it. From any message you can open its whole chain: the follow-ups, the corrections and every reply that touched it.
-- **You can type while Claude works.** Messages sent mid-task are delivered to the running turn, the way Claude Code does it, and each one is still tracked on its own.
+- **You can type while Claude works.** Messages sent mid-task are delivered to the running turn, the way Claude Code does it, and each one is still tracked on its own. Under each message, `✓ sent` means Claude Code has it, and `✓✓` means Claude has actually taken it in: at once when idle, at its next step when it was busy.
 - **It's still Claude Code.** No second client, no API key, no separate bill. Your `CLAUDE.md`, settings, permissions and plugins apply as they always do, and every session can also be opened in `claude` itself.
 - **The overhead is measured.** About 9% more cost per session, for the instructions and the small tag on each reply. The numbers are [below](#does-it-help-the-evaluation).
 

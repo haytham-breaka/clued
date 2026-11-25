@@ -212,17 +212,35 @@ describe('chat', () => {
   test('a message sent while Claude works is queued, then answered with the work', () =>
     withApp({}, async app => {
       await app.send('hold on')
-      await app.waitFor('Slow work')
+      let s = await app.waitFor('Slow work')
+      // Claude Code took the first one in: ✓✓ under it.
+      assert.match(s, /✓✓/)
+      assert.ok(!s.includes('✓ sent') && !s.includes('◌ sending'))
       await app.send('and another thing')
-      let s = await app.waitFor('⏸ queued: Claude reads it at its next step')
+      s = await app.waitFor('⏸ queued: Claude reads it at its next step')
       assert.match(s, /Claude is working… your next message is queued ↓/)
+      // Written to Claude Code, not taken in yet: ✓ sent, until Claude's next step.
+      assert.match(rowOf(s, '⏸ queued'), /⏸ queued: Claude reads it at its next step +✓ sent/)
       app.release('slow')
       s = await app.waitFor('Also got: and another thing')
       assert.match(s, /The slow work is done\./)
       assert.ok(!s.includes('⏸ queued'))
+      assert.ok(!s.includes('✓ sent'), 'both taken in')
+      // Claude Code echoed it with the id it was sent with.
+      const sent = app.claudeLog().filter(e => e.type === 'user')
+      assert.equal(sent.length, 2)
+      assert.ok(sent.every(e => /^[0-9a-f-]{36}$/.test(e.uuid)))
       // Both messages are answered.
       assert.match(s, /✓ and another thing/)
       assert.match(s, /✓ hold on/)
+    }))
+
+  test('a message Claude Code never echoes back stays ✓ sent: received means Claude Code took it in', () =>
+    withApp({ env: { FAKE_NO_ECHO: '1' } }, async app => {
+      await app.send('hello there')
+      const s = await app.waitFor('Echo: hello there')
+      assert.match(s, /✓ sent/)
+      assert.ok(!s.includes('✓✓'))
     }))
 
   test('Esc interrupts Claude while it works', () =>

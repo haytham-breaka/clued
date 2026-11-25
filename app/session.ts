@@ -36,6 +36,13 @@ export type Turn = {
   topicId?: string
   /** Sent while Claude was working: Claude Code queues it until Claude's next step. */
   queued?: boolean
+  /**
+   * Where your message is on its way: the app has it (sending), it is written to Claude Code
+   * (sent). None: Claude Code took it into the conversation (it echoes it back), or it is history.
+   */
+  delivery?: 'sending' | 'sent'
+  /** The id it was sent with: Claude Code's echo of it carries the same one. */
+  uuid?: string
   /** Its work went on under a later message (sent while it ran): one piece of work, not a stopped one. */
   continued?: boolean
   /** Sent from inside a request's view: that request's turn key. */
