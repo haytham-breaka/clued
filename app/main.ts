@@ -41,7 +41,7 @@ import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
 import { agentFor, agentIdOf, agentsFromTurns, endRun, firstTask, resume as resumeRun, sendFailed, sendTask, taskArrived, workingFor } from './tasks.ts'
-import { lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
+import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
@@ -313,7 +313,16 @@ function initRead() {
   if (!S.kept.readInit) {
     for (const t of S.turns) (t.parts ?? []).forEach((_, i) => S.read.add(partId(t, i)))
     S.kept.readInit = true
+    S.kept.readIds = 2
     S.kept.read = [...S.read]
+    keep()
+  }
+  // Before, those replies had other ids after a reload, so they came back unread: what you read
+  // then can't be told apart now. They count as read once, rather than all coming back.
+  if (S.kept.readIds !== 2) {
+    for (const t of S.turns) if (/^(?:follow|fired)-/.test(t.key)) (t.parts ?? []).forEach((_, i) => S.read.add(partId(t, i)))
+    S.kept.readIds = 2
+    S.kept.read = [...S.read].slice(-3000)
     keep()
   }
 }
@@ -489,7 +498,8 @@ function cancelJob(j: Job) {
 /** A turn a scheduled job started: Claude goes on by itself, following up on the message the job was made for. */
 function firedTurn(now: number, source: string): Turn {
   const turn = newTurn('', now)
-  turn.key = `fired-${now.toString(36)}`
+  turn.key = firedKey(now)
+  endedIdle = undefined
   const job = onFire(S.jobs, now, { turn: turn.key, source })
   turn.fired = job ? { prompt: job.prompt, source, job: job.toolId } : { source }
   turn.followUp = job?.for.length ? job.for : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
@@ -737,8 +747,9 @@ function start(resume?: string) {
     for (const [key, texts] of Object.entries(S.kept.early ?? {})) {
       const t = S.turns.findLast(x => x.key === key)
       if (!t) continue
+      // In the order they came live, so each keeps its place (and its id).
       const missing = texts.filter(x => !(t.early ?? []).includes(x))
-      if (missing.length) t.early = [...(t.early ?? []), ...missing]
+      if (missing.length) t.early = [...texts, ...(t.early ?? []).filter(x => !texts.includes(x))]
     }
     assignParts(S.turns, S.kept.board)
     // The jobs the session file shows (the Claude Code that ran them has stopped).
@@ -759,6 +770,9 @@ function start(resume?: string) {
   draw()
 }
 
+/** The first agent that ended while Claude was idle: Claude's next words answer it. */
+let endedIdle: string | undefined
+
 /** The turn Claude's events belong to: the newest one still open. */
 const openTurn = () => S.turns.findLast(t => !t.isDone)
 
@@ -773,7 +787,9 @@ function followUpTurn(): Turn {
   const from = back.length ? back : bg.filter(a => a.state === 'running')
   const keys = from.length ? [...new Set(from.flatMap(a => a.for))] : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
   const turn = newTurn('', now)
-  turn.key = `follow-${now.toString(36)}`
+  // Keyed by the agent whose end it answers, as the session file will show it on resume.
+  turn.key = endedIdle ? followKey(S.turns, endedIdle) : `follow-${now.toString(36)}`
+  endedIdle = undefined
   turn.followUp = keys
   S.turns.push(turn)
   S.isWorking = true
@@ -936,6 +952,7 @@ function onEvent(e: ClaudeEvent) {
       if (e.phase !== 'done' && a.state !== 'running') resumeAgent(a)
       if (e.phase === 'progress' && e.lastTool) a.last = e.lastTool
       if (e.phase === 'done') {
+        if (!t) endedIdle ??= e.taskId || e.toolUseId
         endRun(a, e.status === 'failed' ? 'failed' : e.status === 'stopped' || e.status === 'killed' ? 'stopped' : 'done', Date.now())
         if (e.text) {
           a.last = e.text
@@ -1088,6 +1105,7 @@ function submit(text: string, opts: { reaction?: string; about?: string } = {}) 
   if (!S.claude) start(S.sessionId || undefined)
   const now = Date.now()
   const turn = newTurn(text, now)
+  endedIdle = undefined
   if (opts.reaction) turn.reaction = opts.reaction
   let hidden: string | undefined
   if (!opts.reaction && !text.startsWith('/')) {

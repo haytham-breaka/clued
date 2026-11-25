@@ -88,7 +88,7 @@ describe('session files', () => {
     const turns = S.loadHistory(CWD, 'sched')
     assert.equal(turns.length, 3)
     assert.deepEqual(turns[0]!.steps[0]!.data, { id: '72deb24a', nextFireAt: 5 })
-    assert.equal(turns[1]!.key, `fired-${Date.parse('2026-11-25T10:46:13.000Z').toString(36)}`)
+    assert.equal(turns[1]!.key, S.firedKey(Date.parse('2026-11-25T10:46:13.000Z')))
     assert.deepEqual(turns[1]!.fired, { prompt: 'PING', source: 'schedule_wakeup' })
     assert.deepEqual(turns[1]!.followUp, [turns[0]!.key])
     assert.equal(turns[1]!.answer, 'PONG')
@@ -145,6 +145,42 @@ describe('session files', () => {
     ])
     assert.equal(next!.text, 'no notification here')
     assert.equal(next!.agentEnds, undefined)
+  })
+  test('loadHistory: Claude answering an agent after its turn ended is a follow-up turn keyed by the agent, as live', async () => {
+    const note = (id: string) => `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>tu-${id}</tool-use-id>\n<status>completed</status>\n<summary>Done</summary>\n</task-notification>`
+    write('follow', [
+      user('run it in the background', { timestamp: '2026-11-25T10:00:00.000Z' }),
+      assistant([{ type: 'tool_use', id: 'tu-bg-42', name: 'Agent', input: { run_in_background: true } }], { message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'tu-bg-42', name: 'Agent', input: { run_in_background: true } }] } }),
+      user([{ type: 'tool_result', tool_use_id: 'tu-bg-42', content: 'Started. agentId: bg-42' }]),
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Started it.' }] } },
+      // Claude had finished: its answer to the agent is a turn of its own.
+      user(note('bg-42'), { timestamp: '2026-11-25T10:05:00.000Z' }),
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The job is done.' }] } },
+      // The same agent again (continued): a key of its own.
+      user(note('bg-42'), { timestamp: '2026-11-25T10:09:00.000Z' }),
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done again.' }] } },
+      // Mid-turn (Claude still at work): the news stays on that turn.
+      user('next thing', { timestamp: '2026-11-25T10:10:00.000Z' }),
+      { type: 'assistant', message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'g1', name: 'Grep', input: {} }] } },
+      user([{ type: 'tool_result', tool_use_id: 'g1', content: 'x' }]),
+      user(note('bg-7'), { timestamp: '2026-11-25T10:11:00.000Z' }),
+      { type: 'assistant', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Both done.' }] } },
+    ])
+    const turns = S.loadHistory(CWD, 'follow')
+    assert.deepEqual(turns.map(t => [t.key.startsWith('follow-') ? t.key : t.text, t.answer]), [
+      ['run it in the background', 'Started it.'],
+      ['follow-bg-42', 'The job is done.'],
+      ['follow-bg-42.2', 'Done again.'],
+      ['next thing', 'Both done.'],
+    ])
+    assert.deepEqual(turns[1]!.followUp, [turns[0]!.key])
+    assert.equal(turns[0]!.agentEnds?.[0]?.taskId, 'bg-42')
+    assert.equal(turns[3]!.agentEnds?.[0]?.taskId, 'bg-7')
+    // Their reply ids: the ones the app gives them live.
+    const { assignParts } = await import('../../app/inbox.ts')
+    const { emptyBoard } = await import('../../hooks/model.ts')
+    assignParts(turns, emptyBoard())
+    assert.deepEqual(turns.slice(1, 3).map(t => t.parts?.map(p => p.id)), [['follow-bg-42:0'], ['follow-bg-42.2:0']])
   })
   test('readAgentFile: steps, words and results; later messages to it are prompts, the first is skipped', () => {
     const dir = join(S.projectDir(CWD), 'sess', 'subagents')

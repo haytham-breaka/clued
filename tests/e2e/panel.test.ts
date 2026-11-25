@@ -221,7 +221,35 @@ describe('panel', () => {
       assert.match(s, /Claude · \d\d:\d\d · followed up/)
       assert.match(s, /✓ background agent please/)
       await app.waitFor(/✓ \w+ \(implementer\)/)
+      // Read once you look: kept under the id it will have on resume too (keyed by the agent).
+      app.raw('\x1b[I')
+      await app.waitFor(() => app.read('home/.clued/sessions/s1.json').includes('"follow-bg-42:0"'))
     }))
+
+  test('on resume, a reply Claude wrote when an agent came back keeps its id: read stays read', () => {
+    const note = '<task-notification>\n<task-id>bg-42</task-id>\n<tool-use-id>bg-1</tool-use-id>\n<status>completed</status>\n<summary>Long job finished</summary>\n</task-notification>'
+    const setup = (a: { home: string; work: string }) => {
+      widePanel(a)
+      writeSession(a.home, a.work, 'old-bg', [
+        { type: 'user', timestamp: '2026-11-25T10:00:00.000Z', message: { role: 'user', content: 'background agent please' } },
+        { type: 'assistant', timestamp: '2026-11-25T10:00:01.000Z', message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'bg-1', name: 'Agent', input: { description: 'Long job', prompt: 'Do the long job.', run_in_background: true } }] } },
+        { type: 'user', timestamp: '2026-11-25T10:00:02.000Z', message: { content: [{ type: 'tool_result', tool_use_id: 'bg-1', content: 'Started in the background. agentId: bg-42' }] } },
+        { type: 'assistant', timestamp: '2026-11-25T10:00:03.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Started it in the background.' }] } },
+        { type: 'user', timestamp: '2026-11-25T10:05:00.000Z', message: { role: 'user', content: note } },
+        { type: 'assistant', timestamp: '2026-11-25T10:05:01.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The background job is done.' }] } },
+        { type: 'user', timestamp: '2026-11-25T10:06:00.000Z', message: { role: 'user', content: 'and the other thing' } },
+        { type: 'assistant', timestamp: '2026-11-25T10:06:01.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Not read yet.' }] } },
+      ])
+      const first = keyOf('background agent please')
+      mkdirSync(join(a.home, '.clued', 'sessions'), { recursive: true })
+      writeFileSync(join(a.home, '.clued', 'sessions', 'old-bg.json'), JSON.stringify({ board: {}, reactions: {}, links: {}, readInit: true, readIds: 2, read: [`${first}:0`, 'follow-bg-42:0'] }))
+    }
+    return withApp({ setup, args: ['--resume', 'old-bg'], unfocused: true, height: 44, width: 150 }, async app => {
+      const s = await app.waitFor('Not read yet.')
+      assert.ok(s.includes('The background job is done.'))
+      assert.equal(s.split('\n').filter(l => l.includes('● new')).length, 1, 'only the reply you had not read is new')
+    })
+  })
 
   test('your recent messages: the ? legend, and ⌕ search with the arrows and Enter', () =>
     withApp({ unfocused: true }, async app => {

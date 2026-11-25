@@ -105,6 +105,8 @@ export type Kept = {
   read?: string[]
   /** Set once the parts there were when the app first opened this session were marked read. */
   readInit?: boolean
+  /** 2: the replies Claude wrote by itself (after an agent, a job) have the same ids live and on resume. */
+  readIds?: number
   /** This chat's work setting. */
   work?: Work
   /**
@@ -113,6 +115,21 @@ export type Kept = {
    */
   early?: Record<string, string[]>
 }
+
+/**
+ * The key of Claude's turn answering an agent's end: the same live and from the session file. An
+ * agent continued ends again: its next one is follow-<id>.2, and so on.
+ */
+export function followKey(turns: Turn[], taskId: string) {
+  const base = `follow-${taskId}`
+  const n = turns.filter(t => t.key === base || t.key.startsWith(`${base}.`)).length
+  return n ? `${base}.${n + 1}` : base
+}
+/**
+ * The key of a scheduled job's turn: by the minute it fired, so the app's clock and the session
+ * file's agree (a job fires at most once a minute).
+ */
+export const firedKey = (at: number) => `fired-${Math.floor(at / 60000).toString(36)}`
 
 export const newTurn = (text: string, at = Date.now()): Turn => ({
   key: keyOf(text),
@@ -210,6 +227,8 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
   const turns: Turn[] = []
   let cur: Turn | undefined
   const byId = new Map<string, { turn: Turn; step: Step }>()
+  // Whether Claude's last turn had ended (so news from an agent starts a turn of its own).
+  let ended = false
   const finish = () => {
     if (cur && !cur.answer && cur.pending) cur.answer = stripTag(cur.pending)
     if (cur) {
@@ -234,8 +253,22 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       if (raw.includes('<task-notification>')) {
         const ends = agentEndsIn(raw, at, cur.steps.length)
         if (ends.length) cur.agentEnds = [...(cur.agentEnds ?? []), ...ends]
+        // Claude had finished: it answers the notification in a turn of its own, as it does live
+        // (same key, so what you read stays read).
+        if (ended && e.type === 'user' && ends[0]) {
+          const id = ends[0].taskId || ends[0].toolUseId!
+          const from = turns.find(t => t.steps.some(s => (s.tool.name === 'Agent' || s.tool.name === 'Task') && (s.tool.id === ends[0]!.toolUseId || (s.result ?? '').includes(id))))
+          finish()
+          cur = newTurn('', at)
+          cur.key = followKey(turns, id)
+          cur.followUp = from ? (from.followUp ?? [from.key]) : turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
+          turns.push(cur)
+          ended = false
+          continue
+        }
       }
     }
+    if (e.type === 'assistant') ended = e.message?.stop_reason === 'end_turn' || e.message?.stop_reason === 'stop_sequence'
     // A message you sent while Claude worked: Claude Code stores it as a queued command.
     if (e.type === 'attachment' && e.attachment?.type === 'queued_command') {
       const pr = e.attachment.prompt
@@ -249,6 +282,7 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
         if (!cur.answer) cur.continued = true
       }
       finish()
+      ended = false
       cur = newTurn(text, at)
       if (tid) cur.topicId = tid
       cur.queued = true
@@ -261,8 +295,9 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       const c = e.message?.content
       const prompt = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n') : ''
       finish()
+      ended = false
       cur = newTurn('', at)
-      cur.key = `fired-${at.toString(36)}`
+      cur.key = firedKey(at)
       cur.fired = { prompt, ...(e.wakeupSource ? { source: String(e.wakeupSource) } : {}) }
       const ask = turns.findLast(t => !t.reaction && !t.followUp)
       cur.followUp = ask ? [ask.key] : []
@@ -286,6 +321,7 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       const text = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b: any) => b.type === 'text').map((b: any) => b.text).filter((t: string) => !isNoise(t)).join('\n') : ''
       if (isNoise(text)) continue
       finish()
+      ended = false
       cur = newTurn(text, at)
       const tid = briefTopic(JSON.stringify(c))
       if (tid) cur.topicId = tid
