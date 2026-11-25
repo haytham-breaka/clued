@@ -60,7 +60,7 @@ Your messages are on the right and Claude's replies on the left, with Markdown d
 
 The panel on the left has these sections:
 - **Unread / Read:** replies you haven't seen yet, and the ones you have. A reply counts as read after 3 seconds on screen with the window focused.
-- **Waiting on you:** Claude's open questions to you.
+- **Waiting on you:** Claude's open questions to you. The ✕ on the left, or `✕ dismiss` under the question, drops one you don't want to answer: its message counts as done, and your next message tells Claude not to wait for an answer.
 - **Agents:** Claude first, then each agent it started, by name and role (`James (implementer)`, `Jake (explorer)`), running or just finished, with the message it is working on. Click one to open its live view. Claude is told the names too, so you can write "ask Jake to check the tests".
 - **Your recent messages:** each with its mark, latest activity first. Press `?` for what the marks mean and `⌕` to search.
 

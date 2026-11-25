@@ -209,6 +209,22 @@ function savePrefs() {
   writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded }))
 }
 
+/** Questions you dismissed since your last message: the next one tells Claude not to wait for them. */
+let dismissed: string[] = []
+
+/** Drops questions from Waiting on you without an answer: their messages count as done. */
+function dismiss(partIds: string[]) {
+  const ids = new Set(S.box.waiting.filter(w => partIds.includes(w.id)).flatMap(w => w.part.to))
+  const now = Date.now()
+  const hit = S.kept.board.topics.filter(t => ids.has(t.id) && t.status === 'me')
+  if (!hit.length) return
+  S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (hit.includes(t) ? { ...t, status: 'done' as const, updatedAt: now } : t)) }
+  dismissed.push(...hit.map(t => t.id).filter(id => !dismissed.includes(id)))
+  keep()
+  toast(hit.length > 1 ? `Dismissed ${hit.length} questions. Claude won't wait for them.` : 'Dismissed. Claude won\'t wait for an answer.')
+  draw()
+}
+
 function keep() {
   if (S.sessionId) saveKept(S.sessionId, S.kept)
 }
@@ -857,6 +873,10 @@ function submit(text: string, opts: { reaction?: string } = {}) {
     const first = reply?.quotes[0]
     if (first) S.kept.links[turn.key] = { key: first.key, who: first.who, text: preview(first.text, 60), ...(first.anchor ? { anchor: first.anchor } : {}), ...(reply!.quotes.length > 1 ? { more: reply!.quotes.length - 1, all: reply!.quotes.map(q => ({ anchor: q.anchor ?? `${q.who}:${q.key}`, text: preview(q.text, 120) })) } : {}) }
     S.replyTo = null
+    if (dismissed.length) {
+      hidden += `\nThe user dismissed your question${dismissed.length > 1 ? 's' : ''} on ${dismissed.join(', ')} without answering: don't wait for an answer, and ask again only if it still matters.`
+      dismissed = []
+    }
     if (S.heard.length) {
       hidden += `\nSince your last reply the user reacted: ${S.heard.join('; ')}. Mention it only if it matters.`
       S.heard = []
@@ -1522,6 +1542,7 @@ function paint() {
         side: d => { S.hscroll = Math.max(0, S.hscroll + d); draw() },
         box: S.box,
         openPart,
+        dismiss,
         openMessage,
         openWork,
         picked: S.picked,
@@ -1614,6 +1635,7 @@ function paint() {
       agentName: id => { const a = S.agents.get(id); return a ? `${who(a, S.agents.values())} · ${a.name}` : undefined },
       openAgent,
       setRead,
+      dismiss,
   }
   const { lines: chat, anchors, owners } = req && reqInfo
     ? requestLines(req, reqInfo, { ...ctx, askStatus: () => submit('What is the status of this request?') }, cw - 2)

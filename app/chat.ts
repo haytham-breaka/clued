@@ -58,6 +58,7 @@ export type ChatCtx = {
   showMessage?: (t: Turn) => boolean
   /** Marks reply parts read or unread by hand. */
   setRead: (ids: string[], isRead: boolean) => void
+  dismiss: (ids: string[]) => void
   showPart?: (p: Part) => boolean
 }
 
@@ -457,7 +458,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
         const isPicked = ctx.replying.has(anchor)
         const pick: Span | undefined = multi && isPicked ? { text: '✓ in your reply', style: { fg: C.cyan, bold: true }, action: () => ctx.reply('claude', turn, [i]) } : undefined
         out.push(...bubble(rows, inner, IN, { fg: isPicked ? C.cyan : isUnread ? C.magenta : asks ? C.yellow : C.faint }, undefined, undefined, tag, pick))
-        if (asks) out.push([pad(IN + 2), { text: '✋ waiting for your answer', style: { fg: C.yellow } }])
+        if (asks) out.push([pad(IN + 2), { text: '✋ waiting for your answer', style: { fg: C.yellow } }, { text: '   ✕ dismiss', style: { fg: C.gray }, action: () => ctx.dismiss([id]) }])
         anchors[`partEnd:${id}`] = out.length
         if (multi) {
           // Its row is always there, so hovering moves nothing; reactions you left stay.

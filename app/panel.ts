@@ -81,6 +81,8 @@ export type PanelCtx = {
   /** Unread replies, questions waiting on you, your latest messages. */
   box: Inbox
   openPart: (id: string) => void
+  /** Drops questions from Waiting on you without answering them (by part id). */
+  dismiss: (ids: string[]) => void
   openMessage: (turn: Turn) => void
   /** Claude's own steps right now, in the chat. */
   openWork: () => void
@@ -277,7 +279,13 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       id: 'waiting',
       cap: 5,
       header: [row(width, [{ text: 'Waiting on you', style: { bold: true, fg: C.yellow } }], [{ text: String(waiting.length), style: { fg: C.yellow, bold: true } }])],
-      rows: waiting.map(w => item({ text: ' ✋ ', style: { fg: C.yellow }, action: () => p.openPart(w.id) }, w.question, () => p.openPart(w.id))),
+      // ✕ on the left dismisses one: you won't answer it, and Claude is told not to wait.
+      rows: waiting.map(w => row(iw, [
+        { text: ' ✕', style: { fg: C.gray }, action: () => p.dismiss([w.id]) },
+        { text: ' ✋ ', style: { fg: C.yellow }, action: () => p.openPart(w.id) },
+        { text: slide(w.question, p.hscroll), action: () => p.openPart(w.id) },
+      ])),
+      ...(waiting.length > 1 ? { footer: [row(width, [{ text: '    dismiss all', style: { fg: C.gray }, action: () => p.dismiss(waiting.map(w => w.id)) }])] } : {}),
     })
 
   // ---- Who is working on what: Claude itself, then (a section of their own) the agents it started,
