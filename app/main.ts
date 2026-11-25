@@ -40,7 +40,7 @@ import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
-import { agentFor, agentIdOf, agentsFromTurns, endRun, firstTask, resume as resumeRun, sendFailed, sendTask, taskArrived, workingFor } from './tasks.ts'
+import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, resume as resumeRun, sendFailed, sendTask, taskArrived, workingFor } from './tasks.ts'
 import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
@@ -336,6 +336,15 @@ function markRead(ids: string[]) {
 }
 
 // ---- Inside an agent ------------------------------------------------------------------
+
+/** Asks Claude to continue an agent that Claude Code's exit (a /reload) stopped: Claude sends it a message. */
+function continueAgent(id: string) {
+  const a = S.agents.get(id)
+  if (!a || !canContinue(a)) return
+  const name = a.person ?? a.name
+  submit(continueText(a, name), { agent: a.id })
+  toast(`Asked Claude to continue ${name}.`)
+}
 
 function openAgent(id: string) {
   if (!S.agents.has(id)) return toast('That agent is no longer here.')
@@ -757,6 +766,8 @@ function start(resume?: string) {
     // Its agents and their tasks; the same session again (a new model) keeps the agents it has live.
     const was = S.agents
     S.agents = new Map(agentsFromTurns(S.turns).map(a => [a.id, resume === wasSession && was.get(a.id) ? was.get(a.id)! : a]))
+    // Stopped with the Claude Code before: by a /reload, if the app said so when it quit.
+    for (const a of S.agents.values()) if (a.cut) a.cut = S.kept.stopped?.[a.id] ?? 'exit'
   } else {
     S.jobs = newJobs()
     S.sessionId = ''
@@ -1015,7 +1026,11 @@ function onEvent(e: ClaudeEvent) {
         S.isWorking = false
         S.claude = undefined
         S.asks = []
-        for (const a of S.agents.values()) if (a.state === 'running') endRun(a, 'stopped', Date.now())
+        for (const a of S.agents.values())
+          if (a.state === 'running') {
+            endRun(a, 'stopped', Date.now())
+            a.cut = 'exit'
+          }
         // Jobs Claude Code kept only in memory went with it.
         onExit(S.jobs, Date.now())
       }
@@ -1101,7 +1116,8 @@ function autoLink(json: string) {
 }
 
 /** `about`: the request (turn key) it is part of, as when written inside that request's view. */
-function submit(text: string, opts: { reaction?: string; about?: string } = {}) {
+/** `agent`: the agent (Agent tool use id) it is about, as when written inside that agent's view. */
+function submit(text: string, opts: { reaction?: string; about?: string; agent?: string } = {}) {
   if (!S.claude) start(S.sessionId || undefined)
   const now = Date.now()
   const turn = newTurn(text, now)
@@ -1136,7 +1152,7 @@ function submit(text: string, opts: { reaction?: string; about?: string } = {}) 
     const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
     if (job) turn.aboutJob = job.toolId
     if (job) hidden = `${hidden}\nThe user wrote this from inside the view of your scheduled job ${job.id} (${job.kind === 'wakeup' ? 'ScheduleWakeup' : job.kind === 'remote' ? 'RemoteTrigger' : `CronCreate "${job.cron ?? ''}"`}, ${stateLabel(job)}; prompt "${preview(job.prompt, 120)}"): it is about that job.`
-    const inside = S.agentView ? S.agents.get(S.agentView) : undefined
+    const inside = opts.agent ? S.agents.get(opts.agent) : S.agentView ? S.agents.get(S.agentView) : undefined
     if (inside) {
       turn.aboutAgent = inside.id
       hidden = `${hidden}\nThe user wrote this from inside the view of your agent ${who(inside, S.agents.values())}, "${inside.name}" (${inside.state}; Agent tool use ${inside.id}${inside.taskId ? `, agent id ${inside.taskId}` : ''}): it is about that agent's work. If they want the agent itself to go on, continue it (SendMessage to it, when you can); otherwise answer or do it yourself.`
@@ -1903,6 +1919,7 @@ function paint() {
         turnOf: key => S.turns.findLast(x => x.key === key),
         openAgent,
         agentView: S.agentView,
+        continueAgent,
         openRequest,
         requestView: S.requestView,
         jobs: shownJobs(S.jobs, Date.now()).map(j => ({ job: j, by: j.by ? jobBy(j).name : undefined })),
@@ -2019,6 +2036,7 @@ function paint() {
       isWorking: S.isWorking,
       agentName: id => { const a = S.agents.get(id); return a ? `${who(a, S.agents.values())} · ${a.name}` : undefined },
       openAgent,
+      continueAgent,
       openMessage,
       setRead,
       dismiss,
@@ -2732,7 +2750,10 @@ function quit(code = 0) {
   out.write('\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   if (process.stdin.isTTY) process.stdin.setRawMode(false)
   if (S.sessionId) {
-    keep()
+    // Agents still running go with this Claude Code: on resume they say they were stopped, and how.
+    const running = [...S.agents.values()].filter(a => a.state === 'running')
+    if (running.length) S.kept.stopped = Object.fromEntries([...Object.entries(S.kept.stopped ?? {}), ...running.map(a => [a.id, code === 75 ? 'reload' : 'exit'] as const)].slice(-200))
+    saveKept(S.sessionId, S.kept, true)
     if (code === 75) writeFileSync(`${homedir()}/.clued/reload`, S.sessionId)
     else out.write(`Resume this conversation with: clued --resume ${S.sessionId}\n`)
   }

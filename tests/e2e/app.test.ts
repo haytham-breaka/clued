@@ -502,11 +502,13 @@ describe('app', () => {
       await app.waitFor(() => app.output().includes('\x1b[?1049lResume this conversation with: clued --resume s1\r\n'))
     })
     await withApp({}, async app => {
-      await app.send('hello')
-      await app.waitFor('Echo: hello')
+      // A background agent still at work when it reloads: kept as stopped by the reload.
+      await app.send('background agent please')
+      await app.waitFor('Started it in the background.')
       await app.send('/reload')
       assert.equal(await app.waitExit(), 75)
       assert.equal(app.read('home/.clued/reload'), 's1')
+      assert.deepEqual(JSON.parse(app.read('home/.clued/sessions/s1.json')).stopped, { 'bg-1': 'reload' })
     })
   })
 

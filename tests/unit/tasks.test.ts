@@ -7,7 +7,7 @@ import { notStarted, panelLines, waited } from '../../app/panel.ts'
 import type { Agent, PanelCtx } from '../../app/panel.ts'
 import type { Step, Turn } from '../../app/session.ts'
 import {
-  agentFor, agentIdOf, agentsFromTurns, currentTask, endRun, firstTask, messageText, resume, sendFailed, sendTask, taskArrived, taskTitle, todosOf, workingFor,
+  agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, currentTask, cutLabel, endRun, firstTask, messageText, resume, sendFailed, sendTask, taskArrived, taskTitle, todosOf, workingFor,
 } from '../../app/tasks.ts'
 import { C } from '../../app/text.ts'
 import type { Line } from '../../app/text.ts'
@@ -198,7 +198,7 @@ describe('tasks: from the session file', () => {
     assert.equal(a!.state, 'failed')
     assert.equal(a!.endedAt, NOW + 7)
   })
-  test('a foreground agent ends with its result; one with no end seen is done when the history ends', () => {
+  test('a foreground agent ends with its result; one with no end seen was stopped with its Claude Code', () => {
     const t = turn('go')
     t.steps = [
       step('f1', 'Task', { description: 'Look', prompt: 'Look.' }, { result: 'Found it.\nagentId: fg-1' }),
@@ -211,8 +211,21 @@ describe('tasks: from the session file', () => {
     const [look, plan, long, open] = agentsFromTurns([t, later])
     assert.deepEqual([look!.state, look!.result, look!.taskId], ['done', 'Found it.\nagentId: fg-1', 'fg-1'])
     assert.deepEqual([plan!.state, plan!.name, plan!.tasks[0]!.state], ['failed', 'Plan', 'failed'])
-    assert.deepEqual([long!.state, long!.tasks[0]!.state], ['stopped', 'failed'])
-    assert.deepEqual([open!.state, open!.endedAt, open!.tasks.map(x => x.state)], ['done', NOW + 100, ['done', 'done']])
+    // Stopped by Claude (killed): not by an exit, so nothing to continue.
+    assert.deepEqual([long!.state, long!.tasks[0]!.state, long!.cut], ['stopped', 'failed', undefined])
+    assert.equal(canContinue(long!), false)
+    // Still running when the session ended: Claude Code's exit stopped it, and it can go on.
+    assert.deepEqual([open!.state, open!.cut, open!.endedAt, open!.tasks.map(x => x.state)], ['stopped', 'exit', NOW + 100, ['failed', 'failed']])
+    assert.equal(cutLabel(open!), 'stopped when Claude Code exited')
+    assert.equal(canContinue(open!), true)
+    open!.cut = 'reload'
+    assert.equal(continueText(open!, 'James'), "Continue James's work (agent o-1): it was stopped when the app reloaded. Use SendMessage to it to resume.")
+    // A foreground one, or one with no id, can't be messaged.
+    assert.equal(canContinue({ ...open!, isBackground: false }), false)
+    assert.equal(canContinue({ ...open!, taskId: undefined }), false)
+    // Continued: it runs again, and the stop is behind it.
+    sendTask(open!, { message: 'Go on.' }, NOW + 200, [])
+    assert.deepEqual([open!.state, open!.cut, canContinue(open!)], ['running', undefined, false])
   })
 })
 

@@ -256,6 +256,13 @@ async function scenario(m: Msg) {
   }
   // Claude says it will do it later (its tag says it still owes work), and nothing works on it; on
   // release-later it goes on by itself with an agent for it.
+  // Asked to continue an agent an exit stopped: SendMessage resumes it, as Claude Code does.
+  const cont = m.text.match(/^Continue .*? \(agent ([\w-]+)\): it was stopped/)
+  if (cont) {
+    tool('cont-1', 'SendMessage', { to: cont[1], message: 'Go on from where you stopped.' })
+    toolResult('cont-1', `Agent ${cont[1]} was stopped; resumed it in the background with your message.`)
+    return finish(m, `Resumed ${cont[1]}.`, 'claude')
+  }
   if (t.includes('do it later')) {
     finish(m, "OK, I'll get to it after the current work.", 'claude')
     if (!(await release('later'))) return

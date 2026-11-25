@@ -71,6 +71,7 @@ export function agentIdOf(text: string | undefined, data?: unknown, strict = fal
 /** The agent runs again, from `at`: a queued task, if none is running, is the one it is on. */
 export function resume(a: Agent, at: number) {
   a.state = 'running'
+  delete a.cut
   a.startedAt = at
   delete a.endedAt
   delete a.result
@@ -103,6 +104,16 @@ export function sendTask(a: Agent, input: Record<string, unknown>, at: number, f
   if (!isBusy) resume(a, at)
   return task
 }
+
+/** What stopped an agent mid-run: the Claude Code it ran in exited, by /reload or otherwise. */
+export const cutLabel = (a: Agent) => (a.cut === 'reload' ? 'stopped when the app reloaded' : 'stopped when Claude Code exited')
+
+/** Only a background agent with an id can be continued: Claude sends it a message (SendMessage). */
+export const canContinue = (a: Agent) => a.state === 'stopped' && !!a.cut && a.isBackground && !!a.taskId
+
+/** Your message asking Claude to continue it (`name`: what the app calls it). */
+export const continueText = (a: Agent, name: string) =>
+  `Continue ${name}'s work (agent ${a.taskId}): it was ${cutLabel(a)}. Use SendMessage to it to resume.`
 
 /** A run ended: the tasks it covered (the running ones) are done, or failed with it. */
 export function endRun(a: Agent, state: 'done' | 'failed' | 'stopped', at: number) {
@@ -199,8 +210,8 @@ export function todosOf(log: AgentEntry[]): Todo[] {
 /**
  * The agents a session file shows, from its turns (loadHistory): each Agent call, the SendMessage
  * calls to it as its later tasks, and the ends of its runs (the Agent call's result, or a task
- * notification). The Claude Code that ran them has stopped: one still running at the end is done,
- * and so is every task it was sent.
+ * notification). The Claude Code that ran them has stopped: one still running at the end was
+ * stopped with it (cut: 'exit'; the app knows if it was a /reload), and so were its tasks.
  */
 export function agentsFromTurns(turns: Turn[]): Agent[] {
   const agents = new Map<string, Agent>()
@@ -262,6 +273,10 @@ export function agentsFromTurns(turns: Turn[]): Agent[] {
     endsAt(t.steps.length)
     last = Math.max(last, t.at + (t.durationMs ?? 0))
   }
-  for (const a of agents.values()) if (a.state === 'running') ended(a, 'done', last)
+  for (const a of agents.values())
+    if (a.state === 'running') {
+      ended(a, 'stopped', last)
+      a.cut = 'exit'
+    }
   return [...agents.values()]
 }

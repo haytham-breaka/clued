@@ -9,7 +9,7 @@ import type { Lang, Row } from './code.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
 import { roleOf } from './panel.ts'
 import type { Agent } from './panel.ts'
-import { currentTask, todosOf } from './tasks.ts'
+import { canContinue, currentTask, cutLabel, todosOf } from './tasks.ts'
 import type { AgentTask, Todo } from './tasks.ts'
 import { clock, cronWords, jobMark, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
@@ -59,6 +59,8 @@ export type ChatCtx = {
   /** An agent's name, and opening its view (for messages sent from inside one). */
   agentName: (id: string) => string | undefined
   openAgent: (id: string) => void
+  /** Asks Claude to continue an agent its Claude Code's exit stopped. */
+  continueAgent?: (id: string) => void
   /** Goes to one of your messages in the main chat (from an agent's task). */
   openMessage?: (t: Turn) => void
   /** A request's view draws only its chain: your messages in it, and the reply parts about it. */
@@ -786,6 +788,12 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
     out.push(...bubble(body, Math.max(snug(body, max), cells(tag.text) + 1), IN, { fg: ok ? C.green : C.red }, undefined, undefined, tag))
     out.push([pad(IN + 2), { text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(a.result ?? '') }])
   } else if (a.state === 'running') out.push([pad(IN), { text: `${ctx.spin} working · ${a.steps} step${a.steps === 1 ? '' : 's'} so far`, style: { fg: C.cyan } }])
+  // Stopped mid-run by Claude Code's exit: what happened, and going on from here.
+  if (a.state === 'stopped' && a.cut) {
+    out.push([])
+    out.push([pad(IN), { text: `■ ${cutLabel(a)}${canContinue(a) ? ', before it finished.' : '.'}`, style: { fg: C.gray, italic: true } },
+      ...(canContinue(a) && ctx.continueAgent ? [{ text: '  ▶ continue', style: { fg: C.cyan, bold: true }, action: () => ctx.continueAgent!(a.id) }] : [])])
+  }
   // Tasks it has not started: waiting their turn.
   tasks.forEach((t, n) => n && t.state === 'queued' && sent(n))
 

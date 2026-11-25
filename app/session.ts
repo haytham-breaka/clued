@@ -103,6 +103,8 @@ export type Kept = {
   links: Record<string, Link>
   /** Reply parts you have read (`<turn key>:<index>`). */
   read?: string[]
+  /** Agents still running when the app quit (Agent tool use id: how), so on resume they say why they stopped. */
+  stopped?: Record<string, 'reload' | 'exit'>
   /** Set once the parts there were when the app first opened this session were marked read. */
   readInit?: boolean
   /** 2: the replies Claude wrote by itself (after an agent, a job) have the same ids live and on resume. */
@@ -167,12 +169,14 @@ export function loadKept(sessionId: string, cwd: string): Kept {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
-export function saveKept(sessionId: string, kept: Kept) {
+export function saveKept(sessionId: string, kept: Kept, now = false) {
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
+  const write = () => {
     mkdirSync(DIR, { recursive: true })
     writeFileSync(`${DIR}/${sessionId}.json`, JSON.stringify(kept))
-  }, 300)
+  }
+  if (now) write()
+  else saveTimer = setTimeout(write, 300)
 }
 
 // ---- Claude Code's session files ------------------------------------------------

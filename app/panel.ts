@@ -6,7 +6,7 @@ import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
 import type { Step, Turn, Work } from './session.ts'
-import { currentTask } from './tasks.ts'
+import { canContinue, currentTask, cutLabel } from './tasks.ts'
 import type { AgentTask } from './tasks.ts'
 import { C, cells, clip } from './text.ts'
 import type { Line, Span } from './text.ts'
@@ -43,6 +43,8 @@ export type Agent = {
   alias?: string
   /** Rebuilt from the session file: the Claude Code that ran it has stopped. */
   isPast?: boolean
+  /** Stopped mid-run because the Claude Code it ran in ended: by /reload, or otherwise. */
+  cut?: 'reload' | 'exit'
 }
 
 const NAMES = ['James', 'Jake', 'Maya', 'Leo', 'Nora', 'Omar', 'Zoe', 'Ravi', 'Lina', 'Theo', 'Ivy', 'Sami', 'Ezra', 'Mia', 'Hugo', 'Yara', 'Finn', 'Aria', 'Kai', 'Rosa']
@@ -126,6 +128,8 @@ export type PanelCtx = {
   /** Opens an agent's own chat; which one is open. */
   openAgent: (id: string) => void
   agentView: string
+  /** Asks Claude to continue an agent its Claude Code's exit stopped (see canContinue). */
+  continueAgent?: (id: string) => void
   /** A click on one of your messages: the chat jumps to it, and it is the one Alt+→ answers from. */
   jumpTo: (turn: Turn) => void
   /** Opens one of your messages as a request: its whole chain. */
@@ -329,7 +333,8 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
 
   // ---- Who is working on what: Claude itself, then (a section of their own) the agents it started,
   // each with the messages it is on.
-  const shownAgents = p.agents.filter(a => a.state === 'running' || now - (a.endedAt ?? now) < AGENT_KEEP_MS)
+  // One an exit stopped stays a day: it may be continued.
+  const shownAgents = p.agents.filter(a => a.state === 'running' || now - (a.endedAt ?? now) < (a.cut && a.state === 'stopped' ? 24 * 3_600_000 : AGENT_KEEP_MS))
   /** Under each worker: the message it is on (a click goes to that message, for context) and its latest step. */
   const about = (rows: Line[], keys: string[], last: string, dim: boolean, openLast: () => void) => {
     const turns = keys.map(p.turnOf).filter((t): t is Turn => !!t)
@@ -374,11 +379,19 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         rows.push(row(iw, [{ text: '   ' }, { text: slide(`↳ task ${n + 1} of ${tasks}: ${a.tasks[n]!.title}`, p.hscroll), style: { fg: C.gray, dim: a.state !== 'running' }, action: open }]))
         about(rows, [], last, false, open)
       } else about(rows, a.for, last, a.state !== 'running', open)
+      // Stopped by Claude Code's exit (a /reload): say so, and offer to go on.
+      if (a.state === 'stopped' && a.cut)
+        rows.push(row(iw, [
+          { text: '   ' },
+          { text: cutLabel(a), style: { fg: C.gray }, action: open },
+          ...(canContinue(a) && p.continueAgent ? [{ text: '  ▶ continue', style: { fg: C.cyan, bold: true }, action: () => p.continueAgent!(a.id) }] : []),
+        ]))
     }
+    const stopped = shownAgents.filter(a => a.state === 'stopped' && a.cut).length
     sections.push({
       id: 'agents',
       cap: 12,
-      header: [row(width, [{ text: 'Agents', style: { bold: true, fg: C.magenta } }], [{ text: running ? `${running} working` : 'all done', style: { fg: running ? C.cyan : C.faint } }])],
+      header: [row(width, [{ text: 'Agents', style: { bold: true, fg: C.magenta } }], [{ text: running ? `${running} working` : stopped ? `${stopped} stopped` : 'all done', style: { fg: running ? C.cyan : stopped ? C.gray : C.faint } }])],
       rows,
     })
   }
