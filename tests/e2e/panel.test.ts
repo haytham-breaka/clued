@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { keyOf } from '../../hooks/model.ts'
-import { rowOf, withApp, writeSession } from './harness.ts'
+import { chatRowsWith, rowOf, withApp, writeSession } from './harness.ts'
 
 /** Any frame of the spinner a message something works on shows. */
 const SPIN = '[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]'
@@ -330,6 +330,52 @@ describe('panel', () => {
       const s = await app.waitFor('Not read yet.')
       assert.ok(s.includes('The background job is done.'))
       assert.equal(s.split('\n').filter(l => l.includes('● new')).length, 1, 'only the reply you had not read is new')
+    })
+  })
+
+  test('an unread update folded under a later one: a click in Unread opens the fold and goes to it', () => {
+    const note = (id: string) => `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Done</summary>\n</task-notification>`
+    const setup = (a: { home: string; work: string }) => {
+      widePanel(a)
+      writeSession(a.home, a.work, 'folded', [
+        { type: 'user', timestamp: '2026-11-25T10:00:00.000Z', message: { role: 'user', content: 'run the two agents' } },
+        { type: 'assistant', timestamp: '2026-11-25T10:00:01.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Both are running.' }] } },
+        { type: 'user', timestamp: '2026-11-25T10:05:00.000Z', message: { role: 'user', content: note('bg-1') } },
+        { type: 'assistant', timestamp: '2026-11-25T10:05:01.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The README PR is reopened.' }] } },
+        { type: 'user', timestamp: '2026-11-25T10:06:00.000Z', message: { role: 'user', content: note('bg-2') } },
+        { type: 'assistant', timestamp: '2026-11-25T10:06:01.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The second agent is done too.' }] } },
+      ])
+      // The later update was read; the earlier one, folded under it, never was.
+      mkdirSync(join(a.home, '.clued', 'sessions'), { recursive: true })
+      writeFileSync(join(a.home, '.clued', 'sessions', 'folded.json'), JSON.stringify({ board: {}, reactions: {}, links: {}, readInit: true, readIds: 2, read: [`${keyOf('run the two agents')}:0`, 'follow-bg-2:0'] }))
+    }
+    return withApp({ setup, args: ['--resume', 'folded'], unfocused: true, height: 40, width: 150 }, async app => {
+      let s = await app.waitFor('▸ 1 earlier update')
+      assert.match(s, /1 next ▸/)
+      assert.equal(chatRowsWith(s, 'The README PR is reopened.'), 0, 'folded: not in the chat yet')
+      await app.click('The README PR is reopened.', { area: 'panel' })
+      s = await app.waitFor('▾ hide 1 earlier update')
+      assert.equal(chatRowsWith(s, 'The README PR is reopened.'), 1, 'the click lands on it')
+      assert.ok(!s.includes("Couldn't find"))
+    })
+  })
+
+  test('a reply no longer in the chat: a click says so and counts it read, never nothing', () => {
+    const setup = (a: { home: string; work: string }) => {
+      widePanel(a)
+      writeSession(a.home, a.work, 'stale', [
+        { type: 'user', timestamp: '2026-11-25T10:00:00.000Z', message: { role: 'user', content: 'hello there' } },
+        { type: 'assistant', timestamp: '2026-11-25T10:00:01.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Hi.' }] } },
+      ])
+      mkdirSync(join(a.home, '.clued', 'sessions'), { recursive: true })
+      // Saved under an id no turn has now (the reply's turn is gone from the session file).
+      const saved = [{ anchor: 'part:follow-gone:0', who: 'claude', text: 'A reply that went away.', at: Date.parse('2026-11-25T09:00:00.000Z') }]
+      writeFileSync(join(a.home, '.clued', 'sessions', 'stale.json'), JSON.stringify({ board: {}, reactions: {}, links: {}, readInit: true, readIds: 2, read: [`${keyOf('hello there')}:0`], saved }))
+    }
+    return withApp({ setup, args: ['--resume', 'stale'], unfocused: true, height: 34, width: 150 }, async app => {
+      await app.waitFor('A reply that went away.')
+      await app.click('A reply that went away.', { area: 'panel' })
+      await app.waitFor('That reply is no longer in the chat: marked it read.')
     })
   })
 

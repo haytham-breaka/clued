@@ -31,7 +31,7 @@ import {
   settleTurn,
   stripTag,
 } from '../hooks/model.ts'
-import { agentLines, chatLines, heldLines, jobLines, requestLines, shellLines, stepLabel } from './chat.ts'
+import { agentLines, chatLines, heldLines, jobLines, requestLines, revealPart, shellLines, stepLabel } from './chat.ts'
 import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.ts'
 import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
@@ -646,6 +646,12 @@ function chainSize(turn: Turn): number {
 function openPart(id: string) {
   closeAgent()
   S.lastJump = id
+  // An update folded under a later one is drawn once its fold is open. A part no turn holds any
+  // more can't be gone to: counted read, so it doesn't sit in Unread for good.
+  if (!revealPart(S.turns, id)) {
+    markRead([id])
+    return toast('That reply is no longer in the chat: marked it read.')
+  }
   if (S.anchors[`part:${id}`] == null) {
     S.isResultsOnly = false
   }
@@ -2671,9 +2677,18 @@ function paint() {
   S.chatTotal = chat.length
   S.chatRows = chatRows
   if (S.pendingJump) {
-    const at = anchors[S.pendingJump]
+    const jump = S.pendingJump
+    const at = anchors[jump]
     S.pendingJump = ''
-    if (at == null) setImmediate(() => toast('Couldn\'t find that message in this view.'))
+    // A reply the chat can't draw: counted read, or it would stay in Unread with nowhere to go.
+    const part = jump.startsWith('part:') ? jump.slice(5) : ''
+    if (at == null)
+      setImmediate(() => {
+        if (part && !S.read.has(part)) {
+          markRead([part])
+          toast('Couldn\'t find that reply in the chat: marked it read.')
+        } else toast('Couldn\'t find that message in this view.')
+      })
     else S.chatScroll = Math.max(0, chat.length - at - Math.floor((chatRows * 2) / 3))
   }
   S.chatScroll = Math.max(0, Math.min(S.chatScroll, chat.length - chatRows))

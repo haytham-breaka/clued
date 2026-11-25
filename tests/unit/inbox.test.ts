@@ -2,6 +2,8 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyBoard, keyOf } from '../../hooks/model.ts'
 import { answerGist, assignParts, lostRepliesAsked, hasMarks, inbox, lostRepliesPrompt, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
+import { chatLines, foldedUpdates, revealPart } from '../../app/chat.ts'
+import type { ChatCtx } from '../../app/chat.ts'
 import type { Turn } from '../../app/session.ts'
 import type { Board, Topic } from '../../types/index.d.ts'
 
@@ -328,5 +330,57 @@ describe('a follow-up merged into a topic that waits on you', () => {
     assert.deepEqual(state([first.key]), { 'Add a': 'me', Rejec: 'done' })
     // A question the follow-up's reply raised is the follow-up's, not the first message's.
     assert.deepEqual(state([follow.key]), { 'Add a': 'done', Rejec: 'me' })
+  })
+})
+
+describe('an unread part folded out of sight', () => {
+  const noop = () => {}
+  const draw = (turns: Turn[], unread: Set<string>) => chatLines({
+    turns, kept: { board: emptyBoard(), reactions: {}, links: {} }, isResultsOnly: false, cwd: '/tmp/w', now: NOW, spin: '⠋',
+    toggle: noop, reply: noop, replying: new Set(), react: noop, jump: noop, copy: noop, hover: '', unread, waiting: new Set(),
+    messageOf: () => undefined, replyOf: () => undefined, isLost: () => false, chainOf: () => 0, openChain: noop, askAgain: noop, work: 'folded', poke: noop,
+    isWorking: false, agentName: () => undefined, openAgent: noop, setRead: noop, dismiss: noop,
+  } as ChatCtx, 100)
+  // Two agents report on the same message, one after the other: the chat folds the first under the second.
+  const setup = () => {
+    const ask = turn('run the agents', { topicId: 'T1', answer: 'Both are running.' })
+    const one = turn('', { key: 'follow-a1', followUp: [ask.key], answer: 'The README PR is reopened.' })
+    const two = turn('', { key: 'follow-a2', followUp: [ask.key], answer: 'The second agent is done.' })
+    const turns = [ask, one, two]
+    const board = boardOf(topic('T1', [ask.key], 'done'))
+    assignParts(turns, board)
+    return { turns, board, one, two }
+  }
+
+  test('it stays in Unread though the chat draws no anchor for it (the bug: a click went nowhere)', () => {
+    const { turns, board, one, two } = setup()
+    assert.equal(foldedUpdates(turns).foldedInto.get(one), two)
+    const read = new Set([partId(turns[0]!, 0), partId(two, 0)])
+    const { unread } = inbox(turns, board, read)
+    assert.deepEqual(unread.map(u => u.id), ['follow-a1:0'])
+    assert.equal(draw(turns, new Set(['follow-a1:0'])).anchors['part:follow-a1:0'], undefined)
+  })
+
+  test('revealPart opens the fold it is in, so the jump finds it', () => {
+    const { turns, two } = setup()
+    assert.equal(revealPart(turns, 'follow-a1:0'), true)
+    assert.equal(two.showUpdates, true)
+    const out = draw(turns, new Set(['follow-a1:0']))
+    assert.equal(typeof out.anchors['part:follow-a1:0'], 'number')
+    assert.ok(out.lines.some(l => l.map(sp => sp.text).join('').includes('▾ hide 1 earlier update')))
+  })
+
+  test('a part shown already is left as it is; ids from before parts had theirs still match', () => {
+    const { turns, two } = setup()
+    assert.equal(revealPart(turns, 'follow-a2:0'), true)
+    assert.equal(two.showUpdates, undefined)
+    const old = turn('', { key: 'old', answer: 'x', parts: [{ to: [], text: 'x' }] })
+    assert.equal(revealPart([old], 'old:0'), true)
+  })
+
+  test('a stale id no turn holds: nothing to go to (the app marks it read and says so)', () => {
+    const { turns } = setup()
+    assert.equal(revealPart(turns, 'follow-gone:0'), false)
+    assert.ok(turns.every(t => !t.showUpdates))
   })
 })

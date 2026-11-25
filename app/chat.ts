@@ -365,6 +365,42 @@ const deletedLine = (turn: Turn, width: number): Line => {
   return [pad(Math.max(0, width - cells(t) - 1)), { text: t, style: { fg: C.gray, italic: true } }]
 }
 
+/**
+ * Updates Claude sent by itself (an agent reporting in) on the same messages, one after another,
+ * fold into the latest: the chain keeps one bubble for them, the earlier ones a click away.
+ * `earlier`: the latest of a run → the ones folded under it; `foldedInto`: each of those → the latest.
+ */
+export function foldedUpdates(turns: Turn[]): { earlier: Map<Turn, Turn[]>; foldedInto: Map<Turn, Turn> } {
+  const earlier = new Map<Turn, Turn[]>()
+  const foldedInto = new Map<Turn, Turn>()
+  const aboutOf = (t: Turn) => [...new Set((t.parts ?? []).flatMap(p => p.to))].sort().join(',')
+  let run: Turn[] = []
+  for (const t of turns) {
+    if (t.followUp && t.parts?.length) {
+      if (run.length && aboutOf(run[0]!) !== aboutOf(t)) run = []
+      run.push(t)
+      if (run.length > 1) {
+        for (const x of run.slice(0, -1)) foldedInto.set(x, t)
+        earlier.set(t, run.slice(0, -1))
+        earlier.delete(run.at(-2)!)
+      }
+    } else if (!(t.followUp && !t.parts?.length && !t.steps.length)) run = []
+  }
+  return { earlier, foldedInto }
+}
+
+/**
+ * Gets a reply part ready to be gone to in the main chat: an update folded under a later one is only
+ * drawn once that fold is open, so it opens it. False: no turn holds that part (nothing to go to).
+ */
+export function revealPart(turns: Turn[], id: string): boolean {
+  const turn = turns.find(t => (t.parts ?? []).some((p, i) => (p.id ?? `${t.key}:${i}`) === id))
+  if (!turn) return false
+  const latest = foldedUpdates(turns).foldedInto.get(turn)
+  if (latest) latest.showUpdates = true
+  return true
+}
+
 export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
   const out: Line[] = []
   const anchors: Record<string, number> = {}
@@ -382,23 +418,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     owned = out.length
   }
 
-  // Updates Claude sent by itself (an agent reporting in) on the same messages, one after another,
-  // fold into the latest: the chain keeps one bubble for them, the earlier ones a click away.
-  const earlier = new Map<Turn, Turn[]>()
-  const foldedInto = new Map<Turn, Turn>()
-  const aboutOf = (t: Turn) => [...new Set((t.parts ?? []).flatMap(p => p.to))].sort().join(',')
-  let run: Turn[] = []
-  for (const t of ctx.turns) {
-    if (t.followUp && t.parts?.length) {
-      if (run.length && aboutOf(run[0]!) !== aboutOf(t)) run = []
-      run.push(t)
-      if (run.length > 1) {
-        for (const x of run.slice(0, -1)) foldedInto.set(x, t)
-        earlier.set(t, run.slice(0, -1))
-        earlier.delete(run.at(-2)!)
-      }
-    } else if (!(t.followUp && !t.parts?.length && !t.steps.length)) run = []
-  }
+  const { earlier, foldedInto } = foldedUpdates(ctx.turns)
 
   for (const turn of ctx.turns) {
     owned = out.length
