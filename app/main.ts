@@ -1314,6 +1314,11 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     const raised = raiseTopic(S.kept.board, { text, key: turn.key, replyTo: null }, now)
     turn.topicId = raised.topicId
     hidden = flatBrief(raised.board, raised.topicId, reply?.quotes ?? [])
+    // Sent while Claude works: Claude Code hands it over at Claude's next step, where it is easy to
+    // take in as part of the work and leave unanswered.
+    const busyOn = S.turns.filter(x => !x.isDone && !x.reaction && x.topicId).map(x => x.topicId!)
+    if (busyOn.length)
+      hidden = `${hidden}\nSent while you were working on ${busyOn.join(', ')}: answer it in its own part (<<reply ${raised.topicId}>>) as soon as you have the answer, then go on with that work.`
     // A reply to a message Claude no longer holds word for word: its request's chain comes along.
     const chain = reply?.quotes.length === 1 ? chainFor(reply.quotes[0]!) : ''
     if (chain) hidden = `${hidden}\n${chain}`

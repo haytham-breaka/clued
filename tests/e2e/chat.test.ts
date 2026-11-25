@@ -288,6 +288,13 @@ describe('chat', () => {
       const sent = app.claudeLog().filter(e => e.type === 'user')
       assert.equal(sent.length, 2)
       assert.ok(sent.every(e => /^[0-9a-f-]{36}$/.test(e.uuid)))
+      // The one sent while Claude worked says so in its note, and asks for its own reply part; the first doesn't.
+      const notes = app.sent().map(m => m.note)
+      assert.doesNotMatch(notes[0]!, /Sent while you were working/)
+      assert.match(notes[1]!, /Sent while you were working on T1: answer it in its own part \(<<reply T2>>\)/)
+      // And the system prompt says why.
+      const start = app.claudeLog()[0].args as string[]
+      assert.match(start[start.indexOf('--append-system-prompt') + 1]!, /A message the user sends while you work reaches you at your next step/)
       // Both messages are answered.
       assert.match(s, /✓ and another thing/)
       assert.match(s, /✓ hold on/)
