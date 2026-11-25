@@ -143,6 +143,10 @@ node --no-warnings eval/visibility.ts --in eval/results/burst --out eval/results
 
   They run 2 at a time.
 - **Budget, ledger and cache.** Every call is logged in `results/visibility/raw/ledger.jsonl`. A call that could pass `--budget` (spent so far plus 1.5 × the dearest call of its kind) is not made. Answers are cached by prompt in `results/visibility/raw/cache/`, so re-scoring costs nothing.
+- **Re-reading only what changed.**
+  - `--truth-from <results.json>` takes the ground truth from an earlier run (no truth calls).
+  - `--readers-from <results.json>` takes readers whose screens didn't change (by default `B glance,B full read`, set with `--readers`) from an earlier run: its `misses` list every pair they got wrong, so every other pair was right. It reproduces the saved scores exactly.
+  - `--arms A` makes model calls for arm A only; `--only <file>` glances only the frames listed (lines `<scenario>-<arm>-r<rep> <label>`), such as the ones a change redrew.
 - **Inputs and outputs.** `--in` (default `results/hard`) and `--raw` say where the saved runs are; `--out` (default `results/visibility`) is where `results.json` and `summary.md` go. These hold ids, states and scores only, with no transcript text.
 
 ## Caveats

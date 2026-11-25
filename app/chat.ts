@@ -269,6 +269,9 @@ function bubble(body: Line[], inner: number, left: number, border: Style, header
   return out
 }
 
+/** A reply part this short (in lines) is drawn without a box. */
+export const COMPACT_LINES = 2
+
 /** The widest line of `text` wrapped at `max`, so short messages get snug bubbles. */
 const snug = (lines: Line[], max: number) => Math.min(max, Math.max(8, ...lines.map(lineCells)))
 
@@ -522,7 +525,18 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
         const anchor = `part:${id}`
         const isPicked = ctx.replying.has(anchor)
         const pick: Span | undefined = multi && isPicked ? { text: '✓ in your reply', style: { fg: C.cyan, bold: true }, action: () => ctx.reply('claude', turn, [i]) } : undefined
-        out.push(...bubble(rows, inner, IN, { fg: isPicked ? C.cyan : isUnread ? C.magenta : asks ? C.yellow : C.faint }, undefined, undefined, tag, pick))
+        // In an answer of several parts, a short one to one message (one or two lines) needs no box: the
+        // quote on a line, the answer under it, so a burst of short answers fits on one screen. A question
+        // for you keeps its box, and so does an answer of one part.
+        if (multi && body.length <= COMPACT_LINES && quotes.length === 1 && !asks && tag) {
+          const go = tag.action
+          const head: Span[] = [pad(IN)]
+          if (isUnread) head.push({ text: '● ', style: { fg: C.magenta, bold: true } })
+          head.push({ text: '↩ ', style: { fg: C.cyan }, ...(go ? { action: go } : {}) }, { text: clip(quote.slice(2), claudeMax - 4), style: { fg: isPicked ? C.cyan : C.gray, italic: true }, ...(go ? { action: go } : {}) })
+          if (pick) head.push(pad(2), pick)
+          out.push(head)
+          for (const l of body) out.push([pad(IN + 2), ...l])
+        } else out.push(...bubble(rows, inner, IN, { fg: isPicked ? C.cyan : isUnread ? C.magenta : asks ? C.yellow : C.faint }, undefined, undefined, tag, pick))
         if (asks) out.push([pad(IN + 2), { text: '✋ waiting for your answer', style: { fg: C.yellow } }, { text: '   ✕ dismiss', style: { fg: C.gray }, action: () => ctx.dismiss([id]) }])
         anchors[`partEnd:${id}`] = out.length
         if (multi) {

@@ -28,6 +28,31 @@ describe('chat', () => {
       assert.match(app.read('home/.clued/sent.log'), /sent \{"session":"s1","topic":"T1","text":"hello there"/)
     }))
 
+  test('short parts of a reply have no box: the quote on a line, the answer under it; long ones keep it', () =>
+    withApp({ unfocused: true }, async app => {
+      for (const m of ['alpha', 'beta']) {
+        await app.send(m)
+        await app.waitFor(`Echo: ${m}`)
+      }
+      await app.send('short answers please')
+      const s = await app.waitFor('Long line 4 of the last answer.')
+      // The chat side only (right of the panel's divider).
+      const div = app.divider()
+      const lines = s.split('\n').map(l => [...l].slice(div + 1).join(''))
+      const one = lines.findIndex(l => l.includes('Short answer 1.'))
+      assert.ok(one > 0, 'the short part is shown')
+      assert.match(lines[one - 1]!, /↩ “alpha”/)
+      assert.ok(!lines[one - 1]!.includes('╭') && !lines[one]!.includes('│'), 'no box around a short part')
+      assert.match(lines[lines.findIndex(l => l.includes('Short answer 2.')) - 1]!, /↩ “beta”/)
+      // The long part keeps its bubble.
+      assert.ok(lines.some(l => l.includes('╭─') && l.includes('↩ “short answers please”')))
+      // Its actions are where a bubble's are: on hover, in the row under it.
+      await app.hover('Short answer 1.', { area: 'chat' })
+      await app.waitFor(x => x.split('\n').some((l, i, all) => all[i - 1]?.includes('Short answer 1.') && l.includes('↩ reply')))
+      await app.click('↩ reply', { area: 'chat' })
+      await app.waitFor('Replying to Claude')
+    }))
+
   test('a reply in two parts with <<reply T1>>: one bubble each, quoting its own message', () =>
     withApp({ unfocused: true }, async app => {
       await app.send('first message')

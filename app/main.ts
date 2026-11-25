@@ -1472,7 +1472,7 @@ function selCells(line: number): [number, number] | undefined {
   return [line === p.line ? p.col : 0, line === q.line ? q.col + 1 : Infinity]
 }
 
-/** The selected text. From the chat, without bubble borders and with the common indent removed. */
+/** The selected text. From the chat, without bubble borders or quote lines, and with the common indent removed. */
 function selectedText(): string {
   const sel = S.sel
   if (!sel) return ''
@@ -1486,7 +1486,8 @@ function selectedText(): string {
   if (lines.length > 1 || /[│┃▎╭╮╰╯]/.test(lines[0] ?? '')) {
     lines = lines
       .map(l => l.replace(/^\s*[│┃▎]\s?/, '').replace(/\s?[│┃]\s*$/, '').replace(/\s+$/, ''))
-      .filter(l => !l || !(/^[\s─╭╮╰╯]*$/.test(l) || /^\s*[╭╰]─/.test(l)))
+      // Borders, and the quote line over a short reply drawn without a box (● ↩ “your message”).
+      .filter(l => !l || !(/^[\s─╭╮╰╯]*$/.test(l) || /^\s*[╭╰]─/.test(l) || /^\s*(● )?↩ [“y]/.test(l)))
     // The common indent, not counting a first line that starts mid-row (past text it copies: a code
     // block's gutter is not copied, so a selection from there takes whole lines).
     const isMidRow = p.col > 0 && cellText(S.chatLines[p.line] ?? [], 0, p.col) !== ''

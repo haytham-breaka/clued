@@ -12,7 +12,8 @@
 // against rules built from the scenario facts. The deterministic half is in visibility-core.ts.
 //
 //   node --no-warnings eval/visibility.ts [--in eval/results/hard] [--raw <dir>] [--out eval/results/visibility]
-//        [--truth-judge | --truth-from <results.json>] [--glance] [--full] [--budget 3] [--dry] [--run <scenario>-<arm>-r<rep> [--screens]]
+//        [--truth-judge | --truth-from <results.json>] [--glance] [--full] [--arms A,B] [--readers-from <results.json> [--readers "B glance,B full read"]]
+//        [--budget 3] [--dry] [--run <scenario>-<arm>-r<rep> [--screens]]
 //
 // See eval/README.md ("Visibility") and eval/RESULTS.md ("Can you see what was answered?").
 
@@ -140,7 +141,7 @@ const GLANCE_SYSTEM = [
 ].join(' ')
 
 const LEGEND = {
-  A: 'The screen is the clued app. Left, its panel: "Unread" lists new replies, "Waiting on you" lists questions for you, and "Your recent messages" lists your messages newest first with a mark: ⏳ Claude is on it, no reply yet; ▶ replied, still owes work; ⠋ in progress: being worked on; ✋ waiting on you; ✓ done; ✕ failed; ○ not answered; ⚠ reply lost. Right, the end of the chat: your messages, and Claude\'s replies as bubbles headed with ↩ and the message each answers.',
+  A: 'The screen is the clued app. Left, its panel: "Unread" lists new replies, "Waiting on you" lists questions for you, and "Your recent messages" lists your messages newest first with a mark: ⏳ Claude is on it, no reply yet; ▶ replied, still owes work; ⠋ in progress: being worked on; ✋ waiting on you; ✓ done; ✕ failed; ○ not answered; ⚠ reply lost. Right, the end of the chat: your messages, and Claude\'s replies, each headed with ↩ and the message it answers (short replies without a box, the answer on the line under the ↩).',
   B: 'The screen is Claude Code in a terminal: lines starting with ">" are your messages; lines starting with "⏺" are Claude\'s text and its tool calls (⎿ the tool\'s result).',
 }
 
@@ -317,11 +318,33 @@ async function main() {
         }
       }
 
+  // Readers whose screens didn't change (plain Claude Code) can be taken from an earlier run's results:
+  // its misses list every pair a reader got wrong, so every other pair was right.
+  const readersFrom = get('--readers-from')
+  if (readersFrom) {
+    const old = JSON.parse(readFileSync(resolve(readersFrom), 'utf8')) as { misses: { reader: string; run: string; frame: string; msg: string; claim: Verdict['claim']; link?: false }[]; scores: Record<string, unknown>; perRun: Record<string, Record<string, unknown>> }
+    for (const name of (get('--readers', 'B glance,B full read')!).split(',')) {
+      if (!old.scores[name]) continue
+      const missed = new Map(old.misses.filter(x => x.reader === name).map(x => [`${x.run}|${x.frame}|${x.msg}`, x]))
+      const arm = name[0]
+      for (const { p } of pairs) {
+        // Only the runs it read (a call that failed has no verdicts).
+        if (p.arm !== arm || !old.perRun[name]?.[p.run] || (name.includes('full') && p.frame !== 'end')) continue
+        const x = missed.get(pk(p))
+        reader(name).set(pk(p), { claim: x ? x.claim : p.truth, ...(p.checkable ? { link: x?.link !== false } : {}) })
+      }
+    }
+  }
+  // Only these arms are read by the model (the others may come from --readers-from).
+  const arms = get('--arms', 'A,B')!.split(',')
+
   // 3. The glance: one call per frame and arm.
   if (args.includes('--glance')) {
-    const frames = prepared.flatMap(prep => prep.frames.map(f => ({ prep, f })))
+    const frames = prepared.filter(prep => arms.includes(prep.run.arm)).flatMap(prep => prep.frames.map(f => ({ prep, f })))
     const which = get('--frames', 'all')
-    const chosen = frames.filter(x => which === 'all' || (which === 'end' && x.f.label === 'end'))
+    // --only <file>: just these frames (lines "<scenario>-<arm>-r<rep> <label>"), e.g. the ones a change redrew.
+    const only = get('--only') ? new Set(readFileSync(resolve(get('--only')!), 'utf8').split('\n').filter(Boolean)) : undefined
+    const chosen = frames.filter(x => (which === 'all' || (which === 'end' && x.f.label === 'end')) && (!only || only.has(`${keyOf(x.prep.run)} ${x.f.label}`)))
     await pool(chosen, CALLS, async ({ prep, f }) => {
       const v = parseJson(await caller.ask('glance', `${keyOf(prep.run)}-${f.label.replace(/\s+/g, '')}`, glanceModel, GLANCE_SYSTEM, glancePrompt(prep.run.arm, prep.run, f), 0.004))
       score(prep, f, v, `${prep.run.arm} glance`)
@@ -329,7 +352,7 @@ async function main() {
   }
   // The full read, at the end only: what a reader gets who scrolls through everything.
   if (args.includes('--full')) {
-    await pool(prepared, CALLS, async prep => {
+    await pool(prepared.filter(prep => arms.includes(prep.run.arm)), CALLS, async prep => {
       const f = prep.frames.at(-1)!
       const v = parseJson(await caller.ask('full', keyOf(prep.run), glanceModel, FULL_SYSTEM, glancePrompt(prep.run.arm, prep.run, f, true), 0.006))
       score(prep, f, v, `${prep.run.arm} full read`)

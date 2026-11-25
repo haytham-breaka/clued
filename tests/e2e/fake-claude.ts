@@ -49,6 +49,8 @@ const result = (extra: Record<string, unknown> = {}) =>
   out({ type: 'result', subtype: 'success', is_error: false, result: '', usage, total_cost_usd: 0.0123, duration_ms: 1500, session_id: sessionId, modelUsage: { [MODEL]: { contextWindow: 200_000 } }, ...extra })
 
 let previous = ''
+/** Every message's topic so far, oldest first. */
+const topics: string[] = []
 /** Messages that arrived while a turn ran: Claude Code folds them into it, and the answer covers them. */
 let joined: Msg[] = []
 let busy = false
@@ -66,6 +68,13 @@ function finish(m: Msg, text: string, status = 'done', extra: Record<string, unk
 async function scenario(m: Msg) {
   const t = m.text.toLowerCase()
   const cwd = process.cwd()
+  // A burst answered at once: a short part for every message so far, one long, and one that asks.
+  if (t.includes('short answers')) {
+    const parts = topics.map((id, i) => `<<reply ${id}>>\nShort answer ${i + 1}.`)
+    parts.push(`<<reply ${m.topic}>>\n${Array.from({ length: 4 }, (_, i) => `Long line ${i + 1} of the last answer.`).join('\n\n')}`)
+    say(`${parts.join('\n\n')}\n${tag([...topics.map(id => ({ id, status: 'done' })), { id: m.topic, status: 'done' }])}`)
+    return result()
+  }
   if (t.includes('please split')) {
     say(`<<reply ${previous}>>\nMore about your first message: part one.\n\n<<reply ${m.topic}>>\nAnd this part answers the split request.\n${tag([{ id: previous, status: 'done' }, { id: m.topic, status: 'done' }])}`)
     return result()
@@ -322,6 +331,7 @@ async function run() {
     const m = queue.shift()!
     await scenario(m)
     if (!m.text.toLowerCase().includes('please split')) previous = m.topic
+    topics.push(m.topic)
   }
   busy = false
 }
