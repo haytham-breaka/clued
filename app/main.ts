@@ -626,6 +626,12 @@ function onEvent(e: ClaudeEvent) {
       if (t) {
         // Text with reply marks before more work is a reply written early: shown now, kept as parts.
         if (hasMarks(t.pending)) {
+          // Its own tag, if it has one, settles those messages now rather than at the end of the turn.
+          if (/<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/.test(t.pending)) {
+            // Only the topics it lists: the messages it leaves out are still being worked on.
+            const was = S.kept.board.turnTopics
+            S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, Date.now(), { flat: true }).board, turnTopics: was }
+          }
           t.early = [...(t.early ?? []), stripTag(t.pending)]
           // Kept by the app too: the transcript may lose it.
           const kept = { ...S.kept.early, [t.key]: t.early }
