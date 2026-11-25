@@ -18,15 +18,18 @@ const text = (l: Line) => l.map(s => s.text).join('')
 
 /** A Btw whose side Claude Codes are stubs: what they were started with, got, and how they end. */
 function harness() {
-  const sides: { opts: Options; emit: (e: ClaudeEvent) => void; sent: [string, string | undefined][]; closed: number; answers: unknown[] }[] = []
+  const sides: { opts: Options; emit: (e: ClaudeEvent) => void; sent: [string, string | undefined][]; uuid?: string; closed: number; answers: unknown[] }[] = []
   let draws = 0
   const btw = new Btw(
     () => draws++,
     (opts, emit) => {
-      const side = { opts, emit, sent: [] as [string, string | undefined][], closed: 0, answers: [] as unknown[] }
+      const side = { opts, emit, sent: [] as [string, string | undefined][], uuid: undefined as string | undefined, closed: 0, answers: [] as unknown[] }
       sides.push(side)
       return {
-        send: (t: string, hidden?: string) => void side.sent.push([t, hidden]),
+        send: (t: string, hidden?: string, _images?: unknown, uuid?: string) => {
+          side.sent.push([t, hidden])
+          if (uuid) side.uuid = uuid
+        },
         close: () => void side.closed++,
         answerPermission: (id: string, allow: boolean) => void side.answers.push(['permission', id, allow]),
         answerAsk: (id: string, _input: Record<string, unknown>, dismissed?: string) => void side.answers.push(['ask', id, dismissed]),
@@ -88,6 +91,7 @@ describe('btw', () => {
     sides[0]!.emit(result('Prompt is too long', true))
     assert.deepEqual([a.state, a.error], ['failed', 'Prompt is too long'])
     const b = btw.ask('2', at)
+    sides[1]!.emit({ kind: 'received', uuid: sides[1]!.uuid! })
     sides[1]!.emit(result(''))
     assert.deepEqual([b.state, b.error], ['failed', 'No answer came back.'])
     const c = btw.ask('3', at)
@@ -99,6 +103,22 @@ describe('btw', () => {
     const lines = btw.lines(d, 60, draw).map(text)
     assert.ok(lines.some(l => l.includes('✕ The side question stopped')))
     assert.ok(!lines.some(l => l.includes('⧉ copy')))
+  })
+
+  test('a resumed session ending a turn of its own first (an agent end told to the fork) is not the answer', () => {
+    const { btw, sides } = harness()
+    const a = btw.ask('q', { sessionId: '', model: '', cwd: CWD, after: '' })
+    assert.ok(sides[0]!.uuid, 'the question goes with an id, to know its echo')
+    sides[0]!.emit(result(''))
+    assert.equal(a.state, 'asking')
+    // Another message's echo doesn't count.
+    sides[0]!.emit({ kind: 'received', uuid: 'someone-else' })
+    sides[0]!.emit(result(''))
+    assert.equal(a.state, 'asking')
+    sides[0]!.emit({ kind: 'received', uuid: sides[0]!.uuid! })
+    sides[0]!.emit({ kind: 'text', text: 'The answer.' })
+    sides[0]!.emit(result(''))
+    assert.deepEqual([a.state, a.answer], ['answered', 'The answer.'])
   })
 
   test('asides go in after the message they were asked after; anchors and owners move with the lines', () => {

@@ -4,6 +4,7 @@
 // the fork writes no file of its own. It has no tools, works while Claude is busy, and ends once
 // it has answered. The answer shows in the chat as a dimmed aside: no topic, no part, no unread.
 
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { Claude } from './claude.ts'
 import type { ClaudeEvent, Options } from './claude.ts'
@@ -87,9 +88,16 @@ export class Btw {
     this.asides.push(a)
     let streamed = ''
     let said = ''
+    // Claude Code took the question in (its echo). A resumed session can end a turn of its own first,
+    // empty (a background agent's end, told to the fork): that is not the answer.
+    const uuid = randomUUID()
+    let taken = false
     const side = this.spawn({ args: btwArgs(sessionId, at.model), cwd: at.cwd, appendSystemPrompt: BTW_PROMPT }, e => {
       if (a.state !== 'asking') return
       switch (e.kind) {
+        case 'received':
+          if (e.uuid === uuid) taken = true
+          return
         case 'text-delta':
           streamed += e.text
           a.answer = cleanAnswer(streamed)
@@ -107,6 +115,7 @@ export class Btw {
           return
         case 'result': {
           const text = cleanAnswer(said || e.text || streamed)
+          if (!taken && !text && !e.isError) return
           if (e.isError || !text) {
             a.state = 'failed'
             a.error = e.isError && e.text ? e.text : 'No answer came back.'
@@ -128,7 +137,7 @@ export class Btw {
       this.changed()
     })
     this.live.set(a.id, side)
-    side.send(question, BTW_NOTE)
+    side.send(question, BTW_NOTE, [], uuid)
     this.changed()
     return a
   }
