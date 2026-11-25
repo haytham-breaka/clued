@@ -300,7 +300,10 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     // answers). Taking the answer's first part instead linked "answered" to some other message's reply
     // when its own reply never arrived. History from before the app has no topics: there it is the answer.
     const replyId = latest?.id ?? own?.id ?? (topicId || topic ? undefined : by?.parts?.[0]?.id)
-    const isBusy = live.busy.has(turn.key) || (!!topic && busyTopics.has(topic.id))
+    // A question your message was taken to answer (a guess until Claude's tag takes it up): Claude's
+    // turn is on that answer now, so it is being worked on, not waiting for someone to start it.
+    const guessed = !!topic?.answerGuessed && live.isWorking
+    const isBusy = live.busy.has(turn.key) || (!!topic && busyTopics.has(topic.id)) || guessed
     // "claude" after a settled tag means Claude still owes work: an "OK, I'll do it" is not done.
     const owes = !!topic && !topic.isProvisional && topic.status === 'claude'
     const reply = replyId ? parts.find(p => p.id === replyId) : undefined

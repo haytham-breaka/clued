@@ -163,6 +163,19 @@ describe('inbox', () => {
     assert.equal(st([agent], boardOf(topic('T1', [agent.key], 'claude', { isProvisional: true })), live({ busy: new Set([agent.key]) })).state, 'progress')
   })
 
+  test('a question your next message was taken to answer is being worked on while Claude works, not waiting to start', () => {
+    const asked = turn('should done take text?', { topicId: 'T3', answer: 'Want me to catch errors too?' })
+    const board = boardOf(topic('T3', [asked.key], 'claude', { answerGuessed: true }))
+    assignParts([asked], board)
+    const m = inbox([asked], board, new Set(), live({ isWorking: true, now: NOW + STALE_MS + 1 })).messages[0]!
+    assert.equal(m.state, 'progress')
+    assert.equal(m.active, true)
+    assert.equal(m.stale, undefined)
+    // Not a guess: Claude working on something else isn't on it.
+    const owes = boardOf(topic('T3', [asked.key], 'claude'))
+    assert.equal(inbox([asked], owes, new Set(), live({ isWorking: true })).messages[0]!.active, undefined)
+  })
+
   test('in progress with nothing working on it for a while is stale', () => {
     const owes = turn('owes', { topicId: 'T1', answer: 'On it.' })
     const board = boardOf(topic('T1', [owes.key], 'claude'))
