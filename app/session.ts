@@ -462,11 +462,27 @@ export type AgentFileEntry = (
   | { kind: 'prompt'; text: string }
 ) & { at: number }
 
+/** How Claude Code writes a message Claude sends a running agent (SendMessage): hidden, in these words. */
+const SENT = 'The coordinator sent a message while you were working:\n'
+const SENT_END = '\n\nAddress this before completing your current task.'
+/** The message in Claude Code's words around it (it is written exactly as sent). */
+export const sentMessage = (t: string) => {
+  const body = t.startsWith(SENT) ? t.slice(SENT.length) : t
+  return body.endsWith(SENT_END) ? body.slice(0, -SENT_END.length) : body
+}
+/** A line Claude Code writes when the agent is stopped mid-step: no one sent it this. */
+const isInterruption = (t: string) => /^\[Request interrupted by user[^\]]*\]$/.test(t.trim())
+
 /**
  * A background agent's new entries since byte `from`, in Claude Code's file for it
  * (<project>/<session>/subagents/agent-<id>.jsonl), and where the next read starts. Only whole lines
  * are read: one still being written waits for the next read. The first message to it, Claude's
- * prompt, is skipped (the app has it from the Agent call); later ones are SendMessage arriving.
+ * prompt, is skipped (the app has it from the Agent call). Later ones are SendMessage arriving:
+ * Claude Code writes them hidden, as "The coordinator sent a message while you were working: …".
+ * Not messages to it: the summary a compaction writes, an interruption line, other hidden entries
+ * (another session's or the user's message to it, a task notification, a reminder). A fork's file
+ * starts with a reference to Claude's context and Claude's own Agent call (its prompt is in it): it
+ * has no first message to skip, and that call is not one of its steps.
  */
 export function readAgentFile(cwd: string, sessionId: string, agentId: string, from: number): { entries: AgentFileEntry[]; next: number } {
   const entries: AgentFileEntry[] = []
@@ -480,6 +496,9 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
     const end = buf.lastIndexOf(0x0a)
     if (end < 0) return { entries, next: from }
     let isPrompted = from > 0
+    // A fork's: the next entry is Claude's Agent call that started it, and its result.
+    let isForkStart = false
+    const inherited = new Set<string>()
     for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
       let e: any
       try {
@@ -489,9 +508,28 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
       }
       const content = e.message?.content
       const at = Date.parse(e.timestamp ?? '') || mtimeMs
-      // A message to the agent: the first is Claude's prompt (the app has it from the Agent call).
-      if (e.type === 'user' && !e.isMeta && (typeof content === 'string' || (Array.isArray(content) && !content.some((b: any) => b.type === 'tool_result')))) {
+      if (e.type === 'fork-context-ref') {
+        isPrompted = true
+        isForkStart = true
+        continue
+      }
+      if (isForkStart && e.type === 'assistant') {
+        isForkStart = false
+        const calls = (Array.isArray(content) ? content : []).filter((b: any) => b.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Task'))
+        for (const b of calls) inherited.add(String(b.id))
+        if (calls.length) continue
+      }
+      const isResult = Array.isArray(content) && content.some((b: any) => b.type === 'tool_result')
+      if (e.type === 'user' && !isResult && (typeof content === 'string' || Array.isArray(content))) {
         const text = typeof content === 'string' ? content : content.filter((b: any) => b.type === 'text').map((b: any) => String(b.text)).join('\n')
+        // A message Claude sent it (SendMessage), hidden in Claude Code's words.
+        if (e.origin?.kind === 'coordinator' || text.startsWith(SENT)) {
+          const sent = sentMessage(text)
+          if (sent.trim()) entries.push({ kind: 'prompt', text: sent, at })
+          continue
+        }
+        if (e.isMeta || e.isCompactSummary || e.isVisibleInTranscriptOnly || isInterruption(text) || text.startsWith('This session is being continued')) continue
+        // A message to the agent: the first is Claude's prompt (the app has it from the Agent call).
         if (!isPrompted) isPrompted = true
         else if (text.trim()) entries.push({ kind: 'prompt', text, at })
         continue
@@ -500,7 +538,7 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
       for (const b of content) {
         if (e.type === 'assistant' && b.type === 'tool_use') entries.push({ kind: 'step', tool: { id: String(b.id), name: String(b.name), input: b.input ?? {} }, at })
         else if (e.type === 'assistant' && b.type === 'text' && b.text) entries.push({ kind: 'text', text: String(b.text), at })
-        else if (e.type === 'user' && b.type === 'tool_result') {
+        else if (e.type === 'user' && b.type === 'tool_result' && !inherited.has(String(b.tool_use_id))) {
           const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') : ''
           entries.push({ kind: 'result', id: String(b.tool_use_id), text, isError: !!b.is_error, at })
         }

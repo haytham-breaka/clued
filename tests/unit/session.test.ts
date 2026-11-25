@@ -227,6 +227,76 @@ describe('session files', () => {
     assert.deepEqual(S.readAgentFile(CWD, 'sess', 'ag', next).entries.map(({ at: _, ...e }) => e), [{ kind: 'prompt', text: 'And that.' }])
     assert.deepEqual(S.readAgentFile(CWD, 'sess', 'missing', 0), { entries: [], next: 0 })
   })
+  // As Claude Code writes them (seen in real agent transcripts).
+  const sent = (message: string, extra = {}) => ({ type: 'user', isSidechain: true, isMeta: true, origin: { kind: 'coordinator' }, timestamp: '2026-11-25T10:01:00.000Z', message: { role: 'user', content: `The coordinator sent a message while you were working:\n${message}\n\nAddress this before completing your current task.` }, ...extra })
+  const agentFile = (id: string, lines: unknown[]) => {
+    const dir = join(S.projectDir(CWD), 'sess', 'subagents')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `agent-${id}.jsonl`), lines.map(l => JSON.stringify(l)).join('\n') + '\n')
+    return S.readAgentFile(CWD, 'sess', id, 0).entries.map(({ at: _, ...e }) => e)
+  }
+  test('readAgentFile: a message Claude sent it is hidden, in Claude Code\'s words; it is a prompt, as sent', () => {
+    const entries = agentFile('sent', [
+      { type: 'user', message: { content: 'Do it.' } },
+      sent('Also check the tests.\n\nThen report.'),
+      // Not Claude's: another session's message, yours, a task notification.
+      { type: 'user', isMeta: true, origin: { kind: 'peer', from: 'a1' }, message: { content: 'Another Claude session sent a message while you were working:\n<agent-message from="a1">\nHi.\n</agent-message>' } },
+      { type: 'user', isMeta: true, origin: { kind: 'human' }, message: { content: 'The user sent a new message while you were working:\nhi' } },
+      { type: 'user', isMeta: true, origin: { kind: 'task-notification' }, message: { content: '[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification></task-notification>' } },
+      // Without its origin, its words still say what it is; as text blocks too.
+      { type: 'user', isMeta: true, message: { content: [{ type: 'text', text: 'The coordinator sent a message while you were working:\nOne more.' }] } },
+      sent('  '),
+    ])
+    assert.deepEqual(entries, [
+      { kind: 'prompt', text: 'Also check the tests.\n\nThen report.' },
+      { kind: 'prompt', text: 'One more.' },
+    ])
+    assert.equal(S.sentMessage('plain'), 'plain')
+  })
+  test('readAgentFile: what a compaction writes, and an interruption line, are not messages to it', () => {
+    const entries = agentFile('cut', [
+      { type: 'user', message: { content: 'Do it.' } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'c1', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'The tool use was rejected.', is_error: true }] } },
+      { type: 'user', rowSource: 'harness', message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } },
+      { type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]\n' }] } },
+      { type: 'user', message: { content: '[Request interrupted by user]' } },
+      { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' },
+      { type: 'attachment', attachment: { type: 'compact_file_reference' } },
+      { type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, message: { content: 'This session is being continued from a previous conversation that ran out of context.\n\nSummary: the work.' } },
+      { type: 'user', message: { content: 'This session is being continued from a previous conversation that ran out of context.' } },
+      { type: 'user', isMeta: true, message: { content: '<system-reminder>\n<tools-used-before-summary>\nBash\n</tools-used-before-summary>\n</system-reminder>' } },
+      { type: 'user', message: { content: 'A real later message.' } },
+    ])
+    assert.deepEqual(entries.filter(e => e.kind === 'prompt'), [{ kind: 'prompt', text: 'A real later message.' }])
+    assert.deepEqual(entries.map(e => e.kind), ['step', 'result', 'prompt'])
+  })
+  test('readAgentFile: a fork has no first message to skip, and Claude\'s Agent call that started it is not its step', () => {
+    const input = { description: 'Check', subagent_type: 'fork', prompt: 'Check the docs.' }
+    const entries = agentFile('fork', [
+      { type: 'fork-context-ref', agentId: 'fork', parentSessionId: 'sess', contextLength: 12 },
+      { type: 'assistant', parentUuid: null, message: { content: [{ type: 'tool_use', id: 'parent-call', name: 'Agent', input }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'parent-call', content: [{ type: 'text', text: 'Fork started — that fork is you.' }] }, { type: 'text', text: '<fork-boilerplate>\nYou are a worker fork.\n</fork-boilerplate>\n\nCheck the docs.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Reading.' }, { type: 'tool_use', id: 'f1', name: 'Read', input: { file_path: '/tmp/README.md' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'f1', content: 'docs' }] } },
+      { type: 'user', isCompactSummary: true, isVisibleInTranscriptOnly: true, message: { content: 'This session is being continued from a previous conversation.' } },
+      { type: 'user', message: { content: 'First plain message to it.' } },
+      sent('Then the changelog.'),
+    ])
+    assert.deepEqual(entries, [
+      { kind: 'text', text: 'Reading.' },
+      { kind: 'step', tool: { id: 'f1', name: 'Read', input: { file_path: '/tmp/README.md' } } },
+      { kind: 'result', id: 'f1', text: 'docs', isError: false },
+      { kind: 'prompt', text: 'First plain message to it.' },
+      { kind: 'prompt', text: 'Then the changelog.' },
+    ])
+    // An Agent call later in an agent's file is its own step; a fork's first entry that is no call is kept.
+    assert.deepEqual(agentFile('fork2', [
+      { type: 'fork-context-ref', agentId: 'fork2' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Hi.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'g1', name: 'Agent', input }] } },
+    ]).map(e => e.kind), ['text', 'step'])
+  })
 })
 
 describe('saved messages', () => {

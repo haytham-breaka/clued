@@ -63,6 +63,24 @@ const tag = (topics: { id: string; status: string; title?: string; about?: strin
 const say = (text: string) => out({ type: 'assistant', message: { content: [{ type: 'text', text }], usage } })
 const tool = (id: string, name: string, input: Record<string, unknown>, parent?: string) =>
   out({ type: 'assistant', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_use', id, name, input }], ...(parent ? {} : { usage }) } })
+/**
+ * How Claude Code writes an agent's own transcript (subagents/agent-<id>.jsonl), as seen in real ones:
+ * a message Claude sends it while it runs (SendMessage), hidden and in Claude Code's words; what a
+ * compaction writes (a boundary, a summary shown only in the transcript, a hidden reminder); and the
+ * line written when you stop it mid-step.
+ */
+const agentLines = {
+  sent: (message: string) => ({ type: 'user', isSidechain: true, isMeta: true, origin: { kind: 'coordinator' }, message: { role: 'user', content: `The coordinator sent a message while you were working:\n${message}\n\nAddress this before completing your current task.` } }),
+  compaction: () => [
+    { type: 'system', subtype: 'compact_boundary', isSidechain: true, content: 'Conversation compacted', isMeta: false, compactMetadata: { trigger: 'auto' } },
+    { type: 'user', isSidechain: true, isCompactSummary: true, isVisibleInTranscriptOnly: true, message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. The task: fix the build.' } },
+    { type: 'user', isSidechain: true, isMeta: true, message: { role: 'user', content: '<system-reminder>\n<tools-used-before-summary>\nBash\n</tools-used-before-summary>\n</system-reminder>' } },
+  ],
+  interrupted: (toolId: string) => [
+    { type: 'user', isSidechain: true, message: { content: [{ type: 'tool_result', tool_use_id: toolId, content: "The user doesn't want to proceed with this tool use. The tool use was rejected.", is_error: true }] } },
+    { type: 'user', isSidechain: true, rowSource: 'harness', message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } },
+  ],
+}
 /** `data`: the structured result Claude Code sends beside the text (tool_use_result). */
 const toolResult = (id: string, content: unknown, isError = false, parent?: string, data?: unknown) => {
   out({ type: 'user', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] }, ...(data ? { tool_use_result: data } : {}) })
@@ -344,19 +362,24 @@ async function scenario(m: Msg) {
     tool('at-1', 'Agent', { description: 'Fix the build', subagent_type: 'general-purpose', prompt: 'Fix the build.', run_in_background: true })
     toolResult('at-1', 'Async agent launched successfully. agentId: at-77')
     line({ type: 'user', isSidechain: true, message: { content: 'Fix the build.' } })
+    // Before its to-do list: stopped mid-step ("interrupted" in your message), else a compaction.
+    if (t.includes('interrupted')) {
+      line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'at-s0', name: 'Bash', input: { command: 'rm -rf build', description: 'Clean the build' } }] } })
+      for (const l of agentLines.interrupted('at-s0')) line(l)
+    } else for (const l of agentLines.compaction()) line(l)
     step('at-s1', 'TodoWrite', todo('pending'), 'Todos have been modified successfully.')
     tool('sm-1', 'SendMessage', { to: 'at-77', summary: 'Also run the linter', message: 'Also run the linter and fix what it finds.' })
     toolResult('sm-1', 'Message queued for delivery to at-77 at its next tool round.')
     finish(m, 'Started it and sent it more work.', 'claude')
     await release('task2')
-    line({ type: 'user', isSidechain: true, message: { content: 'Also run the linter and fix what it finds.' } })
+    line(agentLines.sent('Also run the linter and fix what it finds.'))
     step('at-s2', 'Bash', { command: 'npm run lint', description: 'Run the linter' }, 'lint ok')
     step('at-s3', 'TodoWrite', todo('in_progress'), 'Todos have been modified successfully.')
     await release('done1')
     out({ type: 'system', subtype: 'task_notification', task_id: 'at-77', status: 'completed', summary: 'Build fixed, lint clean' })
     tool('sm-2', 'SendMessage', { to: 'at-77', message: 'Now write the release notes for this fix, as a short list.' })
     toolResult('sm-2', 'Agent at-77 was stopped; resumed it in the background with your message.')
-    line({ type: 'user', isSidechain: true, message: { content: 'Now write the release notes for this fix, as a short list.' } })
+    line(agentLines.sent('Now write the release notes for this fix, as a short list.'))
     step('at-s4', 'Write', { file_path: `${cwd}/NOTES.md`, content: '- fixed the build' }, 'ok')
     say('Sent it one more task.')
     result()
@@ -364,6 +387,32 @@ async function scenario(m: Msg) {
     out({ type: 'system', subtype: 'task_notification', task_id: 'at-77', status: 'completed', summary: 'Release notes written' })
     say(`<<reply ${m.topic}>>\nAll three tasks are done.\n${tag([{ id: m.topic, status: 'done' }])}`)
     return result()
+  }
+  // A fork (subagent_type "fork"): its transcript starts as Claude Code writes a fork's, with a
+  // reference to Claude's context and Claude's own Agent call (its prompt is in that call's result),
+  // not with a first message. Claude sends it more (queued); it arrives on release-fork-msg.
+  if (t.includes('fork agent')) {
+    const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}/subagents/agent-fk-5.jsonl`
+    mkdirSync(dirname(file), { recursive: true })
+    const line = (o: unknown) => appendFileSync(file, JSON.stringify(o) + '\n')
+    const input = { description: 'Check the docs', subagent_type: 'fork', prompt: 'Check the docs for the flag.', run_in_background: true }
+    tool('fk-1', 'Agent', input)
+    toolResult('fk-1', 'Async agent launched successfully.\nagentId: fk-5 (Use SendMessage with to: \'fk-5\' to continue this agent.)')
+    line({ type: 'fork-context-ref', agentId: 'fk-5', parentSessionId: sessionId, contextLength: 12 })
+    line({ type: 'assistant', parentUuid: null, isSidechain: true, message: { content: [{ type: 'tool_use', id: 'fk-1', name: 'Agent', input }] } })
+    line({ type: 'user', isSidechain: true, message: { content: [
+      { type: 'tool_result', tool_use_id: 'fk-1', content: [{ type: 'text', text: 'Fork started — that fork is you.' }] },
+      { type: 'text', text: '<fork-boilerplate>\nYou are a worker fork. Execute one directive, then stop.\n</fork-boilerplate>\n\nCheck the docs for the flag.' },
+    ] } })
+    line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'Reading the docs.' }, { type: 'tool_use', id: 'fk-s1', name: 'Read', input: { file_path: `${cwd}/README.md` } }] } })
+    line({ type: 'user', isSidechain: true, message: { content: [{ type: 'tool_result', tool_use_id: 'fk-s1', content: 'the docs' }] } })
+    tool('fk-sm', 'SendMessage', { to: 'fk-5', summary: 'Also check the changelog', message: 'Also check the changelog.' })
+    toolResult('fk-sm', 'Message queued for delivery to fk-5 at its next tool round.')
+    finish(m, 'Started a fork and sent it more.', 'claude')
+    await release('fork-msg')
+    line(agentLines.sent('Also check the changelog.'))
+    line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'fk-s2', name: 'Read', input: { file_path: `${cwd}/CHANGELOG.md` } }] } })
+    return
   }
   // Claude says it will do it later (its tag says it still owes work), and nothing works on it; on
   // release-later it goes on by itself with an agent for it.

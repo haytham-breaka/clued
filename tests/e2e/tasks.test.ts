@@ -88,6 +88,38 @@ describe('agent tasks', () => {
       assert.match(s, /✎ Wrote NOTES\.md/)
     }))
 
+  test('an agent stopped mid-step: the interruption line is no message to it, so the queued task waits for its own', () =>
+    withApp({ setup: widePanel, width: 160, height: 50 }, async app => {
+      await app.send('give the agent tasks, interrupted')
+      await app.waitFor('Started it and sent it more work.')
+      await app.click('2 tasks', { area: 'panel' })
+      let s = await app.waitFor('To-do  1 of 3 done')
+      assert.match(s, /Clean the build/)
+      assert.match(s, /Tasks {2}2 · 1 running · 1 queued/)
+      assert.match(s, /◌ 2\. Also run the linter/)
+      app.release('task2')
+      s = await app.waitFor(new RegExp(`${SPIN} 2\\. Also run the linter`))
+      assert.match(s, /Tasks {2}2 · 2 running/)
+      await app.waitFor('✻ Claude sent task 2')
+    }))
+
+  test('a fork: Claude\'s Agent call that started it is not its step, and a message Claude sends it arrives', () =>
+    withApp({ setup: widePanel, width: 160, height: 50 }, async app => {
+      await app.send('start a fork agent')
+      await app.waitFor('Started a fork and sent it more.')
+      await app.click('2 tasks', { area: 'panel' })
+      let s = await app.waitFor('Reading the docs.')
+      assert.match(s, /Read README\.md/)
+      assert.ok(!s.includes('Agent: Check the docs'), 'the call that started it is Claude\'s, not its step')
+      assert.match(s, /◌ 2\. Also check the changelog/)
+      app.release('fork-msg')
+      s = await app.waitFor(new RegExp(`${SPIN} 2\\. Also check the changelog`))
+      assert.match(s, /Tasks {2}2 · 2 running/)
+      s = await app.waitFor('Read CHANGELOG.md')
+      assert.match(s, /✻ Claude sent task 2/)
+      assert.ok(!s.includes('Agent: Check the docs'))
+    }))
+
   test('on resume, the tasks come back from the session file and the agent\'s own transcript', async () => {
     const t0 = Date.now() - 90_000
     const iso = (ms: number) => new Date(t0 + ms).toISOString()
@@ -111,10 +143,14 @@ describe('agent tasks', () => {
       mkdirSync(sub, { recursive: true })
       writeFileSync(join(sub, 'agent-rs-9.jsonl'), [
         { type: 'user', isSidechain: true, message: { content: 'Fix the build.' } },
+        // As Claude Code writes them: a compaction's summary (no message to it), then each message
+        // Claude sent, hidden.
+        { type: 'system', subtype: 'compact_boundary', isSidechain: true, content: 'Conversation compacted' },
+        { type: 'user', isSidechain: true, isCompactSummary: true, isVisibleInTranscriptOnly: true, message: { content: 'This session is being continued from a previous conversation that ran out of context.' } },
         { type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'r1', name: 'TodoWrite', input: { todos: [{ content: 'Fix the import', status: 'completed' }, { content: 'Lint', status: 'in_progress' }] } }] } },
-        { type: 'user', isSidechain: true, message: { content: 'Also run the linter.' } },
+        { type: 'user', isSidechain: true, isMeta: true, origin: { kind: 'coordinator' }, message: { content: 'The coordinator sent a message while you were working:\nAlso run the linter.\n\nAddress this before completing your current task.' } },
         { type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'Linting now.' }] } },
-        { type: 'user', isSidechain: true, message: { content: 'Now write the release notes.' } },
+        { type: 'user', isSidechain: true, isMeta: true, origin: { kind: 'coordinator' }, message: { content: 'The coordinator sent a message while you were working:\nNow write the release notes.\n\nAddress this before completing your current task.' } },
         { type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'Writing the notes.' }] } },
       ].map(l => JSON.stringify(l)).join('\n') + '\n')
     }
@@ -133,6 +169,9 @@ describe('agent tasks', () => {
       s = await app.waitFor('✻ Claude sent task 3')
       assert.match(s, /✻ Claude sent task 2/)
       assert.match(s, /Linting now\./)
+      // Each starts where its message arrived: task 2 after the plan, task 3 after the linting.
+      assert.ok(s.indexOf('Updated the plan') < s.indexOf('✻ Claude sent task 2'), 'task 2 starts after the plan')
+      assert.ok(s.indexOf('Linting now.') < s.indexOf('✻ Claude sent task 3'), 'task 3 starts after the linting')
     })
   })
 })
