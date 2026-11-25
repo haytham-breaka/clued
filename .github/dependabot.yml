@@ -10,3 +10,8 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      # Node's types follow the oldest Node clued supports (package.json engines), not the newest:
+      # newer ones would let code use APIs that Node 22 doesn't have.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
