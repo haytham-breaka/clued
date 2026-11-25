@@ -1,4 +1,10 @@
-# clued
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/branding/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/branding/logo-light.png">
+    <img src="docs/branding/logo-light.png" width="400" alt="clued">
+  </picture>
+</h1>
 
 **Never lose track of what you asked Claude.**
 
