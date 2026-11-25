@@ -25,7 +25,8 @@ clued makes no API calls of its own. Claude Code runs underneath, headless, with
 
 - **Nothing you ask gets lost.** In a plain terminal session, a question you typed while Claude was busy can be answered in the middle of a tool run, or not at all. clued gives every message a mark: ⏳ Claude is on it, ✋ waiting on you, ✓ done. A message whose reply never arrived says so, with a button to ask again.
 - **Every reply says what it answers.** A reply quotes the message, or each of the several messages, it answers. Click a quote to jump to it. From any message you can open its whole chain: the follow-ups, the corrections and every reply that touched it.
-- **You can type while Claude works.** Messages sent mid-task are delivered to the running turn, the way Claude Code does it, and each one is still tracked on its own. Under each message, `✓ sent` means Claude Code has it, and `✓✓` means Claude has actually taken it in: at once when idle, at its next step when it was busy.
+- **You can type while Claude works.** A message you send while Claude is busy waits in clued (`⏳ in queue`) and goes as a turn of its own when Claude's turn ends, one per turn, so each gets its own answer. A reply to the work in progress (a part of the running turn, its request, or a running agent's view) goes at once, so you can still steer. `/queue off` sends everything at once instead, into the running turn the way Claude Code does it. Under each message, `✓ sent` means Claude Code has it, and `✓✓` means Claude has actually taken it in.
+- **A few seconds to take a message back.** For 3 seconds after Enter a message hasn't gone yet: `◌ sending in 3s · ✎ edit · ✕ delete` under it, and Ctrl+Z puts the last one back in the box. `/hold <seconds>` changes the time, `/hold 0` sends at once. A message that is `✓ sent` but not `✓✓` can still be deleted: Claude Code drops it from its queue when it can, and otherwise Claude is told to ignore it.
 - **It's still Claude Code.** No second client, no API key, no separate bill. Your `CLAUDE.md`, settings, permissions and plugins apply as they always do, and every session can also be opened in `claude` itself.
 - **The overhead is measured.** About 9% more cost per session, for the instructions and the small tag on each reply. The numbers are [below](#does-it-help-the-evaluation).
 
@@ -82,6 +83,7 @@ Drag the divider to resize the panel, and click `≡` to fold it to icons. Your 
 | Alt+→ / Alt+← | from a message to its reply, and back |
 | Alt+S | save the message Alt+↑/↓ picked to get back to later, or unsave it |
 | Ctrl+F | search your messages |
+| Ctrl+Z | take back the message you just sent, while it waits to go (back in the box) |
 | Ctrl+N | next unread reply |
 | Ctrl+O | show or hide Claude's steps |
 | Shift+Tab | next permission mode (default, accept edits, plan, and bypass or auto when you started in it), shown under the status line |
@@ -96,7 +98,7 @@ Drag the divider to resize the panel, and click `≡` to fold it to icons. Your 
 
 ### Commands
 
-`/clear` new session · `/btw <question>` a quick side question: it sees the conversation but stays out of it, answered aside even while Claude works · `/resume` pick one · `/model <name>` switch model · `/notify on|always|off|test` notifications · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
+`/clear` new session · `/btw <question>` a quick side question: it sees the conversation but stays out of it, answered aside even while Claude works · `/resume` pick one · `/model <name>` switch model · `/notify on|always|off|test` notifications · `/hold <seconds>` time to take a message back · `/queue on|off` hold messages while Claude works · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
 
 ## Features
 

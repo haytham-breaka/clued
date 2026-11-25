@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import { emptyBoard, keyOf, reactionText, stripTag } from '../hooks/model.ts'
 import type { Board } from '../types/index.d.ts'
 import type { ToolUse } from './claude.ts'
-import { hasMarks, lostRepliesAsked } from './inbox.ts'
+import { deletedAsked, hasMarks, lostRepliesAsked } from './inbox.ts'
 import type { Part } from './inbox.ts'
 
 export type Step = {
@@ -60,6 +60,16 @@ export type Turn = {
   reaction?: string
   /** The app asking Claude again for replies that never arrived (their topic ids): drawn as one small line. */
   retry?: string[]
+  /**
+   * You deleted it after it went to Claude Code: withdrawn (Claude Code dropped it from its queue,
+   * Claude never sees it) or told (it was too late for that: Claude was told to ignore it).
+   * Drawn as one small line, and left out of the panel.
+   */
+  deleted?: 'withdrawn' | 'told'
+  /** Being deleted: the app asked Claude Code to drop it and waits for the answer. */
+  deleting?: boolean
+  /** The app telling Claude to ignore a message you deleted (its topic id): not drawn itself. */
+  deletes?: string
   steps: Step[]
   /** Claude's final words, tag stripped. */
   answer?: string
@@ -138,6 +148,11 @@ export type Kept = {
   early?: Record<string, string[]>
   /** Messages you saved to get back to later, newest last. */
   saved?: Saved[]
+  /**
+   * Messages you sent that were still waiting for Claude to finish its turn when the app closed: held
+   * again when it opens the session. `from`: what each replied to, the view it was written in, its images.
+   */
+  held?: { text: string; from: unknown }[]
 }
 
 /**
@@ -166,6 +181,16 @@ export function followKey(turns: Turn[], taskId: string) {
  * file's agree (a job fires at most once a minute).
  */
 export const firedKey = (at: number) => `fired-${Math.floor(at / 60000).toString(36)}`
+
+/** The app telling Claude to ignore a message you deleted (deletedPrompt): that message stays deleted on resume. */
+function markDeleted(turn: Turn, turns: readonly Turn[]) {
+  const gone = deletedAsked(turn.text)
+  if (!gone) return
+  turn.reaction = '✕'
+  turn.deletes = gone
+  const was = turns.findLast(t => t.topicId === gone && !t.reaction)
+  if (was) was.deleted = 'told'
+}
 
 export const newTurn = (text: string, at = Date.now()): Turn => ({
   key: keyOf(text),
@@ -330,6 +355,7 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       if (tid) cur.topicId = tid
       cur.queued = true
       cur.pending = carry
+      markDeleted(cur, turns)
       turns.push(cur)
       continue
     }
@@ -376,6 +402,7 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
         cur.reaction = '↻'
         cur.retry = retry
       }
+      markDeleted(cur, turns)
       turns.push(cur)
       continue
     }

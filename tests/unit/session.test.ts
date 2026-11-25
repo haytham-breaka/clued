@@ -8,7 +8,7 @@ import { join } from 'node:path'
 const home = mkdtempSync(join(tmpdir(), 'clued-unit-'))
 process.env.HOME = home
 const S = await import('../../app/session.ts')
-const { lostRepliesPrompt } = await import('../../app/inbox.ts')
+const { deletedAsked, deletedPrompt, lostRepliesPrompt } = await import('../../app/inbox.ts')
 const CWD = '/tmp/some project'
 
 const write = (id: string, lines: unknown[], mtime?: number) => {
@@ -241,5 +241,30 @@ describe('saved messages', () => {
     S.saveKept('saved-1', { board: emptyBoard(), reactions: {}, links: {}, saved: list })
     await new Promise(r => setTimeout(r, 450))
     assert.deepEqual(S.loadKept('saved-1', CWD).saved, list)
+  })
+})
+
+describe('deleted messages', () => {
+  test('the note telling Claude to ignore a message names it, and the session file keeps both deleted', () => {
+    const note = deletedPrompt('T7', 'scrap that')
+    assert.equal(note, 'The user deleted their message T7 (“scrap that”) before you read it: ignore it. Don\'t answer it, act on it or mention it.')
+    assert.equal(deletedAsked(note), 'T7')
+    assert.equal(deletedAsked('The user deleted nothing'), undefined)
+    write('deleted', [
+      user([{ type: 'text', text: 'hold on' }, { type: 'text', text: '[clued] This message is topic T6.' }]),
+      { type: 'attachment', attachment: { type: 'queued_command', prompt: 'scrap that\n[clued] This message is topic T7.' } },
+      { type: 'attachment', attachment: { type: 'queued_command', prompt: note } },
+      assistant([{ type: 'text', text: 'Done.' }]),
+      user([{ type: 'text', text: 'and this' }, { type: 'text', text: '[clued] This message is topic T8.' }]),
+      user(deletedPrompt('T8', 'and this')),
+    ])
+    const turns = S.loadHistory(CWD, 'deleted')
+    assert.deepEqual(turns.map(t => [t.text.slice(0, 12), t.deleted ?? '', t.deletes ?? '', t.reaction ?? '']), [
+      ['hold on', '', '', ''],
+      ['scrap that', 'told', '', ''],
+      ['The user del', '', 'T7', '✕'],
+      ['and this', 'told', '', ''],
+      ['The user del', '', 'T8', '✕'],
+    ])
   })
 })

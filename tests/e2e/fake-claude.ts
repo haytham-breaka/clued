@@ -541,6 +541,19 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (e.type === 'control_request') {
     if (e.request?.subtype === 'interrupt') interrupted = true
+    // Taking back a message not taken in yet (as a real Claude Code does): it leaves the queue unread.
+    // FAKE_NO_CANCEL=1 plays a Claude Code that can't.
+    if (e.request?.subtype === 'cancel_async_message') {
+      const uuid = e.request.message_uuid
+      const isQueued = (m: Msg) => m.raw?.uuid === uuid
+      const can = !process.env.FAKE_NO_CANCEL && (unechoed.some(isQueued) || queue.some(isQueued))
+      if (can) {
+        unechoed = unechoed.filter(m => !isQueued(m))
+        joined = joined.filter(m => !isQueued(m))
+        queue.splice(0, queue.length, ...queue.filter(m => !isQueued(m)))
+      }
+      out({ type: 'control_response', response: process.env.FAKE_NO_CANCEL ? { subtype: 'error', request_id: e.request_id, error: 'cancel_async_message is not supported' } : { subtype: 'success', request_id: e.request_id, response: can ? { cancelled: true, message_uuid: uuid } : { cancelled: false } } })
+    }
     if (e.request?.subtype === 'set_permission_mode') {
       out({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response: { mode: e.request.mode } } })
       out({ type: 'system', subtype: 'status', status: null, permissionMode: e.request.mode })

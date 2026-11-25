@@ -31,13 +31,13 @@ import {
   settleTurn,
   stripTag,
 } from '../hooks/model.ts'
-import { agentLines, chatLines, jobLines, requestLines, stepLabel } from './chat.ts'
+import { agentLines, chatLines, heldLines, jobLines, requestLines, stepLabel } from './chat.ts'
 import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.ts'
 import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
 import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
-import { assignParts, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
+import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import { Btw } from './btw.ts'
@@ -89,6 +89,14 @@ type Quote = { who: 'me' | 'claude'; text: string; key: string; anchor?: string;
 /** What your next message replies to: one message, or several of Claude's reply parts at once. */
 type ReplyTo = { quotes: Quote[] }
 type Permission = { requestId: string; tool: string; input: Record<string, unknown> }
+type Image = { path: string; media: string }
+/**
+ * Where a message was written, as submit() reads it: what it replies to, the view it was written in,
+ * and the images attached. A held message keeps these from when you pressed Enter.
+ */
+type From = { replyTo: ReplyTo | null; about: string; job: string; agent: string; images: Image[] }
+/** A message held back before it goes (/hold): it is no turn yet, so deleting it leaves nothing behind. */
+type Held = { id: string; text: string; from: From; at: number; until: number; timer?: ReturnType<typeof setTimeout> }
 
 const PREFS = `${homedir()}/.clued/panel.json`
 /** Every Enter you press and every message the app sends, one line each: to tell later whether two
@@ -102,7 +110,7 @@ function logSend(what: string, fields: Record<string, unknown>) {
 }
 const prefs = (() => {
   try {
-    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify }
+    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify; holdMs?: number; queue?: boolean }
   } catch {
     return {}
   }
@@ -195,7 +203,9 @@ const S = {
   /** The input box's inner width, as last drawn (for moving the cursor up and down its rows). */
   inputInner: 40,
   /** Images for the next message: `[image N]` in the text stands for images[N-1]. */
-  images: [] as { path: string; media: string }[],
+  images: [] as Image[],
+  /** Messages you sent that wait out the hold (/hold) before they go to Claude Code, oldest first. */
+  held: [] as Held[],
   /** Searching your messages (Ctrl+F): what was in the box before, put back when you are done. */
   search: null as { text: string; cursor: number } | null,
   isFocused: true,
@@ -217,7 +227,7 @@ const S = {
 }
 
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'demo', 'btw']
+const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'hold', 'queue', 'demo', 'btw']
 /** /btw side questions: their own Claude Code each, their answers asides in the chat. */
 const btw = new Btw(() => draw())
 
@@ -286,9 +296,25 @@ function notify(title: string, body: string) {
 /** Each model's context size as Claude Code last reported it, for the status line before the first reply. */
 const knownWindows: Record<string, number> = { ...(prefs.windows ?? {}) }
 
+/**
+ * How long a message waits after Enter before it goes to Claude Code, so you can still edit or delete
+ * it: set with /hold (kept in panel.json as holdMs), 0 sends at once. Until you set it, 3 s, or
+ * CLUED_HOLD_MS (the tests send at once).
+ */
+let holdSet = typeof prefs.holdMs === 'number' && prefs.holdMs >= 0 ? prefs.holdMs : undefined
+const holdMs = () => holdSet ?? (process.env.CLUED_HOLD_MS ? Number(process.env.CLUED_HOLD_MS) || 0 : 3000)
+
+/**
+ * Whether a message sent while Claude works waits in the app until Claude's turn ends (/queue on, the
+ * default), or goes at once for Claude Code to fold into the running turn (/queue off). Kept in
+ * panel.json as queue; until you set it, CLUED_QUEUE=0 turns it off (the tests send at once).
+ */
+let queueSet = typeof prefs.queue === 'boolean' ? prefs.queue : undefined
+const queueOn = () => queueSet ?? process.env.CLUED_QUEUE !== '0'
+
 function savePrefs() {
   mkdirSync(`${homedir()}/.clued`, { recursive: true })
-  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode }))
+  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode, ...(holdSet != null ? { holdMs: holdSet } : {}), ...(queueSet != null ? { queue: queueSet } : {}) }))
 }
 
 /** Questions you dismissed since your last message: the next one tells Claude not to wait for them. */
@@ -760,6 +786,12 @@ function setWork(w: Work) {
 // ---- Claude Code -------------------------------------------------------------------
 
 function start(resume?: string) {
+  // Held messages belong to the session they were written in: leaving it (/clear, /resume), they go
+  // now or are kept with it (parkHeld). The same session again (/model) keeps them held here.
+  if (S.claude && (!resume || resume !== S.sessionId)) {
+    parkHeld()
+    if (S.sessionId) saveKept(S.sessionId, S.kept, true)
+  }
   S.claude?.close()
   // Another session: its side answers go (the same one again, a new model, keeps them).
   if (!resume || resume !== S.sessionId) btw.clear()
@@ -798,6 +830,7 @@ function start(resume?: string) {
   }
   S.chatScroll = 0
   initRead()
+  unparkHeld()
   S.claude = new Claude({ args: [...(resume ? ['--resume', resume] : []), ...passArgs], cwd, appendSystemPrompt: APP_GUIDE }, onEvent)
   refreshStatus()
   draw()
@@ -1115,6 +1148,8 @@ function onEvent(e: ClaudeEvent) {
       }
       break
   }
+  // A turn ended (or Claude Code stopped): the next held message may go.
+  if (S.held.length) pump()
   draw()
 }
 
@@ -1295,18 +1330,26 @@ function chainFor(q: Quote): string {
   return first && (rest.length || !(first.who === q.who && first.text.trim() === q.text.trim())) ? chainNote([first, ...rest], why) : ''
 }
 
+/** Where a message written now is from: the reply being written, the view you are in, the images attached. */
+const here = (): From => ({ replyTo: S.replyTo, about: S.requestView, job: S.jobView, agent: S.agentView, images: S.images })
+
 /** `about`: the request (turn key) it is part of, as when written inside that request's view. */
 /** `agent`: the agent (Agent tool use id) it is about, as when written inside that agent's view. */
-function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; retry?: string[] } = {}) {
+/** `deletes`: the app telling Claude to ignore a message you deleted (its topic id). */
+/** `from`: where it was written (a held message's, from when you pressed Enter); else here and now. */
+function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; retry?: string[]; deletes?: string } = {}, from?: From) {
   if (!S.claude) start(S.sessionId || undefined)
+  const isNow = !from
+  const at = from ?? here()
   const now = Date.now()
   const turn = newTurn(text, now)
   endedIdle = undefined
   if (opts.reaction) turn.reaction = opts.reaction
   if (opts.retry) turn.retry = opts.retry
+  if (opts.deletes) turn.deletes = opts.deletes
   let hidden: string | undefined
   if (!opts.reaction && !text.startsWith('/')) {
-    const reply = S.replyTo
+    const reply = at.replyTo
     // Your answer to a question: what it asked is back with Claude at once, not still ✋ until the next
     // reply's tag. Quoting a reply answers its question. A plain message answers the question only when
     // just one was open and the message is not a question itself ("btw, what about…?" answers nothing).
@@ -1330,7 +1373,7 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     // Several questions in one message: numbered, so a reply can say which it answers (each is quoted).
     const qs = questionsOf(text)
     if (qs.length) hidden = `${hidden}\nIt asks ${qs.length} things: ${qs.map((q, i) => `${raised.topicId}.${i + 1} "${preview(q, 80)}"`).join('; ')}.`
-    const about = opts.about ?? S.requestView
+    const about = opts.about ?? at.about
     const req = about ? S.turns.findLast(t => t.key === about) : undefined
     if (req) {
       // Written inside a request: part of it, linked to it, and Claude is told so.
@@ -1338,10 +1381,10 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
       if (!reply?.quotes.length) S.kept.links[turn.key] = { key: req.key, who: 'me', text: preview(req.text, 60) }
       hidden = `${hidden}\nThe user wrote this from inside the view of their request ${req.topicId ?? ''} ("${preview(req.text, 80)}"): it is part of that request (use same_as ${req.topicId ?? 'its topic'} unless it is a new subject). Reply to its id.`
     }
-    const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
+    const job = at.job ? S.jobs.list.find(j => j.toolId === at.job) : undefined
     if (job) turn.aboutJob = job.toolId
     if (job) hidden = `${hidden}\nThe user wrote this from inside the view of your scheduled job ${job.id} (${job.kind === 'wakeup' ? 'ScheduleWakeup' : job.kind === 'remote' ? 'RemoteTrigger' : `CronCreate "${job.cron ?? ''}"`}, ${stateLabel(job)}; prompt "${preview(job.prompt, 120)}"): it is about that job.`
-    const inside = opts.agent ? S.agents.get(opts.agent) : S.agentView ? S.agents.get(S.agentView) : undefined
+    const inside = opts.agent ? S.agents.get(opts.agent) : at.agent ? S.agents.get(at.agent) : undefined
     if (inside) {
       turn.aboutAgent = inside.id
       hidden = `${hidden}\nThe user wrote this from inside the view of your agent ${who(inside, S.agents.values())}, "${inside.name}" (${inside.state}; Agent tool use ${inside.id}${inside.taskId ? `, agent id ${inside.taskId}` : ''}): it is about that agent's work. If they want the agent itself to go on, continue it (SendMessage to it, when you can); otherwise answer or do it yourself.`
@@ -1352,7 +1395,8 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     S.kept.board = raised.board
     const first = reply?.quotes[0]
     if (first) S.kept.links[turn.key] = { key: first.key, who: first.who, text: preview(first.text, 60), ...(first.anchor ? { anchor: first.anchor } : {}), ...(reply!.quotes.length > 1 ? { more: reply!.quotes.length - 1, all: reply!.quotes.map(q => ({ anchor: q.anchor ?? `${q.who}:${q.key}`, text: preview(q.text, 120) })) } : {}) }
-    S.replyTo = null
+    // A held message's reply was cleared when you pressed Enter: the one in the box now is another.
+    if (isNow) S.replyTo = null
     if (dismissed.length) {
       hidden += `\nThe user dismissed your question${dismissed.length > 1 ? 's' : ''} on ${dismissed.join(', ')} without answering: don't wait for an answer, and ask again only if it still matters.`
       dismissed = []
@@ -1372,14 +1416,14 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   S.isWorking = true
   S.chatScroll = 0
   // The images its text still names ([image N]) go with it.
-  const images = S.images.filter((_, i) => text.includes(`[image ${i + 1}]`)).flatMap(img => {
+  const images = at.images.filter((_, i) => text.includes(`[image ${i + 1}]`)).flatMap(img => {
     try {
       return [{ media: img.media, data: readFileSync(img.path).toString('base64') }]
     } catch {
       return []
     }
   })
-  S.images = []
+  if (isNow) S.images = []
   logSend('sent', { topic: turn.topicId, text, ...(hidden ? { note: hidden } : {}), ...(images.length ? { images: images.length } : {}) })
   // On its way: sending, sent once written, received when Claude Code echoes it back.
   turn.uuid = randomUUID()
@@ -1392,6 +1436,183 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   statusSoon()
   if (S.isDemo && !opts.reaction && !text.startsWith('/')) demoAgents(turn)
   keep()
+  draw()
+}
+
+// ---- Holding a message back: a few seconds to take it back, and while Claude works ----------
+// Once a message is written to Claude Code's stdin it is Claude Code's. So the app holds each one
+// back first: for the hold time (/hold), to ✎ edit or ✕ delete it; and, while Claude works, until
+// Claude's turn ends (/queue), because Claude tends to ignore a message Claude Code folds into a
+// running turn. Then it goes as a turn of its own, one per turn, oldest first. A message about the
+// running work goes as soon as its hold is over, to steer it. Slash commands, reactions and the
+// app's own buttons go at once.
+
+/** A held message's key in the panel's list, and its anchor in the chat (`me:` + it). */
+const heldKey = (h: Held) => `held-${h.id}`
+
+/** Holds a message back until `until` (and, when it must, until Claude is free). */
+function holdBack(text: string, from: From, until: number): Held {
+  const h: Held = { id: randomUUID(), text, from, at: Date.now(), until }
+  h.timer = setTimeout(pump, Math.max(0, until - Date.now()))
+  S.held.push(h)
+  return h
+}
+
+/** Enter on a message: held back for the hold time (and Claude's turn), or sent at once. */
+function sendTyped(text: string) {
+  const from = here()
+  // The reply and the images go with this message: the box starts afresh.
+  S.replyTo = null
+  S.images = []
+  S.chatScroll = 0
+  // Never before one held earlier: they go in the order you wrote them.
+  const ms = holdMs()
+  const h = holdBack(text, from, Math.max(Date.now() + ms, ...S.held.map(x => x.until)))
+  pump()
+  if (S.held.includes(h)) logSend('held', { text, ms, ...(waitsForClaude(h) ? { queued: true } : {}) })
+  draw()
+}
+
+/**
+ * About the work going on now, so it goes without waiting for the turn to end: a reply to a message
+ * or reply part of the running turn or of its topics, or written inside the view of that request, of
+ * Claude's live work or of a running agent (to continue it).
+ */
+function steers(from: From): boolean {
+  if (from.agent === MAIN) return true
+  if (from.agent && S.agents.get(from.agent)?.state === 'running') return true
+  const running = S.turns.filter(t => !t.isDone && !waiting(t))
+  const keys = new Set(running.flatMap(t => [t.key, ...(t.followUp ?? [])]))
+  const topics = new Set<string>()
+  for (const t of S.turns) if (keys.has(t.key) && t.topicId) topics.add(t.topicId)
+  for (const t of S.kept.board.topics) if (topics.has(t.id) || t.messageKeys.some(k => keys.has(k))) topics.add(t.id)
+  const isRunning = (key: string, ids: readonly string[] = []) => keys.has(key) || ids.some(id => topics.has(id)) || topics.has(S.turns.findLast(t => t.key === key)?.topicId ?? '')
+  return !!from.replyTo?.quotes.some(q => isRunning(q.key, q.topics)) || (!!from.about && isRunning(from.about))
+}
+
+/** A held message that, its hold over, still waits: Claude is working and it isn't about that work. */
+const waitsForClaude = (h: Held) => queueOn() && S.isWorking && !steers(h.from)
+
+/**
+ * Sends the held messages whose time has come, oldest first: each at the end of its hold, unless it
+ * waits for Claude (then the first of those goes once Claude's turn ends, and the next one waits for
+ * the turn that one starts). Runs as a hold ends and after each of Claude Code's events.
+ */
+function pump() {
+  if (quitting) return
+  const now = Date.now()
+  let isSent = false
+  for (const h of [...S.held]) {
+    if (h.until > now) break
+    if (waitsForClaude(h)) continue
+    takeHeld(h)
+    submit(h.text, {}, h.from)
+    isSent = true
+  }
+  if (isSent) draw()
+}
+
+/** ➤ send now on a message waiting for Claude: it goes at once, into the running turn. */
+function sendHeldNow(h: Held) {
+  if (!takeHeld(h)) return
+  submit(h.text, {}, h.from)
+}
+
+/**
+ * Quitting, /reload or another session: the held messages that would go now go now (rather than be
+ * lost), and those waiting for Claude to finish its turn stay held: kept with the session, they come
+ * back held when the app opens it again (after /reload, at once) and go from there. Sending those
+ * now would put them into the turn Claude Code is about to stop, where Claude would not answer them.
+ */
+function parkHeld() {
+  const wait: Held[] = []
+  for (const h of S.held.splice(0)) {
+    clearTimeout(h.timer)
+    if (waitsForClaude(h)) wait.push(h)
+    else submit(h.text, {}, h.from)
+  }
+  if (wait.length) S.kept.held = [...(S.kept.held ?? []), ...wait.map(h => ({ text: h.text, from: h.from }))]
+}
+
+/** The held messages a session kept when the app last closed it: held again, after a fresh hold. */
+function unparkHeld() {
+  const kept = S.kept.held ?? []
+  delete S.kept.held
+  for (const k of kept) holdBack(k.text, k.from as From, Date.now() + holdMs())
+}
+
+/** Takes a held message off the list: it will not go. */
+function takeHeld(h: Held): boolean {
+  const at = S.held.indexOf(h)
+  if (at < 0) return false
+  S.held.splice(at, 1)
+  clearTimeout(h.timer)
+  return true
+}
+
+/** ✕ delete on a held message: gone, as if never sent (no turn, no topic, nothing to Claude). */
+function dropHeld(h: Held) {
+  if (!takeHeld(h)) return
+  logSend('deleted', { text: h.text, held: true })
+  toast('Deleted. It never went to Claude.')
+}
+
+/**
+ * ✎ edit (or Ctrl+Z) on a held message: back in the input box as it was when you pressed Enter, with
+ * its images, what it replied to and the view it was written in. Text already in the box goes after
+ * it, its images numbered after the held message's.
+ */
+function editHeld(h: Held) {
+  if (!takeHeld(h)) return
+  const n = h.from.images.length
+  const rest = n ? S.text.replace(/\[image (\d+)\]/g, (_, d: string) => `[image ${Number(d) + n}]`) : S.text
+  S.images = [...h.from.images, ...S.images]
+  S.text = rest.trim() ? `${h.text}\n${rest}` : h.text
+  S.cursor = h.text.length
+  S.historyAt = -1
+  const quotes = [...(h.from.replyTo?.quotes ?? []), ...(S.replyTo?.quotes ?? [])].filter((q, i, all) => all.findIndex(x => x.key === q.key && x.anchor === q.anchor) === i)
+  S.replyTo = quotes.length ? { quotes } : null
+  if (h.from.about || h.from.agent || h.from.job) {
+    if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
+    S.requestView = h.from.about
+    S.agentView = h.from.agent
+    S.jobView = h.from.job
+  }
+  logSend('edit', { text: h.text, held: true })
+  draw()
+}
+
+/**
+ * ✕ delete on a message written to Claude Code that it hasn't taken in yet (✓ sent, not ✓✓). Claude
+ * Code can drop a message from its queue (its cancel_async_message control request): then Claude
+ * never sees it. When that comes too late (Claude Code took it in meanwhile), or this Claude Code
+ * can't, the message is already Claude's: the app tells Claude, in a short note sent right behind
+ * it, to ignore it. Either way it shows as deleted and leaves the panel.
+ */
+function unsend(turn: Turn) {
+  const claude = S.claude
+  if (turn.delivery !== 'sent' || turn.deleting || turn.deleted || !turn.uuid || !turn.topicId || !claude) return
+  turn.deleting = true
+  logSend('delete', { topic: turn.topicId, text: turn.text })
+  claude.cancelQueued(turn.uuid, cancelled => {
+    delete turn.deleting
+    // Another session since (/clear, /resume): this message is gone from the chat anyway.
+    if (S.claude !== claude || !S.turns.includes(turn)) return draw()
+    if (cancelled) {
+      turn.deleted = 'withdrawn'
+      delete turn.delivery
+      delete turn.queued
+      turn.isDone = true
+    } else {
+      turn.deleted = 'told'
+      submit(deletedPrompt(turn.topicId!, turn.text), { reaction: '✕', deletes: turn.topicId! })
+    }
+    logSend('deleted', { topic: turn.topicId, how: turn.deleted })
+    // Nothing more to do on it, for Claude or for you.
+    S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (t.id === turn.topicId ? { ...t, status: 'done' as const, updatedAt: Date.now() } : t)) }
+    keep()
+    toast(cancelled ? 'Deleted. Claude Code dropped it before Claude read it.' : 'Deleted. It had reached Claude Code, so Claude was told to ignore it.')
+  })
   draw()
 }
 
@@ -2093,6 +2314,9 @@ function paint() {
   const busy = new Set([...S.agents.values()].filter(a => a.state === 'running' || handingBack(a, Date.now(), settledFrom)).flatMap(workingFor))
   const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
   S.box = inbox(S.turns, S.kept.board, S.read, { isWorking: S.isWorking, busy, now: Date.now(), reacted })
+  // Messages waiting for Claude's turn to end are in queue too, after those Claude Code has (a click goes to them).
+  const inQueue = S.held.filter(waitsForClaude).map(h => ({ turn: { ...newTurn(h.text, h.at), key: heldKey(h), queued: true }, state: 'claude' as const, queued: true, updatedAt: h.at, event: 'sent' as const }))
+  if (inQueue.length) S.box.messages.splice(S.box.messages.findLastIndex(m => m.active || m.queued) + 1, 0, ...inQueue)
   notifyNewQuestions()
   markTab()
   // Sorted by what moved last, but never reordered under the pointer or during a search: the new
@@ -2254,6 +2478,9 @@ function paint() {
       openMessage,
       setRead,
       dismiss,
+      // Only once Claude Code echoes messages: before that, "sent" can't tell taken in from not.
+      ...(echoes ? { unsend } : {}),
+      heldBelow: S.held.some(waitsForClaude),
       firedBy: t => {
         const j = t.fired?.job ? S.jobs.list.find(x => x.toolId === t.fired!.job) : undefined
         return j ? { label: `${jobMark(j)} scheduled job ran: “${jobName(j, 50)}”`, open: () => openJob(j.toolId) } : t.fired ? { label: `⏰ a scheduled job ran${t.fired.prompt ? `: “${preview(t.fired.prompt, 50)}”` : ''}` } : undefined
@@ -2282,7 +2509,19 @@ function paint() {
         : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
     }
   // Side answers (/btw) sit in the chat itself, after the message that was last when asked.
-  const { lines: chat, anchors, owners } = job || req || inside ? chatCache!.out : btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin })
+  const base = job || req || inside ? chatCache!.out : btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin })
+  // Held messages last, in every view: they are the newest, and drawn fresh for their countdown.
+  const held = S.held.length
+    ? heldLines(S.held.map(h => {
+        const qs = h.from.replyTo?.quotes ?? []
+        const queued = waitsForClaude(h)
+        return { id: h.id, text: h.text, ...(qs.length ? { quote: qs.length > 1 ? `${qs.length} messages` : preview(qs[0]!.text, 60) } : {}), secs: Math.max(1, Math.ceil((h.until - Date.now()) / 1000)), ...(queued ? { queued, sendNow: () => sendHeldNow(h) } : {}), edit: () => editHeld(h), drop: () => dropHeld(h) }
+      }), cw - 2)
+    : undefined
+  const anchors = held ? { ...base.anchors, ...Object.fromEntries(Object.entries(held.anchors).map(([k, v]) => [k, v + base.lines.length])) } : base.anchors
+  const chat = held ? [...base.lines, ...held.lines] : base.lines
+  const owners = base.owners.slice()
+  held?.owners.forEach((o, i) => (owners[base.lines.length + i] = o))
   S.anchors = anchors
   S.owners = owners
   S.chatLines = chat
@@ -2315,7 +2554,7 @@ function paint() {
     S.inView.add(p.id)
   }
   if (banner) frame[0] += ' ' + lineText(banner, cw - 1, 1, cx + 1)
-  if (!S.turns.length && !btw.asides.length) {
+  if (!S.turns.length && !btw.asides.length && !S.held.length) {
     const hello = [
       [{ text: 'clued', style: { bold: true, fg: C.cyan } }, { text: `  on Claude Code · ${cwd.replace(homedir(), '~')}`, style: { fg: C.gray } }],
       [{ text: 'Your messages sit on the right, Claude\'s answers on the left, its work folded into one line.', style: { fg: C.gray } }],
@@ -2503,6 +2742,29 @@ function runCommand(text: string): boolean {
       else S.chatScroll = 0
       return true
     }
+    case 'hold': {
+      // /hold <seconds>: how long a message waits before it goes (0 sends at once); /hold alone says.
+      const secs = Number(arg.replace(/\s*s$/, ''))
+      if (arg && !(arg.trim() && secs >= 0 && secs <= 60)) return toast('Usage: /hold <seconds>, from 0 (send at once) to 60.'), true
+      if (arg) {
+        holdSet = Math.round(secs * 1000)
+        savePrefs()
+      }
+      const ms = holdMs()
+      toast(ms ? `Messages wait ${ms / 1000} s before they go: ✎ edit or ✕ delete under one, Ctrl+Z takes the last one back. /hold 0 sends at once.` : 'Messages go at once. /hold 3 gives you 3 s to edit or delete one.')
+      return true
+    }
+    case 'queue': {
+      // /queue on|off, or /queue alone to flip it.
+      const want = arg.trim()
+      if (want && want !== 'on' && want !== 'off') return toast('Usage: /queue on | off'), true
+      queueSet = want ? want === 'on' : !queueOn()
+      savePrefs()
+      toast(queueSet ? 'A message you send while Claude works waits for its turn to end, then goes as a turn of its own.' : 'Messages go at once, even while Claude works: Claude Code adds them to the running turn.')
+      // Off: what waits goes now.
+      pump()
+      return true
+    }
     case 'panel':
     case 'threads':
       S.isFolded = !S.isFolded
@@ -2524,8 +2786,9 @@ function enter() {
   S.text = ''
   S.cursor = 0
   S.menuAt = 0
-  if (text.startsWith('/') && runCommand(text)) return
-  submit(text)
+  // Slash commands go at once (Claude Code's own ones too); a message waits out the hold first.
+  if (text.startsWith('/')) return runCommand(text) ? undefined : submit(text)
+  sendTyped(text)
 }
 
 function key(k: string) {
@@ -2745,6 +3008,13 @@ function key(k: string) {
       const img = clipboardImage()
       if (img) attachImage(img)
       else toast('No image on the clipboard. Text pastes with your terminal\'s paste key; in Windows Terminal, add an image with Alt+V.')
+      break
+    }
+    case '\x1a': {
+      // Ctrl+Z: the last message you sent, while it is still held, back in the box to edit.
+      const h = S.held.at(-1)
+      if (h) editHeld(h)
+      else toast(holdMs() ? 'Nothing to take back: Ctrl+Z works while a message waits to go.' : 'Messages go at once: /hold 3 gives you 3 s to take one back.')
       break
     }
     case '\x06':
@@ -2979,6 +3249,9 @@ function input(data: string) {
 let quitting = false
 function quit(code = 0) {
   quitting = true
+  // Held messages: what would go now is written to Claude Code before it closes (as a message sent
+  // just before quitting would be); what waits for Claude's turn is kept with the session (parkHeld).
+  parkHeld()
   S.claude?.close()
   btw.close()
   if (IS_WT && tabMark.startsWith('✋')) out.write('\x1b]9;4;0;0\x07')
@@ -3050,6 +3323,10 @@ setInterval(() => {
     draw()
   }
 }, 1000)
+// A held message's countdown.
+setInterval(() => {
+  if (S.held.length) draw()
+}, 500)
 // Running agents' clocks.
 setInterval(() => {
   if (!S.isWorking && [...S.agents.values()].some(a => a.state === 'running')) draw()

@@ -62,6 +62,19 @@ export function lostRepliesPrompt(ids: readonly string[]): string {
   return `Your ${many ? 'replies' : 'reply'} to ${ids.join(', ')} never reached the app: it shows no answer to ${many ? 'them' : 'it'}. Write ${many ? 'each of them' : 'it'} again now as reply text, ${many ? 'each in its own part starting with <<reply T…>> for its message' : `in a part starting with <<reply ${ids[0]}>>`}.`
 }
 
+/**
+ * Tells Claude to ignore a message of yours it hasn't read yet (you deleted it in the app, too late
+ * for Claude Code to drop it): sent right behind it, so Claude gets the two together.
+ */
+export function deletedPrompt(id: string, text: string): string {
+  return `The user deleted their message ${id} (“${preview(text, 60)}”) before you read it: ignore it. Don't answer it, act on it or mention it.`
+}
+
+/** The topic id a deletedPrompt() is about (the session file has only its text), or undefined. */
+export function deletedAsked(text: string): string | undefined {
+  return text.match(/^The user deleted their message (T\d+) \(/)?.[1]
+}
+
 /** The ids a lostRepliesPrompt() asks again for (the session file has only its text), or undefined. */
 export function lostRepliesAsked(text: string): string[] | undefined {
   const m = text.match(/^Your repl(?:y|ies) to (T\d+(?:, T\d+)*) never reached the app: it shows no answer to (?:it|them)\./)
@@ -274,7 +287,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
   const busyTopics = new Set(turns.filter(t => live.busy.has(t.key)).map(homeOf).filter((id): id is string => !!id))
   const messages: MessageRef[] = []
   turns.forEach((turn, i) => {
-    if (turn.reaction || turn.followUp || turn.text.startsWith('/')) return
+    if (turn.reaction || turn.followUp || turn.deleted || turn.text.startsWith('/')) return
     // Its own id (what parts name), and the topic it lives in now (merged ones live in another).
     const topicId = topicOfTurn(board, turn)
     const topic = board.topics.find(t => t.id === topicId) ?? board.topics.find(t => t.messageKeys.includes(turn.key))

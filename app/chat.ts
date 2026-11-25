@@ -73,6 +73,10 @@ export type ChatCtx = {
   showPart?: (p: Part) => boolean
   /** A turn a scheduled job started: what to say above it, and opening that job's view. */
   firedBy?: (t: Turn) => { label: string; open?: () => void } | undefined
+  /** Deletes a message written to Claude Code that it hasn't taken in yet (✓ sent, not ✓✓). */
+  unsend?: (t: Turn) => void
+  /** A message you sent waits in the app for Claude's turn to end (drawn below the chat). */
+  heldBelow?: boolean
 }
 
 export const QUICK = ['👍', '👎', '❓', '👀']
@@ -284,9 +288,55 @@ const snug = (lines: Line[], max: number) => Math.min(max, Math.max(8, ...lines.
 
 /** Your message's way to Claude: ◌ sending (the app has it), ✓ sent (written to Claude Code), ✓✓ (Claude Code took it in). */
 export function delivered(turn: Turn): Span {
+  if (turn.deleting) return { text: '◌ deleting…', style: { fg: C.faint, italic: true } }
   return turn.delivery === 'sending'
     ? { text: '◌ sending', style: { fg: C.faint, italic: true } }
     : turn.delivery === 'sent' ? { text: '✓ sent', style: { fg: C.gray } } : { text: '✓✓', style: { fg: C.cyan } }
+}
+
+/** A message you sent that the app still holds back (/hold): `secs` until it goes. */
+/** `queued`: its hold is over, but it waits for Claude's turn to end (➤ send now sends it into the turn). */
+export type HeldView = { id: string; text: string; quote?: string; secs: number; queued?: boolean; sendNow?: () => void; edit: () => void; drop: () => void }
+
+/**
+ * Messages held back before they go to Claude Code, at the end of the chat: your bubble, dimmed, and
+ * under it the time left (or ⏳ in queue, waiting for Claude's turn to end) with ✎ edit (back in the
+ * input box) and ✕ delete (gone, nothing sent). Anchored at `me:held-<id>`.
+ */
+export function heldLines(list: readonly HeldView[], width: number): { lines: Line[]; owners: string[]; anchors: Record<string, number> } {
+  const out: Line[] = []
+  const owners: string[] = []
+  const anchors: Record<string, number> = {}
+  const meMax = Math.max(16, Math.floor(width * 0.75) - 4)
+  for (const h of list) {
+    const from = out.length
+    out.push([])
+    const body = wrap([{ text: h.text }], meMax)
+    const head: Line | undefined = h.quote ? [{ text: '↩ ', style: { fg: C.cyan } }, { text: clip(`“${h.quote}”`, meMax - 4), style: { fg: C.gray, italic: true } }] : undefined
+    const inner = Math.max(snug(body, meMax), head ? Math.min(meMax, lineCells(head)) : 0)
+    const left = Math.max(0, width - inner - 4 - 1)
+    anchors[`me:held-${h.id}`] = out.length
+    out.push(...bubble(body, inner, left, { fg: C.gray }, head ? clipped(head, inner) : undefined))
+    const foot: Span[] = [
+      ...(h.queued
+        ? [{ text: '⏳ in queue: goes when Claude finishes', style: { fg: C.cyan, italic: true } }, { text: ' · ', style: { fg: C.faint } }, { text: '➤ send now', style: { fg: C.cyan }, ...(h.sendNow ? { action: h.sendNow } : {}) }]
+        : [{ text: `◌ sending in ${h.secs}s`, style: { fg: C.faint, italic: true } }]),
+      { text: ' · ', style: { fg: C.faint } },
+      { text: '✎ edit', style: { fg: C.cyan, bold: true }, action: h.edit },
+      { text: ' · ', style: { fg: C.faint } },
+      { text: '✕ delete', style: { fg: C.red, bold: true }, action: h.drop },
+    ]
+    out.push([pad(Math.max(0, width - lineCells(foot) - 1)), ...foot])
+    for (let i = from; i < out.length; i++) owners[i] = `held:${h.id}`
+  }
+  return { lines: out, owners, anchors }
+}
+
+/** A message you deleted after it went to Claude Code: one small line where its bubble was. */
+const deletedLine = (turn: Turn, width: number): Line => {
+  const why = turn.deleted === 'withdrawn' ? 'taken back before Claude read it' : 'Claude was told to ignore it'
+  const t = `✕ deleted “${clip(preview(turn.text, 60), Math.max(10, width - cells(why) - 20))}” · ${why}`
+  return [pad(Math.max(0, width - cells(t) - 1)), { text: t, style: { fg: C.gray, italic: true } }]
 }
 
 export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
@@ -343,6 +393,12 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
         anchors[`fired:${turn.key}`] = out.length
         out.push([pad(2), { text: clip(f?.label ?? '⏰ a scheduled job ran', width - 4), style: { fg: C.yellow, ...(f?.open ? { underline: true } : {}) }, ...(f?.open ? { action: f.open } : {}) }])
       }
+    } else if (turn.deletes) {
+      // The app telling Claude to ignore a message you deleted: that message's own line says so.
+    } else if (turn.deleted) {
+      out.push([], deletedLine(turn, width))
+      anchors[`me:${turn.key}`] = out.length - 1
+      mark(`me:${turn.key}`)
     } else if (turn.reaction) {
       // On which reply: a click goes there.
       const on = ctx.kept.links[turn.key]
@@ -389,6 +445,8 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       // Saved to get back to later: shown always, so it is easy to spot.
       const isSaved = !!ctx.kept.saved?.some(x => x.anchor === `me:${turn.key}`)
       if (isSaved && ctx.hover !== `me:${turn.key}`) foot.push(saveSpan(ctx, `me:${turn.key}`, 'me', turn.text), { text: '  ' })
+      // Written to Claude Code but not taken in yet: it can still be deleted.
+      if (turn.delivery === 'sent' && !turn.deleting && !!turn.topicId && ctx.unsend) foot.push({ text: '✕ delete', style: { fg: C.red }, action: () => ctx.unsend!(turn) }, { text: ' · ', style: { fg: C.faint } })
       // Where it is on its way, last: the app has it, it went to Claude Code, Claude Code took it in.
       if (!turn.text.startsWith('/')) foot.push(delivered(turn))
       while (foot.length && foot.at(-1)!.text.trim() === '') foot.pop()
@@ -423,7 +481,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     // writing (a reply part, before its next step) count as reaching it.
     const notYet = !!turn.queued && working && !turn.steps.length && !turn.live && !turn.pending && !hasParts
     // Still the running turn, with a later message sent and not taken in yet.
-    const queuedBelow = working && !turn.queued && ctx.turns.slice(idx + 1).some(t => t.queued && !t.isDone && !t.reaction)
+    const queuedBelow = working && !turn.queued && (ctx.turns.slice(idx + 1).some(t => t.queued && !t.isDone && !t.reaction) || (!!ctx.heldBelow && !ctx.turns.slice(idx + 1).some(t => !t.isDone)))
     if (!notYet && (showSteps || working || text || hasParts || carried)) {
       owned = out.length
       const doneAt = new Date(turn.at + (turn.durationMs ?? 0))

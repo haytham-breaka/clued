@@ -46,6 +46,8 @@ export class Claude {
   private buf = ''
   private stderr = ''
   private onEvent: (e: ClaudeEvent) => void
+  /** The app's own control requests waiting for Claude Code's answer, by request id. */
+  private answers = new Map<string, (response: any) => void>()
   constructor(opts: Options, onEvent: (e: ClaudeEvent) => void) {
     this.onEvent = onEvent
     const args = [
@@ -97,6 +99,26 @@ export class Claude {
   /** default, acceptEdits, plan, bypassPermissions…: Claude Code answers with a status event. */
   setMode(mode: string) {
     this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'set_permission_mode', mode } })
+  }
+
+  /**
+   * Takes back a message Claude Code has queued and not taken in yet (sent with `uuid`), with its
+   * cancel_async_message control request. `done(true)`: Claude Code dropped it, so Claude never sees
+   * it. `done(false)`: it was taken in already, or this Claude Code can't (an error, or no answer in 3 s).
+   */
+  cancelQueued(uuid: string, done: (cancelled: boolean) => void) {
+    const id = randomUUID()
+    let isOver = false
+    const end = (cancelled: boolean) => {
+      if (isOver) return
+      isOver = true
+      this.answers.delete(id)
+      done(cancelled)
+    }
+    this.answers.set(id, r => end(r?.subtype === 'success' && r.response?.cancelled === true))
+    setTimeout(() => end(false), 3000).unref()
+    if (!this.proc.stdin.writable) return end(false)
+    this.write({ type: 'control_request', request_id: id, request: { subtype: 'cancel_async_message', message_uuid: uuid } })
   }
 
   interrupt() {
@@ -233,6 +255,9 @@ export class Claude {
         return
       case 'rate_limit_event':
         emit({ kind: 'rate', info: e.rate_limit_info ?? {} })
+        return
+      case 'control_response':
+        this.answers.get(String(e.response?.request_id ?? ''))?.(e.response)
         return
       case 'control_request':
         if (e.request?.subtype === 'can_use_tool' && e.request.tool_name === 'AskUserQuestion')

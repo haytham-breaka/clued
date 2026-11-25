@@ -277,8 +277,8 @@ describe('chat', () => {
       await app.send('and another thing')
       s = await app.waitFor('⏸ queued: Claude reads it at its next step')
       assert.match(s, /Claude is working… your next message is queued ↓/)
-      // Written to Claude Code, not taken in yet: ✓ sent, until Claude's next step.
-      assert.match(rowOf(s, '⏸ queued'), /⏸ queued: Claude reads it at its next step +✓ sent/)
+      // Written to Claude Code, not taken in yet: ✓ sent, until Claude's next step (and it can still be deleted).
+      assert.match(rowOf(s, '⏸ queued'), /⏸ queued: Claude reads it at its next step +✕ delete · ✓ sent/)
       app.release('slow')
       s = await app.waitFor('Also got: and another thing')
       assert.match(s, /The slow work is done\./)

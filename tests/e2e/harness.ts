@@ -57,6 +57,10 @@ export async function launch(opts: LaunchOpts = {}) {
     PATH: `${bin}:${process.env.PATH}`,
     HOME: home,
     CLUED_CLIPBOARD: 'osc52',
+    // Messages go at once (no hold to edit or delete them first) unless a test sets it: '' is the app's default.
+    CLUED_HOLD_MS: '0',
+    // And a message sent while Claude works goes at once too (Claude Code folds it in), unless a test sets it.
+    CLUED_QUEUE: '0',
     FAKE_DIR: dir,
     LANG: 'C.UTF-8',
     LC_ALL: 'C.UTF-8',
