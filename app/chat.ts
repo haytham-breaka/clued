@@ -6,6 +6,7 @@ import { markdown } from './markdown.ts'
 import { preview, questionsOf, splitAnswer, stripMarks } from './inbox.ts'
 import { lineDiff } from './diff.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
+import { roleOf } from './panel.ts'
 import type { Agent } from './panel.ts'
 import type { Part } from './inbox.ts'
 import { C, cells, clip, lineCells, pad, wrap } from './text.ts'
@@ -583,8 +584,8 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   out.push([
     pad(1),
     a.asker ? { text: ' ✻ ', style: { bg: C.claude, fg: 231, bold: true } } : { text: ' ◇ ', style: { bg: C.magenta, fg: 16, bold: true } },
-    { text: ` ${a.name}`, style: { fg: a.asker ? C.claudeName : C.magenta, bold: true } },
-    { text: a.type ? ` (${a.type})` : '', style: { fg: C.faint } },
+    { text: ` ${a.person ? `${a.person} (${roleOf(a.type)})` : a.name}`, style: { fg: a.asker ? C.claudeName : C.magenta, bold: true } },
+    { text: a.person ? ` · ${a.name}` : a.type ? ` (${a.type})` : '', style: { fg: C.faint } },
     { text: state, style: a.state === 'running' ? { fg: C.cyan, italic: true } : { fg: C.faint } },
   ])
   if (!a.log.length)
@@ -661,7 +662,7 @@ export function requestLines(req: Turn, info: RequestInfo, ctx: ChatCtx & { askS
   if (info.isStale) out.push([pad(2), { text: '⚠ No update: nothing is working on it. Ask for its status, or add to it below.', style: { fg: C.yellow } }])
   for (const a of info.agents) {
     const icon = a.state === 'running' ? '◐' : a.state === 'done' ? '✓' : a.state === 'failed' ? '✕' : '■'
-    out.push([pad(4), { text: `${icon} ◇ ${a.name}`, style: { fg: C.magenta }, action: () => ctx.openAgent(a.id) }, { text: `  ${a.state}`, style: { fg: C.faint } }])
+    out.push([pad(4), { text: `${icon} ◇ ${a.person ? `${a.person} (${roleOf(a.type)}) · ` : ''}${a.name}`, style: { fg: C.magenta }, action: () => ctx.openAgent(a.id) }, { text: `  ${a.state}`, style: { fg: C.faint } }])
   }
   const rest = chatLines({ ...ctx, turns: info.turns, showMessage: t => info.keys.has(t.key), showPart: p => p.to.some(id => info.ids.includes(id)) }, width)
   const base = out.length

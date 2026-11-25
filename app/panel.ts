@@ -29,6 +29,36 @@ export type Agent = {
   /** Claude's own view: who asked (your messages) and what its answer is called. */
   asker?: string
   resultLabel?: string
+  /** The name it goes by in the app (James, Jake…), given in the order agents start. */
+  person?: string
+}
+
+const NAMES = ['James', 'Jake', 'Maya', 'Leo', 'Nora', 'Omar', 'Zoe', 'Ravi', 'Lina', 'Theo', 'Ivy', 'Sami', 'Ezra', 'Mia', 'Hugo', 'Yara', 'Finn', 'Aria', 'Kai', 'Rosa']
+const ROLES: Record<string, string> = { explore: 'explorer', plan: 'planner', 'general-purpose': 'implementer', claude: 'implementer', fork: 'helper', 'web-fetch': 'researcher', 'statusline-setup': 'setup' }
+
+/** What an agent of this type does, in a word: explorer, planner, implementer, reviewer… */
+export function roleOf(type: string): string {
+  const t = type.toLowerCase()
+  if (ROLES[t]) return ROLES[t]!
+  if (/review/.test(t)) return 'reviewer'
+  if (/test/.test(t)) return 'tester'
+  if (/simplif/.test(t)) return 'simplifier'
+  if (/plan|architect/.test(t)) return 'planner'
+  if (/explor|search/.test(t)) return 'explorer'
+  return t ? t.split(':').pop()!.replace(/[-_]+/g, ' ') : 'implementer'
+}
+
+/** An agent as the app names it, "James (explorer)". The first time, it gets the next free name. */
+export function who(a: Agent, all: Iterable<Agent>): string {
+  if (!a.person) {
+    const named = [...all].filter(x => x.person)
+    const used = new Set(named.map(x => x.person))
+    const n = named.length
+    let name = NAMES[n % NAMES.length]!
+    if (used.has(name)) name = `${name} ${Math.floor(n / NAMES.length) + 1}`
+    a.person = name
+  }
+  return `${a.person} (${roleOf(a.type)})`
 }
 
 /** One thing in an agent's own chat: words it wrote, or a tool it used. */
@@ -261,22 +291,19 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
     if (msg) rows.push(row(iw, [{ text: '   ' }, { text: slide(msg, p.hscroll), style: { fg: C.gray, dim, underline: true }, action: toMessage }]))
     if (last) rows.push(row(iw, [{ text: '   ' }, { text: slide(`· ${last}`, p.hscroll), style: { fg: C.faint }, action: openLast }]))
   }
-  if (p.main) {
+  // One section for everyone working: Claude first, then each agent it started, by name and role.
+  if (p.main || shownAgents.length) {
     const rows: Line[] = []
     // Claude itself opens its own live view.
     const open = p.openWork
-    rows.push(row(iw, [{ text: ' ✻ ', style: { fg: C.claude }, action: open }, { text: 'Claude', style: { bold: true }, action: open }], [{ text: 'working', style: { fg: C.cyan }, action: open }]))
-    about(rows, p.main.for, p.main.last, false, open)
-    sections.push({
-      id: 'working',
-      cap: 4,
-      header: [row(width, [{ text: 'Working', style: { bold: true, fg: C.cyan } }], [{ text: 'busy', style: { fg: C.cyan } }])],
-      rows,
-    })
-  }
-  if (shownAgents.length) {
-    const rows: Line[] = []
-    const running = shownAgents.filter(a => a.state === 'running').length
+    rows.push(row(iw, [
+      { text: p.agentView === 'main' ? '▸' : ' ', style: { fg: C.claude }, action: open },
+      { text: '✻ ', style: { fg: C.claude }, action: open },
+      { text: 'Claude', style: { bold: true }, action: open },
+      { text: ' (lead)', style: { fg: C.faint }, action: open },
+    ], [{ text: p.main ? 'working' : 'idle', style: { fg: p.main ? C.cyan : C.faint }, action: open }]))
+    if (p.main) about(rows, p.main.for, p.main.last, false, open)
+    const running = shownAgents.filter(a => a.state === 'running').length + (p.main ? 1 : 0)
     for (const a of shownAgents) {
       const icon = a.state === 'running' ? { t: '◐', fg: C.cyan } : a.state === 'done' ? { t: '✓', fg: C.green } : a.state === 'failed' ? { t: '✕', fg: C.red } : { t: '■', fg: C.gray }
       // The agent itself opens its own chat: what it was asked, what it did, what it handed back.
@@ -286,15 +313,16 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       rows.push(row(iw, [
         { text: isOn ? '▸' : ' ', style: { fg: C.magenta }, action: open },
         { text: `${icon.t} `, style: { fg: icon.fg }, action: open },
-        { text: slide(a.name, p.hscroll), style: { bold: a.state === 'running' || isOn, dim: a.state !== 'running' && !isOn, fg: isOn ? C.magenta : undefined }, action: open },
+        { text: who(a, p.agents), style: { bold: a.state === 'running' || isOn, dim: a.state !== 'running' && !isOn, fg: isOn ? C.magenta : undefined }, action: open },
+        { text: slide(` · ${a.name}`, p.hscroll), style: { fg: C.gray, dim: a.state !== 'running' }, action: open },
         { text: a.isBackground ? ' bg' : '', style: { fg: C.faint } },
       ], [{ text: right, style: { fg: a.state === 'running' ? C.cyan : C.faint } }]))
-      about(rows, a.for, a.state === 'running' ? (a.last ? `${a.last}${a.steps > 1 ? ` (${a.steps} steps)` : ''}` : a.type) : '', a.state !== 'running', open)
+      about(rows, a.for, a.state === 'running' ? (a.last ? `${a.last}${a.steps > 1 ? ` (${a.steps} steps)` : ''}` : 'starting') : '', a.state !== 'running', open)
     }
     sections.push({
       id: 'agents',
-      cap: 9,
-      header: [row(width, [{ text: 'Agents', style: { bold: true, fg: C.magenta } }], [{ text: running ? `${running} running` : 'all done', style: { fg: running ? C.cyan : C.faint } }])],
+      cap: 12,
+      header: [row(width, [{ text: 'Agents', style: { bold: true, fg: C.magenta } }], [{ text: running ? `${running} working` : 'all done', style: { fg: running ? C.cyan : C.faint } }])],
       rows,
     })
   }

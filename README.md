@@ -61,8 +61,7 @@ Your messages are on the right and Claude's replies on the left, with Markdown d
 The panel on the left has these sections:
 - **Unread / Read:** replies you haven't seen yet, and the ones you have. A reply counts as read after 3 seconds on screen with the window focused.
 - **Waiting on you:** Claude's open questions to you.
-- **Working:** Claude, while it works. Click it to open a live view of its stream.
-- **Agents:** each agent Claude started, running or just finished, with the message it is working on. Click one to open its own view.
+- **Agents:** Claude first, then each agent it started, by name and role (`James (implementer)`, `Jake (explorer)`), running or just finished, with the message it is working on. Click one to open its live view. Claude is told the names too, so you can write "ask Jake to check the tests".
 - **Your recent messages:** each with its mark, latest activity first. Press `?` for what the marks mean and `⌕` to search.
 
 Drag the divider to resize the panel, and click `☰` to fold it to icons. Your own status line command runs at the bottom, fed what Claude Code would feed it.
@@ -108,7 +107,7 @@ The `⛓` button on a message opens everything connected to it: the replies, you
 
 ### Live views of Claude and its agents
 
-Click **Working** or any agent in the panel for its own view: each step as it happens, with commands, output and diffs. Press Esc to go back to the chat.
+Click Claude or any agent under **Agents** for its own view: each step as it happens, with commands, output and diffs. Press Esc to go back to the chat.
 
 ### Messages that never got an answer
 

@@ -34,7 +34,7 @@ import { assignParts, hasMarks, inbox, matches, partId, questionsOf, REPLY_GUIDE
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
-import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines } from './panel.ts'
+import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
 import { listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
@@ -848,8 +848,11 @@ function submit(text: string, opts: { reaction?: string } = {}) {
     const inside = S.agentView ? S.agents.get(S.agentView) : undefined
     if (inside) {
       turn.aboutAgent = inside.id
-      hidden = `${hidden}\nThe user wrote this from inside the view of your agent "${inside.name}" (${inside.state}; Agent tool use ${inside.id}${inside.taskId ? `, agent id ${inside.taskId}` : ''}): it is about that agent's work. If they want the agent itself to go on, continue it (SendMessage to it, when you can); otherwise answer or do it yourself.`
+      hidden = `${hidden}\nThe user wrote this from inside the view of your agent ${who(inside, S.agents.values())}, "${inside.name}" (${inside.state}; Agent tool use ${inside.id}${inside.taskId ? `, agent id ${inside.taskId}` : ''}): it is about that agent's work. If they want the agent itself to go on, continue it (SendMessage to it, when you can); otherwise answer or do it yourself.`
     }
+    // The names the panel gives your agents, so "ask Jake" means something.
+    const named = [...S.agents.values()].filter(a => a.state === 'running' || Date.now() - (a.endedAt ?? 0) < 30 * 60_000)
+    if (named.length && !inside) hidden = `${hidden}\nThe app shows your agents by these names: ${named.map(a => `${who(a, S.agents.values())} = "${preview(a.name, 50)}" (${a.state}; Agent tool use ${a.id}${a.taskId ? `, agent id ${a.taskId}` : ''})`).join('; ')}.`
     S.kept.board = raised.board
     const first = reply?.quotes[0]
     if (first) S.kept.links[turn.key] = { key: first.key, who: first.who, text: preview(first.text, 60), ...(first.anchor ? { anchor: first.anchor } : {}), ...(reply!.quotes.length > 1 ? { more: reply!.quotes.length - 1, all: reply!.quotes.map(q => ({ anchor: q.anchor ?? `${q.who}:${q.key}`, text: preview(q.text, 120) })) } : {}) }
@@ -1409,7 +1412,7 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const inside = S.agentView ? S.agents.get(S.agentView) : undefined
   const req = S.requestView ? S.turns.findLast(t => t.key === S.requestView) : undefined
   const border = { fg: S.search ? C.yellow : req ? C.blue : inside ? C.magenta : S.isWorking ? C.faint : C.cyan }
-  const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ about agent: ${clip(inside.name, Math.max(6, w - 24))} ` : ''
+  const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : ''
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search ? C.yellow : req ? C.blue : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
   const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
@@ -1564,7 +1567,7 @@ function paint() {
     ? [
         isMain
           ? { text: ` ✻ Claude, live${inside.state === 'running' ? '' : ` · ${inside.state}`} `, style: { bg: C.claude, fg: 231, bold: true } }
-          : { text: ` ◇ Inside agent: ${inside.name} `, style: { bg: C.magenta, fg: 16, bold: true } },
+          : { text: ` ◇ ${who(inside, S.agents.values())} · ${clip(inside.name, 40)} `, style: { bg: C.magenta, fg: 16, bold: true } },
         ...(insideFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, { text: `“${preview(insideFor[0].text, 50)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(insideFor[0]!) }] : []),
         { text: '  · ', style: { fg: C.faint } },
         { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
@@ -1608,7 +1611,7 @@ function paint() {
       work: S.kept.work ?? 'folded',
       poke: draw,
       isWorking: S.isWorking,
-      agentName: id => S.agents.get(id)?.name,
+      agentName: id => { const a = S.agents.get(id); return a ? `${who(a, S.agents.values())} · ${a.name}` : undefined },
       openAgent,
       setRead,
   }
