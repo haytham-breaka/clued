@@ -241,7 +241,15 @@ export function waited(ms: number): string {
  * and not among the messages `onIt` (running agents', and Claude's turn's). Longest waiting first.
  */
 export function notStarted(messages: MessageRef[], onIt: ReadonlySet<string>): MessageRef[] {
-  return messages.filter(m => m.state === 'progress' && !m.active && !onIt.has(m.turn.key)).sort((a, b) => a.updatedAt - b.updatedAt)
+  // One row per request: its messages (a follow-up merged into it) are the same task, shown by its newest.
+  const byHome = new Map<string, MessageRef>()
+  for (const m of messages) {
+    if (m.state !== 'progress' || m.active || onIt.has(m.turn.key)) continue
+    const home = m.homeId ?? m.topicId ?? m.turn.key
+    const was = byHome.get(home)
+    if (!was || m.turn.at > was.turn.at) byHome.set(home, m)
+  }
+  return [...byHome.values()].sort((a, b) => a.updatedAt - b.updatedAt)
 }
 
 export type PanelList = { start: number; end: number; total: number; max: number }
@@ -432,7 +440,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       header: [row(width, [{ text: 'Not started', style: { bold: true, fg: C.yellow } }], [{ text: String(idle.length), style: { fg: C.yellow, bold: true } }])],
       rows: idle.map(m => {
         const open = () => p.openRequest(m.turn)
-        const title = (m.topicId && p.topicTitle?.(m.topicId)) || preview(m.turn.text, 200)
+        const title = (m.homeId && p.topicTitle?.(m.homeId)) || (m.topicId && p.topicTitle?.(m.topicId)) || preview(m.turn.text, 200)
         return row(iw, [
           { text: ' ▷ ', style: { fg: C.yellow }, action: open },
           { text: slide(title, p.hscroll), action: open },

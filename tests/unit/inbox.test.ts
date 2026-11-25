@@ -250,6 +250,17 @@ describe('inbox', () => {
     assert.deepEqual(Object.fromEntries(box.messages.map(m => [m.turn.text, m.state])), { thanks: 'done', 'lost one': 'lost', later: 'done', 'new one': 'claude' })
   })
 
+  test('an agent working for a follow-up merged into a request works on the request too: in progress, not "not started"', () => {
+    const ask = turn('add a demo video', { topicId: 'T1', answer: '<<reply T1>>\nWill do.' })
+    const go = turn('start it now', { topicId: 'T2', at: NOW + 1, answer: '<<reply T2>>\nStarted.' })
+    const other = turn('something else', { topicId: 'T3', at: NOW + 2, answer: '<<reply T3>>\nLater.' })
+    const board = boardOf(topic('T1', [ask.key, go.key], 'claude'), topic('T3', [other.key], 'claude'))
+    assignParts([ask, go, other], board)
+    const box = inbox([ask, go, other], board, new Set(), live({ busy: new Set([go.key]) }))
+    const by = Object.fromEntries(box.messages.map(m => [m.turn.text, m.active ? 'active' : m.state]))
+    assert.deepEqual(by, { 'add a demo video': 'active', 'start it now': 'active', 'something else': 'progress' })
+  })
+
   test('a status change long after the reply is a status event', () => {
     const a = turn('later', { topicId: 'T1', answer: 'Reply.' })
     const board = boardOf(topic('T1', [a.key], 'done', { updatedAt: NOW + 60_000 }))

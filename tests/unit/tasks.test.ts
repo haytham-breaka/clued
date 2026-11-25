@@ -338,6 +338,11 @@ describe('not started', () => {
     const list = [a, b, ref('busy', { active: true }), ref('done', { state: 'done' }), ref('agent on it')]
     assert.deepEqual(notStarted(list, new Set([keyOf('agent on it')])).map(m => m.turn.text), ['b', 'a'])
   })
+  test('one row per request: a follow-up merged into it is the same task, shown by its newest message', () => {
+    const first = { ...ref('yes recreate the repo', { topicId: 'T150', homeId: 'T153' }), turn: { ...turn('yes recreate the repo'), at: NOW } }
+    const later = { ...ref('are we ready to go public?', { topicId: 'T153', homeId: 'T153' }), turn: { ...turn('are we ready to go public?'), at: NOW + 9 } }
+    assert.deepEqual(notStarted([first, later, ref('other', { topicId: 'T9', homeId: 'T9' })], new Set()).map(m => m.turn.text), ['are we ready to go public?', 'other'])
+  })
   test('the section: title or preview, how long, ▶ start, a click opens the request; none when empty', () => {
     const owed = ref('please write the docs', { topicId: 'T7', updatedAt: Date.now() - 12 * 60_000 })
     const plainOne = ref('another owed thing', { updatedAt: Date.now() - 1000 })

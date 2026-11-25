@@ -153,6 +153,8 @@ export type MessageRef = {
   active?: boolean
   stale?: boolean
   queued?: boolean
+  /** The topic it lives in now (the one it merged into, when it did). */
+  homeId?: string
   /** When it last moved, and how: you sent it, Claude replied to it, or its status changed. */
   updatedAt: number
   event: 'sent' | 'replied' | 'status'
@@ -260,6 +262,10 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     if (turns[i]!.answer && turns[i]!.parts?.length && !turns[i]!.followUp) next = turns[i]
     answeredBy[i] = next
   }
+  // The topics agents are on: a message merged into one (written in its view) is worked on with it,
+  // so the request it continues isn't "not started" while an agent works for the follow-up.
+  const homeOf = (t: Turn) => { const id = topicOfTurn(board, t); return (board.topics.find(x => x.id === id) ?? board.topics.find(x => x.messageKeys.includes(t.key)))?.id }
+  const busyTopics = new Set(turns.filter(t => live.busy.has(t.key)).map(homeOf).filter((id): id is string => !!id))
   const messages: MessageRef[] = []
   turns.forEach((turn, i) => {
     if (turn.reaction || turn.followUp || turn.text.startsWith('/')) return
@@ -275,7 +281,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     // answers). Taking the answer's first part instead linked "answered" to some other message's reply
     // when its own reply never arrived. History from before the app has no topics: there it is the answer.
     const replyId = latest?.id ?? own?.id ?? (topicId || topic ? undefined : by?.parts?.[0]?.id)
-    const isBusy = live.busy.has(turn.key)
+    const isBusy = live.busy.has(turn.key) || (!!topic && busyTopics.has(topic.id))
     // "claude" after a settled tag means Claude still owes work: an "OK, I'll do it" is not done.
     const owes = !!topic && !topic.isProvisional && topic.status === 'claude'
     const reply = replyId ? parts.find(p => p.id === replyId) : undefined
@@ -300,7 +306,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)
     // The tag that came with a reply stamps its topic a moment later: that is still the reply.
     const event = updatedAt === turn.at ? 'sent' : repliedAt && updatedAt - repliedAt < 10_000 ? 'replied' : 'status'
-    messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}) })
+    messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}), ...(topic ? { homeId: topic.id } : {}) })
   })
   // What is being worked on first, then what waits in queue (oldest first: Claude takes them in
   // order), then the rest by newest activity; the same moment keeps the later message on top.
