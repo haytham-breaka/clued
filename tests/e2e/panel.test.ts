@@ -182,7 +182,7 @@ describe('panel', () => {
       s = await app.waitFor('Look around the code.')
       assert.match(s, /⌕ Searched for main ▾/)
       assert.match(s, /Looking for main\./)
-      assert.match(s, /working · 1 step so far/)
+      assert.match(s, /working for \S+ · 1 step so far · (?:last step \S+ ago|running \w+ for \S+)/)
       // Steps fold with a click.
       await app.click('⌕ Searched for main', { area: 'chat' })
       await app.waitFor('⌕ Searched for main ▸')

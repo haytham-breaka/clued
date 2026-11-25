@@ -251,6 +251,22 @@ async function scenario(m: Msg) {
     say(`<<reply ${m.topic}>>\nThe background job is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
     return result()
   }
+  // A background agent that runs a long tool (its result comes on release-tool), then goes quiet;
+  // asked to check on it, Claude says so.
+  if (t.includes('quiet agent')) {
+    const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}/subagents/agent-qa-9.jsonl`
+    mkdirSync(dirname(file), { recursive: true })
+    const line = (o: unknown) => appendFileSync(file, JSON.stringify({ timestamp: new Date().toISOString(), ...(o as object) }) + '\n')
+    tool('qa-1', 'Agent', { description: 'Run the evals', subagent_type: 'general-purpose', prompt: 'Run the evals.', run_in_background: true })
+    toolResult('qa-1', 'Async agent launched successfully. agentId: qa-9')
+    line({ type: 'user', isSidechain: true, message: { content: 'Run the evals.' } })
+    line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'qa-s1', name: 'Bash', input: { command: 'npm run eval', description: 'Run the evals' } }] } })
+    finish(m, 'Started the evals in the background.', 'claude')
+    await release('tool', 20_000)
+    line({ type: 'user', isSidechain: true, message: { content: [{ type: 'tool_result', tool_use_id: 'qa-s1', content: 'evals done' }] } })
+    return
+  }
+  if (t.includes('gone quiet')) return finish(m, 'I will check on it.')
   // One background agent, three tasks: the Agent call, a SendMessage while it runs (queued until its
   // transcript shows it arriving), and one after it finished (which continues it). It keeps a to-do list.
   if (t.includes('agent tasks')) {

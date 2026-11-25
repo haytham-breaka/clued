@@ -175,4 +175,27 @@ describe('not started', () => {
       app.release('later-agent')
       s = await app.waitFor('The later work is done.')
     }))
+
+  test('a running agent: the tool it waits on, then quiet once nothing comes; ▶ continue asks Claude to check on it', () =>
+    withApp({ setup: ({ home }) => {
+      mkdirSync(join(home, '.clued'), { recursive: true })
+      writeFileSync(join(home, '.clued', 'panel.json'), JSON.stringify({ width: 68 }))
+    }, height: 44, width: 150, env: { CLUED_QUIET_MS: '2500' } }, async app => {
+      await app.send('quiet agent please')
+      await app.waitFor('Started the evals in the background.')
+      // A long tool run is not quiet: it says what it waits on, however long.
+      let s = await app.waitFor(/◐ James \(implementer\) · Run the evals bg +running Bash \d+s/)
+      await app.waitFor(/running Bash [3-9]s/)
+      assert.doesNotMatch(app.screen(), /quiet \d/)
+      // Its result comes, then nothing more: quiet.
+      app.release('tool')
+      s = await app.waitFor(/Run the evals bg +last step \ds ago/)
+      s = await app.waitFor(/Run the evals bg +quiet \ds/)
+      await app.click('James (implementer)', { area: 'panel' })
+      s = await app.waitFor(/◌ no new steps for \ds: it may be stuck\. +▶ continue/)
+      assert.match(s, /working for \S+ · 1 step so far · last step \ds ago/)
+      await app.click('▶ continue', { area: 'chat' })
+      await app.waitFor('I will check on it.')
+      assert.match(app.sent().at(-1)!.text, /^James \(agent qa-9\) seems to have gone quiet: no new steps for \ds\. Check on it, and if it has stopped, use SendMessage to it to continue its work\.$/)
+    }))
 })

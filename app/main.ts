@@ -39,9 +39,10 @@ import { assignParts, hasMarks, inbox, lostRepliesPrompt, matches, partId, quest
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
-import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
+import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
-import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, resume as resumeRun, sendFailed, sendTask, taskArrived, workingFor } from './tasks.ts'
+import type { Pulse } from './tasks.ts'
+import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, isQuiet, nudgeText, pulseOf, QUIET_MS, resume as resumeRun, sendFailed, sendTask, taskArrived, touch, workingFor } from './tasks.ts'
 import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
@@ -338,13 +339,22 @@ function markRead(ids: string[]) {
 
 // ---- Inside an agent ------------------------------------------------------------------
 
-/** Asks Claude to continue an agent that Claude Code's exit (a /reload) stopped: Claude sends it a message. */
+/**
+ * Asks Claude to continue an agent that Claude Code's exit (a /reload) stopped, or to check on one
+ * that has gone quiet: Claude sends it a message.
+ */
 function continueAgent(id: string) {
   const a = S.agents.get(id)
-  if (!a || !canContinue(a)) return
+  if (!a) return
   const name = a.person ?? a.name
-  submit(continueText(a, name), { agent: a.id })
-  toast(`Asked Claude to continue ${name}.`)
+  const now = Date.now()
+  if (canContinue(a)) {
+    submit(continueText(a, name), { agent: a.id })
+    toast(`Asked Claude to continue ${name}.`)
+  } else if (isQuiet(a, now)) {
+    submit(nudgeText(a, name, ago(now - pulseOf(a, now).since)), { agent: a.id })
+    toast(`Asked Claude to check on ${name}.`)
+  }
 }
 
 function openAgent(id: string) {
@@ -376,11 +386,12 @@ function followBackgroundAgents() {
     a.fileAt = next
     for (const e of entries) {
       moved = true
+      if (e.kind !== 'prompt') touch(a, e.at)
       if (e.kind === 'step') {
         if (a.log.some(x => 'step' in x && x.step.tool.id === e.tool.id)) continue
         a.steps++
         a.last = stepLabel({ tool: e.tool }, cwd).text
-        a.log.push({ step: { tool: e.tool } })
+        a.log.push({ step: { tool: e.tool, at: e.at } })
       } else if (e.kind === 'text') {
         if (isStreamed && a.log.some(x => 'text' in x && x.text === e.text)) continue
         a.log.push({ text: e.text })
@@ -394,7 +405,8 @@ function followBackgroundAgents() {
       }
     }
   }
-  if (moved) draw()
+  // Their "last step … ago" moves even when nothing else does.
+  if (moved || [...S.agents.values()].some(a => a.state === 'running')) draw()
 }
 setInterval(followBackgroundAgents, 1000).unref()
 
@@ -808,7 +820,20 @@ function followUpTurn(): Turn {
   return turn
 }
 
+/** When Claude last did anything (its words, a step, a result): how the app tells it has gone quiet. */
+let leadAt = 0
+
+/** Claude itself while it works: the tool it waits on, else the time since it last did anything. */
+function leadPulse(now: number): Pulse {
+  const t = openTurn()
+  const since = Math.max(leadAt, t?.at ?? 0)
+  const s = t?.steps.at(-1)
+  if (s && s.result == null) return { kind: 'tool', tool: s.tool.name, since: s.at ?? since }
+  return { kind: now - since >= QUIET_MS ? 'quiet' : 'step', since }
+}
+
 function onEvent(e: ClaudeEvent) {
+  if (e.kind !== 'usage' && e.kind !== 'output-tokens') leadAt = Date.now()
   let t = openTurn()
   if (!t && !quitting && (e.kind === 'text-delta' || e.kind === 'text' || e.kind === 'tool')) t = followUpTurn()
   switch (e.kind) {
@@ -892,7 +917,7 @@ function onEvent(e: ClaudeEvent) {
         keepTail()
         // Text with reply marks before more work is a reply written early: shown now, kept as parts.
         if (hasMarks(t.pending)) earlyPart(t, false)
-        t.steps.push({ tool: e.tool, ...(t.pending ? { said: stripMarks(stripTag(t.pending)) } : {}) })
+        t.steps.push({ tool: e.tool, at: Date.now(), ...(t.pending ? { said: stripMarks(stripTag(t.pending)) } : {}) })
         t.pending = ''
         t.live = ''
       }
@@ -932,18 +957,23 @@ function onEvent(e: ClaudeEvent) {
       if (a) {
         a.steps++
         a.last = stepLabel({ tool: e.tool }, cwd).text
-        a.log.push({ step: { tool: e.tool } })
+        a.log.push({ step: { tool: e.tool, at: Date.now() } })
+        touch(a, Date.now())
       }
       break
     }
     case 'agent-text': {
       const a = agentOf(e.parent)
-      if (a) a.log.push({ text: e.text })
+      if (a) {
+        a.log.push({ text: e.text })
+        touch(a, Date.now())
+      }
       break
     }
     case 'agent-tool-result': {
       onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
       const a = agentOf(e.parent)
+      if (a) touch(a, Date.now())
       const hit = a?.log.find(x => 'step' in x && x.step.tool.id === e.id)
       if (hit && 'step' in hit) {
         hit.step.result = e.text
@@ -1989,7 +2019,7 @@ function paint() {
         work: S.kept.work ?? 'folded',
         setWork: w => { setWork(w); draw() },
         agents: [...S.agents.values()],
-        main: S.isWorking ? { for: S.turns.filter(x => !x.isDone && !x.reaction).flatMap(x => x.followUp ?? [x.key]), last: (() => { const s = openTurn()?.steps.at(-1); return s ? stepLabel(s, cwd).text : 'thinking' })() } : undefined,
+        main: S.isWorking ? { for: S.turns.filter(x => !x.isDone && !x.reaction).flatMap(x => x.followUp ?? [x.key]), last: (() => { const s = openTurn()?.steps.at(-1); return s ? stepLabel(s, cwd).text : 'thinking' })(), pulse: leadPulse(Date.now()) } : undefined,
         turnOf: key => S.turns.findLast(x => x.key === key),
         openAgent,
         agentView: S.agentView,

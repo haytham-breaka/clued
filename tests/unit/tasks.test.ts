@@ -7,10 +7,11 @@ import { notStarted, panelLines, waited } from '../../app/panel.ts'
 import type { Agent, PanelCtx } from '../../app/panel.ts'
 import type { Step, Turn } from '../../app/session.ts'
 import {
-  agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, currentTask, cutLabel, endRun, firstTask, messageText, resume, sendFailed, sendTask, taskArrived, taskTitle, todosOf, workingFor,
+  agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, currentTask, cutLabel, endRun, firstTask, isQuiet, messageText, nudgeText, pulseOf, QUIET_MS, resume, sendFailed, sendTask, taskArrived, taskTitle, todosOf, touch, workingFor,
 } from '../../app/tasks.ts'
 import { C } from '../../app/text.ts'
 import type { Line } from '../../app/text.ts'
+import type { Pulse } from '../../app/tasks.ts'
 
 const NOW = 1_700_000_000_000
 const noop = () => {}
@@ -368,5 +369,75 @@ describe('not started', () => {
     // A running agent for it: not listed either.
     const a = agent({ for: [owed.turn.key, plainOne.turn.key] })
     assert.ok(!panelLines({ ...p, agents: [a] }, 44).lines.map(plain).some(l => l.startsWith('Not started')))
+  })
+})
+
+describe('tasks: working, or gone quiet', () => {
+  test('pulseOf: the tool it waits on, else the time since its last step; quiet after QUIET_MS with nothing running', () => {
+    const a = agent({ log: [{ step: step('s1', 'Read', {}, { at: NOW + 1000, result: 'ok' }) }] })
+    assert.deepEqual(pulseOf(a, NOW + 2000), { kind: 'step', since: NOW })
+    touch(a, NOW + 1500)
+    touch(a, NOW + 1200) // never back in time
+    assert.deepEqual(pulseOf(a, NOW + 2000), { kind: 'step', since: NOW + 1500 })
+    assert.equal(pulseOf(a, NOW + 1500 + QUIET_MS).kind, 'quiet')
+    assert.ok(isQuiet(a, NOW + 1500 + QUIET_MS))
+    // A long tool run is not quiet: it waits on that tool, since the call.
+    a.log.push({ step: step('s2', 'Bash', {}, { at: NOW + 3000 }) })
+    assert.deepEqual(pulseOf(a, NOW + 10 * QUIET_MS), { kind: 'tool', tool: 'Bash', since: NOW + 3000 })
+    assert.ok(!isQuiet(a, NOW + 10 * QUIET_MS))
+    // A resumed run counts from its start.
+    const b = agent({ startedAt: NOW + 9000, lastStepAt: NOW })
+    assert.equal(pulseOf(b, NOW + 9000 + QUIET_MS - 1).kind, 'step')
+    // Only a background agent with an id can be checked on (Claude sends it a message).
+    assert.ok(!isQuiet(agent({ isBackground: false }), NOW + QUIET_MS))
+    assert.ok(!isQuiet(agent({ taskId: undefined }), NOW + QUIET_MS))
+    assert.ok(!isQuiet(agent({ state: 'done' }), NOW + QUIET_MS))
+    assert.equal(nudgeText(a, 'James', '6m 0s'), 'James (agent ag-1) seems to have gone quiet: no new steps for 6m 0s. Check on it, and if it has stopped, use SendMessage to it to continue its work.')
+  })
+
+  test('drawn: the row says last step, the tool, or quiet (yellow); its view says so, with ▶ continue when quiet', () => {
+    const base = {
+      isResultsOnly: false, isWorking: false, isFolded: false, hscroll: 0, results: noop, fold: noop, side: noop,
+      box: { unread: [], waiting: [], messages: [] }, openPart: noop, dismiss: noop, openMessage: noop, openWork: noop,
+      picked: '', query: null, search: noop, isLegend: false, legend: noop, next: noop, readParts: noop, unreadParts: noop,
+      readList: [], isReadTab: false, readTab: noop, work: 'folded', setWork: noop, agents: [], turnOf: () => undefined,
+      openAgent: noop, agentView: '', jumpTo: noop, openRequest: noop, requestView: '', jobs: [], openJob: noop, jobView: '', scroll: {}, height: 60,
+    } as unknown as PanelCtx
+    const now = Date.now()
+    const rowOf = (a: Agent, width: number, extra: Partial<PanelCtx> = {}) => {
+      const out = panelLines({ ...base, agents: [a], ...extra }, width).lines
+      return out.find(l => plain(l).includes('James'))!
+    }
+    const working = agent({ person: 'James', name: 'Fix', startedAt: now - 60_000, lastStepAt: now - 12_000 })
+    assert.match(plain(rowOf(working, 60)), /◐ James \(implementer\) · Fix bg +last step 12s ago$/)
+    // Narrow: the name keeps its room, the note goes short.
+    assert.match(plain(rowOf(working, 40)), /◐ James \(implementer\) · Fix bg +12s$/)
+    const running = agent({ person: 'James', name: 'Fix', startedAt: now - 600_000, log: [{ step: step('b', 'Bash', {}, { at: now - 360_000 }) }] })
+    assert.match(plain(rowOf(running, 60)), /running Bash 6m 0s$/)
+    assert.match(plain(rowOf(running, 46)), /Fix bg +Bash 6m 0s$/)
+    assert.match(plain(rowOf(running, 40)), /Fix bg +6m 0s$/)
+    const quiet = agent({ person: 'James', name: 'Fix', startedAt: now - 900_000, lastStepAt: now - 360_000 })
+    const q = rowOf(quiet, 60)
+    assert.match(plain(q), /quiet 6m 0s$/)
+    assert.equal(q.at(-1)!.style?.fg, C.yellow)
+    // Claude itself: working, its tool after a while, quiet.
+    const lead = (pulse: Pulse) =>
+      plain(panelLines({ ...base, main: { for: [], last: 'thinking', pulse } }, 60).lines.find(l => plain(l).includes('Claude'))!)
+    assert.match(lead({ kind: 'step', since: now - 1000 }), /working$/)
+    assert.match(lead({ kind: 'tool', tool: 'Bash', since: now - 2000 }), /working$/)
+    assert.match(lead({ kind: 'tool', tool: 'Bash', since: now - 120_000 }), /running Bash 2m 0s$/)
+    assert.match(lead({ kind: 'quiet', since: now - 400_000 }), /quiet 6m 40s$/)
+
+    // Its view: how long it has worked, its last step or tool; quiet, with ▶ continue.
+    let asked = ''
+    const view = (a: Agent) => agentLines(a, [], ctx([], { now, continueAgent: (id: string) => (asked = id) }), 80).lines
+    assert.ok(view(working).map(plain).some(l => /⠋ working for 1m 0s · 0 steps so far · last step 12s ago/.test(l)))
+    assert.ok(view(running).map(plain).some(l => /working for 10m 0s · 0 steps so far · running Bash for 6m 0s/.test(l)))
+    const lines = view(quiet)
+    const note = lines.find(l => plain(l).includes('no new steps'))!
+    assert.match(plain(note), /◌ no new steps for 6m 0s: it may be stuck\.  ▶ continue/)
+    note.find(sp => sp.text.includes('continue'))!.action!()
+    assert.equal(asked, quiet.id)
+    assert.ok(!view(working).some(l => plain(l).includes('no new steps')))
   })
 })

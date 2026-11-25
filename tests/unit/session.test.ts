@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -192,14 +192,18 @@ describe('session files', () => {
     mkdirSync(dir, { recursive: true })
     const lines = [
       { type: 'user', message: { content: 'Do it.' } },
-      { type: 'assistant', message: { content: [{ type: 'text', text: 'On it.' }, { type: 'tool_use', id: 'x1', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'assistant', timestamp: '2026-11-25T10:00:05.000Z', message: { content: [{ type: 'text', text: 'On it.' }, { type: 'tool_use', id: 'x1', name: 'Bash', input: { command: 'ls' } }] } },
       { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x1', content: [{ type: 'text', text: 'a.ts' }], is_error: true }] } },
       { type: 'user', isMeta: true, message: { content: 'meta' } },
       { type: 'user', message: { content: [{ type: 'text', text: 'Also this.' }] } },
       { type: 'user', message: { content: '  ' } },
     ]
     writeFileSync(join(dir, 'agent-ag.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n{"partial":')
-    const { entries, next } = S.readAgentFile(CWD, 'sess', 'ag', 0)
+    const { entries: all, next } = S.readAgentFile(CWD, 'sess', 'ag', 0)
+    // When: the transcript's time, else when the file last changed.
+    const mtime = statSync(join(dir, 'agent-ag.jsonl')).mtimeMs
+    assert.deepEqual(all.map(e => e.at), [Date.parse('2026-11-25T10:00:05.000Z'), Date.parse('2026-11-25T10:00:05.000Z'), mtime, mtime])
+    const entries = all.map(({ at: _, ...e }) => e)
     assert.deepEqual(entries, [
       { kind: 'text', text: 'On it.' },
       { kind: 'step', tool: { id: 'x1', name: 'Bash', input: { command: 'ls' } } },
@@ -208,7 +212,7 @@ describe('session files', () => {
     ])
     // From where it left off, a message is a prompt (the first was read before).
     writeFileSync(join(dir, 'agent-ag.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n' + JSON.stringify({ type: 'user', message: { content: 'And that.' } }) + '\n')
-    assert.deepEqual(S.readAgentFile(CWD, 'sess', 'ag', next).entries, [{ kind: 'prompt', text: 'And that.' }])
+    assert.deepEqual(S.readAgentFile(CWD, 'sess', 'ag', next).entries.map(({ at: _, ...e }) => e), [{ kind: 'prompt', text: 'And that.' }])
     assert.deepEqual(S.readAgentFile(CWD, 'sess', 'missing', 0), { entries: [], next: 0 })
   })
 })

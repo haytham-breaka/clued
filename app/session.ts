@@ -402,12 +402,14 @@ export function lastCwd(cwd: string, sessionId: string): string | undefined {
 }
 
 /** What a background agent did, read from its own transcript (Claude Code does not stream it). */
-export type AgentFileEntry =
+/** `at`: when the transcript says it happened, else when the file last changed. */
+export type AgentFileEntry = (
   | { kind: 'step'; tool: { id: string; name: string; input: Record<string, unknown> } }
   | { kind: 'text'; text: string }
   | { kind: 'result'; id: string; text: string; isError: boolean }
   /** A message to it after its first (a SendMessage arriving). */
   | { kind: 'prompt'; text: string }
+) & { at: number }
 
 /**
  * A background agent's new entries since byte `from`, in Claude Code's file for it
@@ -420,7 +422,7 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
   let fd: number | undefined
   try {
     fd = openSync(`${projectDir(cwd)}/${sessionId}/subagents/agent-${agentId}.jsonl`, 'r')
-    const size = fstatSync(fd).size
+    const { size, mtimeMs } = fstatSync(fd)
     if (size <= from) return { entries, next: from }
     const buf = Buffer.alloc(size - from)
     readSync(fd, buf, 0, buf.length, from)
@@ -435,20 +437,21 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
         continue
       }
       const content = e.message?.content
+      const at = Date.parse(e.timestamp ?? '') || mtimeMs
       // A message to the agent: the first is Claude's prompt (the app has it from the Agent call).
       if (e.type === 'user' && !e.isMeta && (typeof content === 'string' || (Array.isArray(content) && !content.some((b: any) => b.type === 'tool_result')))) {
         const text = typeof content === 'string' ? content : content.filter((b: any) => b.type === 'text').map((b: any) => String(b.text)).join('\n')
         if (!isPrompted) isPrompted = true
-        else if (text.trim()) entries.push({ kind: 'prompt', text })
+        else if (text.trim()) entries.push({ kind: 'prompt', text, at })
         continue
       }
       if (!Array.isArray(content)) continue
       for (const b of content) {
-        if (e.type === 'assistant' && b.type === 'tool_use') entries.push({ kind: 'step', tool: { id: String(b.id), name: String(b.name), input: b.input ?? {} } })
-        else if (e.type === 'assistant' && b.type === 'text' && b.text) entries.push({ kind: 'text', text: String(b.text) })
+        if (e.type === 'assistant' && b.type === 'tool_use') entries.push({ kind: 'step', tool: { id: String(b.id), name: String(b.name), input: b.input ?? {} }, at })
+        else if (e.type === 'assistant' && b.type === 'text' && b.text) entries.push({ kind: 'text', text: String(b.text), at })
         else if (e.type === 'user' && b.type === 'tool_result') {
           const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') : ''
-          entries.push({ kind: 'result', id: String(b.tool_use_id), text, isError: !!b.is_error })
+          entries.push({ kind: 'result', id: String(b.tool_use_id), text, isError: !!b.is_error, at })
         }
       }
     }

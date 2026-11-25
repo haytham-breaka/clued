@@ -6,8 +6,8 @@ import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
 import type { Step, Turn, Work } from './session.ts'
-import { canContinue, currentTask, cutLabel } from './tasks.ts'
-import type { AgentTask } from './tasks.ts'
+import { canContinue, currentTask, cutLabel, pulseOf } from './tasks.ts'
+import type { AgentTask, Pulse } from './tasks.ts'
 import { C, cells, clip } from './text.ts'
 import type { Line, Span } from './text.ts'
 
@@ -43,6 +43,8 @@ export type Agent = {
   alias?: string
   /** Rebuilt from the session file: the Claude Code that ran it has stopped. */
   isPast?: boolean
+  /** When it last did something (a step, its words, a tool's result): how the app tells it has gone quiet. */
+  lastStepAt?: number
   /** Stopped mid-run because the Claude Code it ran in ended: by /reload, or otherwise. */
   cut?: 'reload' | 'exit'
 }
@@ -81,7 +83,19 @@ export type AgentEntry = { text: string } | { step: Step }
 /** Finished agents stay listed this long. */
 const AGENT_KEEP_MS = 10 * 60 * 1000
 
-const ago = (ms: number) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s` : `${Math.floor(ms / 3_600_000)}h`)
+export const ago = (ms: number) => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s` : `${Math.floor(ms / 3_600_000)}h`)
+/**
+ * A worker's right-hand note: the tool it waits on, quiet, or the time since its last step. `short`
+ * when the panel is narrow (the name needs the room): "Bash 6m", "12s ago".
+ */
+const pulseText = (pulse: Pulse | undefined, now: number, plain?: string, short = false) =>
+  !pulse ? plain ?? ''
+  // Claude's own quick steps would flicker by: its tool shows once it has run a while.
+  : pulse.kind === 'tool' && plain && now - pulse.since < 10_000 ? plain
+  : pulse.kind === 'tool' ? `${short ? '' : 'running '}${pulse.tool} ${ago(now - pulse.since)}`
+  : pulse.kind === 'quiet' ? `quiet ${ago(now - pulse.since)}`
+  : plain ?? (short ? ago(now - pulse.since) : `last step ${ago(now - pulse.since)} ago`)
+
 export const FOLDED = 7
 
 export type PanelCtx = {
@@ -123,7 +137,7 @@ export type PanelCtx = {
   setWork: (w: Work) => void
   agents: Agent[]
   /** Claude itself, while it works: the messages it is on and its latest step. */
-  main?: { for: string[]; last: string }
+  main?: { for: string[]; last: string; pulse?: Pulse }
   turnOf: (key: string) => Turn | undefined
   /** Opens an agent's own chat; which one is open. */
   openAgent: (id: string) => void
@@ -354,7 +368,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       { text: '✻ ', style: { fg: C.claude }, action: open },
       { text: 'Claude', style: { bold: true }, action: open },
       { text: ' (lead)', style: { fg: C.faint }, action: open },
-    ], [{ text: p.main ? 'working' : 'idle', style: { fg: p.main ? C.cyan : C.faint }, action: open }]))
+    ], [{ text: !p.main ? 'idle' : pulseText(p.main.pulse, now, 'working'), style: { fg: p.main?.pulse?.kind === 'quiet' ? C.yellow : p.main ? C.cyan : C.faint }, action: open }]))
     if (p.main) about(rows, p.main.for, p.main.last, false, open)
     const running = shownAgents.filter(a => a.state === 'running').length + (p.main ? 1 : 0)
     for (const a of shownAgents) {
@@ -362,8 +376,15 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       // The agent itself opens its own chat: what it was asked, what it did, what it handed back.
       const open = () => p.openAgent(a.id)
       const isOn = p.agentView === a.id
-      const right = a.state === 'running' ? ago(now - a.startedAt) : `${a.state} ${ago(now - (a.endedAt ?? now))} ago`
+      // Running: the tool it waits on, else how long since its last step; quiet (yellow) after QUIET_MS.
+      const pulse = a.state === 'running' ? pulseOf(a, now) : undefined
       const tasks = a.tasks.length
+      // The long note only when the name and what it does still fit whole beside it.
+      const named = 4 + cells(who(a, p.agents)) + (tasks > 1 ? cells(` · ${tasks} tasks`) : 0) + cells(` · ${a.name}`) + (a.isBackground ? 3 : 0)
+      // Else the short one, else (a tool) just how long; quiet always says so.
+      const fits = (t: string) => named + 1 + cells(t) <= iw
+      const notes = pulse ? [pulseText(pulse, now), pulseText(pulse, now, undefined, true), ago(now - pulse.since)] : []
+      const right = !pulse ? `${a.state} ${ago(now - (a.endedAt ?? now))} ago` : pulse.kind === 'quiet' ? notes[0]! : notes.find(fits) ?? notes[2]!
       rows.push(row(iw, [
         { text: isOn ? '▸' : ' ', style: { fg: C.magenta }, action: open },
         { text: `${icon.t} `, style: { fg: icon.fg }, action: open },
@@ -372,7 +393,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         { text: tasks > 1 ? ` · ${tasks} tasks` : '', style: { fg: C.magenta, dim: a.state !== 'running' }, action: open },
         { text: slide(` · ${a.name}`, p.hscroll), style: { fg: C.gray, dim: a.state !== 'running' }, action: open },
         { text: a.isBackground ? ' bg' : '', style: { fg: C.faint } },
-      ], [{ text: right, style: { fg: a.state === 'running' ? C.cyan : C.faint } }]))
+      ], [{ text: right, style: { fg: pulse?.kind === 'quiet' ? C.yellow : pulse ? C.cyan : C.faint } }]))
       const last = a.state === 'running' ? (a.last ? `${a.last}${a.steps > 1 ? ` (${a.steps} steps)` : ''}` : 'starting') : ''
       if (tasks > 1) {
         // The task it is on (the newest running one, else the last it had); its messages are in its view.

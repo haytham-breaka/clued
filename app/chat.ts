@@ -7,9 +7,9 @@ import { preview, questionsOf, splitAnswer, stripMarks } from './inbox.ts'
 import { block, codeRows, diffHead, diffRows, hunkGap, K, langOf, readRows, shellRows } from './code.ts'
 import type { Lang, Row } from './code.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
-import { roleOf } from './panel.ts'
+import { ago, roleOf } from './panel.ts'
 import type { Agent } from './panel.ts'
-import { canContinue, currentTask, cutLabel, todosOf } from './tasks.ts'
+import { canContinue, currentTask, cutLabel, isQuiet, pulseOf, todosOf } from './tasks.ts'
 import type { AgentTask, Todo } from './tasks.ts'
 import { clock, cronWords, jobMark, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
@@ -799,7 +799,17 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
     const tag: Span = { text: ok ? (a.resultLabel ?? '✓ handed back to Claude') : '✕ failed', style: { fg: ok ? C.green : C.red, bold: true } }
     out.push(...bubble(body, Math.max(snug(body, max), cells(tag.text) + 1), IN, { fg: ok ? C.green : C.red }, undefined, undefined, tag))
     out.push([pad(IN + 2), { text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(a.result ?? '') }])
-  } else if (a.state === 'running') out.push([pad(IN), { text: `${ctx.spin} working · ${a.steps} step${a.steps === 1 ? '' : 's'} so far`, style: { fg: C.cyan } }])
+  } else if (a.state === 'running') {
+    // How long it has run, and how it is doing now: the tool it waits on, or its last step.
+    const now = ctx.now
+    const pulse = pulseOf(a, now)
+    const doing = pulse.kind === 'tool' ? `running ${pulse.tool} for ${ago(now - pulse.since)}` : `last step ${ago(now - pulse.since)} ago`
+    out.push([pad(IN), { text: `${ctx.spin} working for ${ago(now - a.startedAt)} · ${a.steps} step${a.steps === 1 ? '' : 's'} so far · ${doing}`, style: { fg: C.cyan } }])
+    // Nothing new for a while, and nothing running: it may be stuck. Claude can check on it.
+    if (pulse.kind === 'quiet')
+      out.push([pad(IN), { text: `◌ no new steps for ${ago(now - pulse.since)}: it may be stuck.`, style: { fg: C.yellow, italic: true } },
+        ...(isQuiet(a, now) && ctx.continueAgent ? [{ text: '  ▶ continue', style: { fg: C.cyan, bold: true }, action: () => ctx.continueAgent!(a.id) }] : [])])
+  }
   // Stopped mid-run by Claude Code's exit: what happened, and going on from here.
   if (a.state === 'stopped' && a.cut) {
     out.push([])

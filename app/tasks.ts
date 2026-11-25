@@ -115,6 +115,35 @@ export const canContinue = (a: Agent) => a.state === 'stopped' && !!a.cut && a.i
 export const continueText = (a: Agent, name: string) =>
   `Continue ${name}'s work (agent ${a.taskId}): it was ${cutLabel(a)}. Use SendMessage to it to resume.`
 
+// ---- Working, or gone quiet ----------------------------------------------------------
+
+/** No new step for this long, with no tool running: the agent has gone quiet (it may be stuck). */
+export const QUIET_MS = Number(process.env.CLUED_QUIET_MS) || 5 * 60 * 1000
+
+/** An agent did something (a step, its words, a tool's result) at `at`. */
+export function touch(a: Agent, at: number) {
+  if (!a.lastStepAt || at > a.lastStepAt) a.lastStepAt = at
+}
+
+/**
+ * How a running agent is doing: a tool it is waiting on (a long test run is not stuck), or the time
+ * since its last step; past QUIET_MS with nothing running, quiet.
+ */
+export type Pulse = { kind: 'tool'; tool: string; since: number } | { kind: 'step' | 'quiet'; since: number }
+export function pulseOf(a: Agent, now: number): Pulse {
+  const since = Math.max(a.lastStepAt ?? 0, a.startedAt)
+  const newest = a.log.findLast(x => 'step' in x)
+  if (newest && 'step' in newest && newest.step.result == null) return { kind: 'tool', tool: newest.step.tool.name, since: newest.step.at ?? since }
+  return { kind: now - since >= QUIET_MS ? 'quiet' : 'step', since }
+}
+
+/** A running background agent that has gone quiet: Claude can check on it and send it a message. */
+export const isQuiet = (a: Agent, now: number) => a.state === 'running' && a.isBackground && !!a.taskId && pulseOf(a, now).kind === 'quiet'
+
+/** Your message asking Claude to check on an agent that has gone quiet. */
+export const nudgeText = (a: Agent, name: string, quietFor: string) =>
+  `${name} (agent ${a.taskId}) seems to have gone quiet: no new steps for ${quietFor}. Check on it, and if it has stopped, use SendMessage to it to continue its work.`
+
 /** A run ended: the tasks it covered (the running ones) are done, or failed with it. */
 export function endRun(a: Agent, state: 'done' | 'failed' | 'stopped', at: number) {
   a.state = state
