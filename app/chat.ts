@@ -9,6 +9,8 @@ import type { Lang, Row } from './code.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
 import { roleOf } from './panel.ts'
 import type { Agent } from './panel.ts'
+import { currentTask, todosOf } from './tasks.ts'
+import type { AgentTask, Todo } from './tasks.ts'
 import { clock, cronWords, jobMark, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
 import type { Part } from './inbox.ts'
@@ -57,6 +59,8 @@ export type ChatCtx = {
   /** An agent's name, and opening its view (for messages sent from inside one). */
   agentName: (id: string) => string | undefined
   openAgent: (id: string) => void
+  /** Goes to one of your messages in the main chat (from an agent's task). */
+  openMessage?: (t: Turn) => void
   /** A request's view draws only its chain: your messages in it, and the reply parts about it. */
   showMessage?: (t: Turn) => boolean
   /** Marks reply parts read or unread by hand. */
@@ -216,11 +220,7 @@ export function stepDetail(s: Step, width: number, left: number, ctx: ChatCtx): 
       break
     }
     case 'TodoWrite':
-      for (const t of (i.todos ?? []) as { content?: string; status?: string }[]) {
-        const mark = t.status === 'completed' ? '☑ ' : t.status === 'in_progress' ? '◐ ' : '☐ '
-        const style: Style = t.status === 'completed' ? { fg: C.gray } : t.status === 'in_progress' ? { fg: C.cyan } : {}
-        for (const [n, l] of wrap([{ text: String(t.content ?? '') }], width - 4).entries()) rows.push([pad(2), { text: n ? '  ' : mark, style: { fg: C.cyan } }, ...l.map(x => ({ ...x, style }))])
-      }
+      rows.push(...todoLines((i.todos ?? []) as Partial<Todo>[], width, 2))
       break
     default: {
       for (const l of fieldLines(i, width - 2)) rows.push([pad(2), ...l])
@@ -237,6 +237,17 @@ export function stepDetail(s: Step, width: number, left: number, ctx: ChatCtx): 
   if (shown.length < rows.length)
     out.push([pad(left), { text: `… ${rows.length - shown.length} more lines, show all`, style: { fg: C.cyan }, action: () => { s.isFull = true; ctx.poke() } }])
   return out
+}
+
+/** A to-do list: ☑ done, ◐ in progress, ☐ to do, each item wrapped under itself. */
+export function todoLines(todos: Partial<Todo>[], width: number, left: number): Line[] {
+  const rows: Line[] = []
+  for (const t of todos) {
+    const mark = t.status === 'completed' ? '☑ ' : t.status === 'in_progress' ? '◐ ' : '☐ '
+    const style: Style = t.status === 'completed' ? { fg: C.gray } : t.status === 'in_progress' ? { fg: C.cyan } : {}
+    for (const [n, l] of wrap([{ text: String(t.content ?? '') }], width - left - 2).entries()) rows.push([pad(left), { text: n ? '  ' : mark, style: { fg: C.cyan } }, ...l.map(x => ({ ...x, style }))])
+  }
+  return rows
 }
 
 const secs = (ms: number) => (ms < 60000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`)
@@ -618,6 +629,52 @@ function clipped(line: Line, width: number): Line {
 // ---- Inside an agent: its own chat ---------------------------------------------------
 
 /**
+ * An agent's tasks, when Claude gave it more than one: each with its mark (✓ done, the spinner while
+ * it runs, ◌ queued, ✕ failed), its title (a click goes to where it starts in the log), when Claude
+ * sent it, and the topic ids of your messages it is for (a click goes to that message).
+ */
+export function tasksBlock(a: Agent, ctx: ChatCtx, width: number): Line[] {
+  const tasks = a.tasks
+  if (tasks.length < 2) return []
+  const n = currentTask(a)
+  const counts = (['running', 'queued', 'done', 'failed'] as const).map(s => [s, tasks.filter(t => t.state === s).length] as const).filter(([, k]) => k)
+  const out: Line[] = [[], [
+    pad(2),
+    { text: 'Tasks', style: { bold: true } },
+    { text: `  ${tasks.length} · ${counts.map(([s, k]) => `${k} ${s}`).join(' · ')}`, style: { fg: C.gray } },
+  ]]
+  const numW = String(tasks.length).length + 2
+  tasks.forEach((t, i) => {
+    const mark: Span = t.state === 'done' ? { text: '✓ ', style: { fg: C.green } }
+      : t.state === 'running' ? { text: `${ctx.spin} `, style: { fg: C.cyan } }
+      : t.state === 'failed' ? { text: '✕ ', style: { fg: C.red } }
+      : { text: '◌ ', style: { fg: C.gray } }
+    const go = () => ctx.jump(`task:${i}`)
+    // Right of the title: when it was sent, and which of your messages it is for.
+    const msgs = t.for.map(k => ctx.turns.findLast(x => x.key === k)).filter((x): x is Turn => !!x)
+    const right: Span[] = [{ text: `  ${clock(t.at, ctx.now)}`, style: { fg: C.faint } }]
+    msgs.slice(0, 4).forEach((m, k) => {
+      right.push({ text: k ? ' ' : ' · ', style: { fg: C.faint } })
+      const label = m.topicId ?? `“${preview(m.text, 14)}”`
+      right.push({ text: label, style: { fg: C.blue, underline: true }, ...(ctx.openMessage ? { action: () => ctx.openMessage!(m) } : {}) })
+    })
+    if (msgs.length > 4) right.push({ text: ` +${msgs.length - 4}`, style: { fg: C.faint } })
+    const rightW = right.reduce((w, sp) => w + cells(sp.text), 0)
+    const room = Math.max(8, width - 4 - 2 - numW - rightW)
+    const title = clip(t.title, room)
+    const isOn = i === n && t.state === 'running'
+    out.push([
+      pad(4),
+      { ...mark, action: go },
+      { text: `${i + 1}.`.padEnd(numW), style: { fg: C.faint }, action: go },
+      { text: title, style: { bold: isOn, fg: t.state === 'queued' ? C.gray : undefined, dim: t.state === 'done' }, action: go },
+      ...right,
+    ])
+  })
+  return out
+}
+
+/**
  * An agent's chat: what Claude asked it (on the right, as the one who wrote to it), then what the
  * agent said and did (on the left, under its avatar), then what it handed back. Below that, your
  * messages about this agent and Claude's replies, drawn as in the main chat.
@@ -627,12 +684,42 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   const IN = 4
   const max = Math.max(20, Math.min(110, width - 6 - IN))
   const meMax = Math.max(16, Math.floor(width * 0.75) - 4)
+  const taskAnchors: Record<string, number> = {}
+  const tasks = a.tasks
+  const many = tasks.length > 1
+
+  // What Claude asked it, task by task, and its own to-do list.
+  out.push(...tasksBlock(a, ctx, width))
+  const todos = todosOf(a.log)
+  if (todos.length) {
+    const done = todos.filter(t => t.status === 'completed').length
+    out.push([], [pad(2), { text: 'To-do', style: { bold: true } }, { text: `  ${done} of ${todos.length} done`, style: { fg: C.gray } }])
+    out.push(...todoLines(todos, width, 4))
+  }
 
   // Claude's request.
   out.push([])
+  taskAnchors['task:0'] = out.length
   const ask = a.prompt ? markdown(a.prompt, meMax, ctx.copy) : [[{ text: a.name, style: {} }] as Line]
-  const askW = Math.max(snug(ask, meMax), 16)
-  out.push(...bubble(ask, askW, Math.max(0, width - askW - 5), { fg: C.claude }, undefined, undefined, { text: a.asker ?? '✻ Claude asked', style: { fg: a.asker ? C.cyan : C.claudeName, bold: true } }))
+  const askTag: Span = { text: a.asker ?? (many ? '✻ Claude asked · task 1' : '✻ Claude asked'), style: { fg: a.asker ? C.cyan : C.claudeName, bold: true } }
+  const askW = Math.max(snug(ask, meMax), many ? Math.min(meMax, cells(askTag.text) + 1) : 0, 16)
+  out.push(...bubble(ask, askW, Math.max(0, width - askW - 5), { fg: C.claude }, undefined, undefined, askTag))
+  /** A later task where it starts: Claude's message, on the right as the first one is. */
+  const sent = (n: number) => {
+    const t = tasks[n]!
+    out.push([])
+    taskAnchors[`task:${n}`] = out.length
+    const body = markdown(t.text || t.title, meMax, ctx.copy)
+    const tag: Span = t.state === 'queued'
+      ? { text: clip(`◌ task ${n + 1} · queued: it gets it after this run`, meMax), style: { fg: C.gray, bold: true } }
+      : { text: clip(`✻ Claude sent task ${n + 1} · ${clock(t.at, ctx.now)}`, meMax), style: { fg: C.claudeName, bold: true } }
+    const w = Math.max(snug(body, meMax), Math.min(meMax, cells(tag.text) + 1), 16)
+    out.push(...bubble(body, w, Math.max(0, width - w - 5), { fg: t.state === 'queued' ? C.faint : C.claude }, undefined, undefined, tag))
+  }
+  const startsAt = new Map<number, number[]>()
+  tasks.forEach((t, n) => {
+    if (n && t.logAt != null && t.state !== 'queued') startsAt.set(Math.min(t.logAt, a.log.length), [...(startsAt.get(Math.min(t.logAt, a.log.length)) ?? []), n])
+  })
 
   // The agent, like a contact.
   out.push([])
@@ -646,7 +733,8 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   ])
   if (!a.log.length)
     out.push([pad(IN), { text: a.isBackground ? (a.state === 'running' ? `${ctx.spin} It runs in the background: its steps show here as Claude Code writes them down.` : 'It ran in the background, and no steps of it were found.') : a.state === 'running' ? `${ctx.spin} starting…` : 'No steps were streamed.', style: { fg: C.gray, italic: true } }])
-  for (const e of a.log) {
+  for (const [k, e] of a.log.entries()) {
+    for (const n of startsAt.get(k) ?? []) sent(n)
     if ('text' in e) {
       const body = markdown(e.text, max, ctx.copy)
       out.push(...bubble(body, snug(body, max), IN, { fg: C.faint }))
@@ -673,6 +761,8 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
     }
   }
 
+  for (const n of startsAt.get(a.log.length) ?? []) sent(n)
+
   // What it handed back to Claude.
   if (a.result) {
     out.push([])
@@ -682,6 +772,8 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
     out.push(...bubble(body, Math.max(snug(body, max), cells(tag.text) + 1), IN, { fg: ok ? C.green : C.red }, undefined, undefined, tag))
     out.push([pad(IN + 2), { text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(a.result ?? '') }])
   } else if (a.state === 'running') out.push([pad(IN), { text: `${ctx.spin} working · ${a.steps} step${a.steps === 1 ? '' : 's'} so far`, style: { fg: C.cyan } }])
+  // Tasks it has not started: waiting their turn.
+  tasks.forEach((t, n) => n && t.state === 'queued' && sent(n))
 
   // Your messages about it, with Claude's replies.
   const base = out.length
@@ -694,6 +786,7 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   else out.push([], [pad(2), { text: a.asker ? 'What you write below goes to Claude as a normal message. Esc goes back to the chat.' : 'Write below to ask Claude about this agent, or to have it continue the agent.', style: { fg: C.faint } }])
   const shift = out.length - base
   for (const k of Object.keys(anchors)) anchors[k]! += shift
+  Object.assign(anchors, taskAnchors)
   const ownersShifted: string[] = []
   owners.forEach((o, i) => (ownersShifted[i + shift] = o))
   out.push(...rest.lines)

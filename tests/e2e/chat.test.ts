@@ -55,9 +55,9 @@ describe('chat', () => {
       assert.match(s, /Claude is working… you can still send a message \(Esc to interrupt\)/)
       assert.ok(rowOf(s, '╭─ ↩ “stream it”'), 'the live bubble quotes the message')
       app.release('stream')
-      s = await app.waitFor('Streaming the answer slowly, now finished.')
+      // The whole text can show a frame before the turn's end does (still with its caret): wait for the end.
+      s = await app.waitFor(x => x.includes('Streaming the answer slowly, now finished.') && x.includes('○ idle'))
       assert.ok(!s.includes('▍'), 'no caret once it is done')
-      assert.match(s, /○ idle/)
     }))
 
   test('tool steps fold into one line; Ctrl+O and a click open them', () =>

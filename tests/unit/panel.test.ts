@@ -41,7 +41,9 @@ describe('your recent messages', () => {
 
   test('a message Claude still owes with nothing running on it: "waiting", not ⚠ no update', () => {
     const lines = text(ctx([ref('owed', { stale: true })]))
-    const row = lines.find(l => l.includes('owed'))!
+    const row = lines.find(l => l.includes('▶ owed'))!
+    // Nothing is on it: it is under Not started too.
+    assert.ok(lines.some(l => l.includes('▷ owed')))
     assert.match(row, /▶ owed +waiting/)
     assert.ok(!lines.some(l => l.includes('no update') || l.includes('⚠')))
   })

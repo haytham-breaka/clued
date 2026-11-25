@@ -127,4 +127,47 @@ describe('session files', () => {
     assert.ok(turns.every(t => t.isDone && !t.pending))
     assert.deepEqual(S.lastUsage(CWD, 'full'), { input_tokens: 42 })
   })
+  test('loadHistory: task notifications are kept on the turn, after the steps before them; steps have their time', () => {
+    const note = '<task-notification>\n<task-id>bg-1</task-id>\n<tool-use-id>tu-1</tool-use-id>\n<status>failed</status>\n<summary>It broke</summary>\n</task-notification>'
+    write('notes', [
+      user('start it', { timestamp: '2026-11-25T10:00:00.000Z' }),
+      assistant([{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: {} }], { timestamp: '2026-11-25T10:00:01.000Z' }),
+      user(note, { timestamp: '2026-11-25T10:05:00.000Z' }),
+      { type: 'attachment', timestamp: '2026-11-25T10:06:00.000Z', attachment: { type: 'queued_command', prompt: [{ type: 'text', text: '<task-notification><task-id>bg-2</task-id></task-notification><task-notification><status>x</status></task-notification>' }] } },
+      user([{ type: 'text', text: 'no notification here' }]),
+      assistant([{ type: 'text', text: 'It failed.' }]),
+    ])
+    const [t, next] = S.loadHistory(CWD, 'notes')
+    assert.equal(t!.steps[0]!.at, Date.parse('2026-11-25T10:00:01.000Z'))
+    assert.deepEqual(t!.agentEnds, [
+      { taskId: 'bg-1', toolUseId: 'tu-1', status: 'failed', summary: 'It broke', at: Date.parse('2026-11-25T10:05:00.000Z'), after: 1 },
+      { taskId: 'bg-2', status: 'completed', at: Date.parse('2026-11-25T10:06:00.000Z'), after: 1 },
+    ])
+    assert.equal(next!.text, 'no notification here')
+    assert.equal(next!.agentEnds, undefined)
+  })
+  test('readAgentFile: steps, words and results; later messages to it are prompts, the first is skipped', () => {
+    const dir = join(S.projectDir(CWD), 'sess', 'subagents')
+    mkdirSync(dir, { recursive: true })
+    const lines = [
+      { type: 'user', message: { content: 'Do it.' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'On it.' }, { type: 'tool_use', id: 'x1', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x1', content: [{ type: 'text', text: 'a.ts' }], is_error: true }] } },
+      { type: 'user', isMeta: true, message: { content: 'meta' } },
+      { type: 'user', message: { content: [{ type: 'text', text: 'Also this.' }] } },
+      { type: 'user', message: { content: '  ' } },
+    ]
+    writeFileSync(join(dir, 'agent-ag.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n{"partial":')
+    const { entries, next } = S.readAgentFile(CWD, 'sess', 'ag', 0)
+    assert.deepEqual(entries, [
+      { kind: 'text', text: 'On it.' },
+      { kind: 'step', tool: { id: 'x1', name: 'Bash', input: { command: 'ls' } } },
+      { kind: 'result', id: 'x1', text: 'a.ts', isError: true },
+      { kind: 'prompt', text: 'Also this.' },
+    ])
+    // From where it left off, a message is a prompt (the first was read before).
+    writeFileSync(join(dir, 'agent-ag.jsonl'), lines.map(l => JSON.stringify(l)).join('\n') + '\n' + JSON.stringify({ type: 'user', message: { content: 'And that.' } }) + '\n')
+    assert.deepEqual(S.readAgentFile(CWD, 'sess', 'ag', next).entries, [{ kind: 'prompt', text: 'And that.' }])
+    assert.deepEqual(S.readAgentFile(CWD, 'sess', 'missing', 0), { entries: [], next: 0 })
+  })
 })

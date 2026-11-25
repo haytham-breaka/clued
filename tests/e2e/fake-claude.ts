@@ -206,6 +206,56 @@ async function scenario(m: Msg) {
     say(`<<reply ${m.topic}>>\nThe background job is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
     return result()
   }
+  // One background agent, three tasks: the Agent call, a SendMessage while it runs (queued until its
+  // transcript shows it arriving), and one after it finished (which continues it). It keeps a to-do list.
+  if (t.includes('agent tasks')) {
+    const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}/subagents/agent-at-77.jsonl`
+    mkdirSync(dirname(file), { recursive: true })
+    const line = (o: unknown) => appendFileSync(file, JSON.stringify(o) + '\n')
+    const step = (id: string, name: string, input: unknown, res: string) => {
+      line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id, name, input }] } })
+      line({ type: 'user', isSidechain: true, message: { content: [{ type: 'tool_result', tool_use_id: id, content: res }] } })
+    }
+    const todo = (lint: string) => ({ todos: [
+      { content: 'Read the error', status: 'completed', activeForm: 'Reading the error' },
+      { content: 'Fix the import', status: lint === 'pending' ? 'in_progress' : 'completed', activeForm: 'Fixing the import' },
+      { content: 'Run the linter', status: lint, activeForm: 'Running the linter' },
+    ] })
+    tool('at-1', 'Agent', { description: 'Fix the build', subagent_type: 'general-purpose', prompt: 'Fix the build.', run_in_background: true })
+    toolResult('at-1', 'Async agent launched successfully. agentId: at-77')
+    line({ type: 'user', isSidechain: true, message: { content: 'Fix the build.' } })
+    step('at-s1', 'TodoWrite', todo('pending'), 'Todos have been modified successfully.')
+    tool('sm-1', 'SendMessage', { to: 'at-77', summary: 'Also run the linter', message: 'Also run the linter and fix what it finds.' })
+    toolResult('sm-1', 'Message queued for delivery to at-77 at its next tool round.')
+    finish(m, 'Started it and sent it more work.', 'claude')
+    await release('task2')
+    line({ type: 'user', isSidechain: true, message: { content: 'Also run the linter and fix what it finds.' } })
+    step('at-s2', 'Bash', { command: 'npm run lint', description: 'Run the linter' }, 'lint ok')
+    step('at-s3', 'TodoWrite', todo('in_progress'), 'Todos have been modified successfully.')
+    await release('done1')
+    out({ type: 'system', subtype: 'task_notification', task_id: 'at-77', status: 'completed', summary: 'Build fixed, lint clean' })
+    tool('sm-2', 'SendMessage', { to: 'at-77', message: 'Now write the release notes for this fix, as a short list.' })
+    toolResult('sm-2', 'Agent at-77 was stopped; resumed it in the background with your message.')
+    line({ type: 'user', isSidechain: true, message: { content: 'Now write the release notes for this fix, as a short list.' } })
+    step('at-s4', 'Write', { file_path: `${cwd}/NOTES.md`, content: '- fixed the build' }, 'ok')
+    say('Sent it one more task.')
+    result()
+    await release('done2')
+    out({ type: 'system', subtype: 'task_notification', task_id: 'at-77', status: 'completed', summary: 'Release notes written' })
+    say(`<<reply ${m.topic}>>\nAll three tasks are done.\n${tag([{ id: m.topic, status: 'done' }])}`)
+    return result()
+  }
+  // Claude says it will do it later (its tag says it still owes work), and nothing works on it; on
+  // release-later it goes on by itself with an agent for it.
+  if (t.includes('do it later')) {
+    finish(m, "OK, I'll get to it after the current work.", 'claude')
+    if (!(await release('later'))) return
+    tool('lt-1', 'Agent', { description: 'Do the later work', subagent_type: 'general-purpose', prompt: 'Do the work.' })
+    await release('later-agent')
+    toolResult('lt-1', 'Did the work.')
+    say(`<<reply ${m.topic}>>\nThe later work is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
+    return result()
+  }
   if (t.includes('rate limit')) {
     out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.42, resetsAt: 1_900_000_000 } } } })
     out({ type: 'system', subtype: 'status', status: 'compacting' })

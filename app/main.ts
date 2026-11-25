@@ -40,6 +40,7 @@ import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
+import { agentFor, agentIdOf, agentsFromTurns, endRun, firstTask, resume as resumeRun, sendFailed, sendTask, taskArrived, workingFor } from './tasks.ts'
 import { lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
@@ -338,18 +339,20 @@ function openAgent(id: string) {
   draw()
 }
 
-/** An agent that finished and was continued: running again, from now. */
 /**
  * Background agents: Claude Code streams none of their steps, but writes them to the agent's own
  * transcript. Read each second while one runs (and once more after it ends), so its view and its
- * row under Agents show what it is doing.
+ * row under Agents show what it is doing. So are agents Claude continued (SendMessage), and those
+ * rebuilt from the session file. A later message to it there is a task arriving.
  */
 function followBackgroundAgents() {
   if (!S.sessionId) return
   let moved = false
   for (const a of S.agents.values()) {
-    if (!a.isBackground || !a.taskId) continue
+    if (!a.taskId || !(a.isBackground || a.isPast || a.tasks.length > 1)) continue
     if (a.state !== 'running' && a.fileAt != null && (a.endedAt ?? 0) < Date.now() - 5000) continue
+    // Steps the stream already gave (a foreground agent's first run) are not added twice.
+    const isStreamed = !a.isBackground && a.fileAt == null && a.log.length > 0
     const { entries, next } = readAgentFile(cwd, S.sessionId, a.taskId, a.fileAt ?? 0)
     a.fileAt = next
     for (const e of entries) {
@@ -359,7 +362,10 @@ function followBackgroundAgents() {
         a.steps++
         a.last = stepLabel({ tool: e.tool }, cwd).text
         a.log.push({ step: { tool: e.tool } })
-      } else if (e.kind === 'text') a.log.push({ text: e.text })
+      } else if (e.kind === 'text') {
+        if (isStreamed && a.log.some(x => 'text' in x && x.text === e.text)) continue
+        a.log.push({ text: e.text })
+      } else if (e.kind === 'prompt') taskArrived(a, e.text)
       else {
         const hit = a.log.find(x => 'step' in x && x.step.tool.id === e.id)
         if (hit && 'step' in hit) {
@@ -373,12 +379,20 @@ function followBackgroundAgents() {
 }
 setInterval(followBackgroundAgents, 1000).unref()
 
-function resumeAgent(a: Agent) {
-  a.state = 'running'
-  a.startedAt = Date.now()
-  delete a.endedAt
-  delete a.result
+/** An agent that finished and was continued: running again, from now. */
+const resumeAgent = (a: Agent) => resumeRun(a, Date.now())
+
+/**
+ * The messages of yours a call Claude makes now is for: those open (a turn Claude started by itself
+ * stands for the messages it follows up on), else your latest.
+ */
+function openFor(): string[] {
+  const open = S.turns.filter(x => !x.isDone && !x.reaction)
+  return [...new Set((open.length ? open : S.turns.filter(x => !x.reaction).slice(-1)).flatMap(x => x.followUp ?? [x.key]))]
 }
+
+/** The agent an event of an agent's own belongs to: by its Agent call, or the SendMessage that continued it. */
+const agentOf = (parent: string) => S.agents.get(parent) ?? [...S.agents.values()].find(a => a.tasks.some(t => t.toolId === parent))
 
 /** Back to the main chat from an agent's or a request's view. */
 function closeAgent() {
@@ -501,7 +515,7 @@ let chainVersion = ''
 /** Once a paint: drops the chain sizes when the conversation moved since they were worked out. */
 function checkChains() {
   const b = S.kept.board
-  const version = `${S.turns.length}|${S.turns.reduce((n, t) => n + (t.parts?.length ?? 0), 0)}|${b.topics.length}|${b.topics.reduce((m, t) => Math.max(m, t.updatedAt ?? 0), 0)}|${Object.keys(S.kept.links).length}|${S.agents.size}|${S.turns.at(-1)?.aboutRequest ?? ''}`
+  const version = `${S.turns.length}|${S.turns.reduce((n, t) => n + (t.parts?.length ?? 0), 0)}|${b.topics.length}|${b.topics.reduce((m, t) => Math.max(m, t.updatedAt ?? 0), 0)}|${Object.keys(S.kept.links).length}|${S.agents.size}|${[...S.agents.values()].reduce((n, a) => n + a.tasks.length, 0)}|${S.turns.at(-1)?.aboutRequest ?? ''}`
   if (version !== chainVersion) {
     chainCache = new Map()
     chainVersion = version
@@ -588,6 +602,7 @@ function mainAgent(): Agent | undefined {
     type: 'this session',
     isBackground: false,
     for: asks.map(x => x.key),
+    tasks: [],
     startedAt: chain[0]!.at,
     ...(end.isDone ? { endedAt: end.at + (end.durationMs ?? 0) } : {}),
     state: !end.isDone ? 'running' : end.error ? 'failed' : 'done',
@@ -710,6 +725,7 @@ function start(resume?: string) {
   S.isWorking = false
   S.permissions = []
   S.asks = []
+  const wasSession = S.sessionId
   if (resume) {
     S.sessionId = resume
     S.turns = loadHistory(cwd, resume)
@@ -727,6 +743,9 @@ function start(resume?: string) {
     assignParts(S.turns, S.kept.board)
     // The jobs the session file shows (the Claude Code that ran them has stopped).
     S.jobs = jobsFromTurns(S.turns, Date.now())
+    // Its agents and their tasks; the same session again (a new model) keeps the agents it has live.
+    const was = S.agents
+    S.agents = new Map(agentsFromTurns(S.turns).map(a => [a.id, resume === wasSession && was.get(a.id) ? was.get(a.id)! : a]))
   } else {
     S.jobs = newJobs()
     S.sessionId = ''
@@ -797,31 +816,30 @@ function onEvent(e: ClaudeEvent) {
     case 'tool':
       // A scheduling call: the job it makes shows under Scheduled once its result says so.
       onCall(S.jobs, e.tool, Date.now(), { for: t?.followUp ?? (S.turns.filter(x => !x.isDone && !x.reaction).length ? S.turns.filter(x => !x.isDone && !x.reaction) : S.turns.filter(x => !x.reaction).slice(-1)).map(x => x.key) })
-      // A message to an agent that finished continues it: back under Agents, running.
+      // A message to an agent is a task of its own: it waits while the agent runs, and continues
+      // one that finished (back under Agents, running).
       if (e.tool.name === 'SendMessage') {
-        const to = String(e.tool.input.to ?? '')
-        const a = [...S.agents.values()].find(x => x.taskId === to || x.id === to || x.name === to)
-        if (a) {
-          resumeAgent(a)
-          a.log.push({ text: `↻ Claude continued it: ${preview(String(e.tool.input.message ?? ''), 300)}` })
-        }
+        const a = agentFor(S.agents.values(), String(e.tool.input.to ?? ''))
+        if (a) sendTask(a, e.tool.input, Date.now(), openFor(), e.tool.id)
       }
       if (e.tool.name === 'Agent' || e.tool.name === 'Task') {
         // A subagent: which of your messages it works for are the ones this turn answers.
         const i = e.tool.input
-        const open = S.turns.filter(x => !x.isDone && !x.reaction)
+        const forKeys = openFor()
         S.agents.set(e.tool.id, {
           id: e.tool.id,
           name: String(i.description || i.subagent_type || 'agent'),
           type: String(i.subagent_type ?? ''),
           isBackground: i.run_in_background === true,
-          for: (open.length ? open : S.turns.filter(x => !x.reaction).slice(-1)).map(x => x.key),
+          for: forKeys,
           startedAt: Date.now(),
           state: 'running',
           steps: 0,
           last: '',
           prompt: String(i.prompt ?? ''),
           log: [],
+          tasks: [firstTask(i, Date.now(), forKeys, e.tool.id)],
+          ...(typeof i.name === 'string' && i.name ? { alias: i.name } : {}),
         })
       }
       if (t) {
@@ -860,13 +878,15 @@ function onEvent(e: ClaudeEvent) {
       onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
       const a = S.agents.get(e.id)
       if (a) {
-        if (a.isBackground && !e.isError) a.taskId = e.text.match(/agent ?id:?\s*([\w-]+)/i)?.[1] ?? a.taskId
-        else {
-          a.state = e.isError ? 'failed' : 'done'
-          a.endedAt = Date.now()
+        // Its agent id, which SendMessage and its transcript go by (a finished one's result can name it).
+        a.taskId = agentIdOf(e.text, e.data, !a.isBackground || e.isError) ?? a.taskId
+        if (!a.isBackground || e.isError) {
+          endRun(a, e.isError ? 'failed' : 'done', Date.now())
           a.result = e.text
         }
       }
+      // A SendMessage that failed: its task did too.
+      if (e.isError) for (const x of S.agents.values()) if (x.tasks.some(t => t.toolId === e.id)) sendFailed(x, e.id, Date.now())
       for (const turn of S.turns)
         for (const s of turn.steps)
           if (s.tool.id === e.id) {
@@ -884,7 +904,7 @@ function onEvent(e: ClaudeEvent) {
       statusSoon()
       break
     case 'agent-step': {
-      const a = S.agents.get(e.parent)
+      const a = agentOf(e.parent)
       onCall(S.jobs, e.tool, Date.now(), { by: e.parent, for: a?.for ?? [] })
       if (a) {
         a.steps++
@@ -894,13 +914,13 @@ function onEvent(e: ClaudeEvent) {
       break
     }
     case 'agent-text': {
-      const a = S.agents.get(e.parent)
+      const a = agentOf(e.parent)
       if (a) a.log.push({ text: e.text })
       break
     }
     case 'agent-tool-result': {
       onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
-      const a = S.agents.get(e.parent)
+      const a = agentOf(e.parent)
       const hit = a?.log.find(x => 'step' in x && x.step.tool.id === e.id)
       if (hit && 'step' in hit) {
         hit.step.result = e.text
@@ -916,8 +936,7 @@ function onEvent(e: ClaudeEvent) {
       if (e.phase !== 'done' && a.state !== 'running') resumeAgent(a)
       if (e.phase === 'progress' && e.lastTool) a.last = e.lastTool
       if (e.phase === 'done') {
-        a.state = e.status === 'failed' ? 'failed' : e.status === 'stopped' ? 'stopped' : 'done'
-        a.endedAt = Date.now()
+        endRun(a, e.status === 'failed' ? 'failed' : e.status === 'stopped' || e.status === 'killed' ? 'stopped' : 'done', Date.now())
         if (e.text) {
           a.last = e.text
           a.result = e.text
@@ -979,7 +998,7 @@ function onEvent(e: ClaudeEvent) {
         S.isWorking = false
         S.claude = undefined
         S.asks = []
-        for (const a of S.agents.values()) if (a.state === 'running') { a.state = 'stopped'; a.endedAt = Date.now() }
+        for (const a of S.agents.values()) if (a.state === 'running') endRun(a, 'stopped', Date.now())
         // Jobs Claude Code kept only in memory went with it.
         onExit(S.jobs, Date.now())
       }
@@ -1064,7 +1083,8 @@ function autoLink(json: string) {
   }
 }
 
-function submit(text: string, opts: { reaction?: string } = {}) {
+/** `about`: the request (turn key) it is part of, as when written inside that request's view. */
+function submit(text: string, opts: { reaction?: string; about?: string } = {}) {
   if (!S.claude) start(S.sessionId || undefined)
   const now = Date.now()
   const turn = newTurn(text, now)
@@ -1085,7 +1105,8 @@ function submit(text: string, opts: { reaction?: string } = {}) {
     // Several questions in one message: numbered, so a reply can say which it answers (each is quoted).
     const qs = questionsOf(text)
     if (qs.length) hidden = `${hidden}\nIt asks ${qs.length} things: ${qs.map((q, i) => `${raised.topicId}.${i + 1} "${preview(q, 80)}"`).join('; ')}.`
-    const req = S.requestView ? S.turns.findLast(t => t.key === S.requestView) : undefined
+    const about = opts.about ?? S.requestView
+    const req = about ? S.turns.findLast(t => t.key === about) : undefined
     if (req) {
       // Written inside a request: part of it, linked to it, and Claude is told so.
       turn.aboutRequest = req.key
@@ -1164,10 +1185,12 @@ function demoAgents(turn: Turn) {
   for (let k = 0; k < count; k++) {
     const d = DEMO[demoAt++ % DEMO.length]!
     const id = `demo-${crypto.randomUUID()}`
+    const prompt = `${d.name} for the user's message: “${preview(turn.text, 80)}”. Report what you find in a few bullet points. (demo)`
     const a: Agent = {
       id, name: d.name, type: d.type, isBackground: false, for: [turn.key], startedAt: Date.now(), state: 'running', steps: 0, last: '',
-      prompt: `${d.name} for the user's message: “${preview(turn.text, 80)}”. Report what you find in a few bullet points. (demo)`,
+      prompt,
       log: [{ text: `I'll start by looking around. (demo)` }],
+      tasks: [firstTask({ description: d.name, prompt }, Date.now(), [turn.key], id)],
     }
     S.agents.set(id, a)
     const every = 2500 + Math.random() * 2500
@@ -1179,8 +1202,7 @@ function demoAgents(turn: Turn) {
       } else {
         a.result = `**${d.name}** (demo)\n\n${d.steps.map(x => `- ${x}: nothing unusual`).join('\n')}`
         clearInterval(tick)
-        a.state = demoAt % 4 === 0 && k === 1 ? 'failed' : 'done'
-        a.endedAt = Date.now()
+        endRun(a, demoAt % 4 === 0 && k === 1 ? 'failed' : 'done', Date.now())
       }
       draw()
     }, every)
@@ -1821,7 +1843,7 @@ function paint() {
   const cw = W - cx
 
   if (S.picker) return paintPicker(W, H)
-  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running').flatMap(a => a.for))
+  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running').flatMap(workingFor))
   const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
   S.box = inbox(S.turns, S.kept.board, S.read, { isWorking: S.isWorking, busy, now: Date.now(), reacted })
   notifyNewQuestions()
@@ -1880,6 +1902,9 @@ function paint() {
         legend: () => { S.isLegend = !S.isLegend; draw() },
         jumpTo,
         next: nextUnread,
+        topicTitle: id => S.kept.board.topics.find(t => t.id === id)?.title,
+        // Asks Claude, visibly, to start on it now: sent as part of that request.
+        startRequest: m => submit(`Please start on ${m.topicId ?? `“${preview(m.turn.text, 60)}”`} now.`, { about: m.turn.key }),
       },
       pw,
     )
@@ -1973,6 +1998,7 @@ function paint() {
       isWorking: S.isWorking,
       agentName: id => { const a = S.agents.get(id); return a ? `${who(a, S.agents.values())} · ${a.name}` : undefined },
       openAgent,
+      openMessage,
       setRead,
       dismiss,
       firedBy: t => {

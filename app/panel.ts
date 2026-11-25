@@ -2,10 +2,12 @@
 // what, where your messages stand. Narrower than MIN_FULL (or folded) it is an icon view.
 
 import { matches, preview } from './inbox.ts'
-import type { Inbox, PartRef } from './inbox.ts'
+import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
 import type { Step, Turn, Work } from './session.ts'
+import { currentTask } from './tasks.ts'
+import type { AgentTask } from './tasks.ts'
 import { C, cells, clip } from './text.ts'
 import type { Line, Span } from './text.ts'
 
@@ -35,6 +37,12 @@ export type Agent = {
   person?: string
   /** A background agent's own transcript: how far the app has read it (bytes). */
   fileAt?: number
+  /** What Claude asked it, in order: the Agent call's prompt, then each SendMessage to it. */
+  tasks: AgentTask[]
+  /** The name the Agent call gave it, which SendMessage can use. */
+  alias?: string
+  /** Rebuilt from the session file: the Claude Code that ran it has stopped. */
+  isPast?: boolean
 }
 
 const NAMES = ['James', 'Jake', 'Maya', 'Leo', 'Nora', 'Omar', 'Zoe', 'Ravi', 'Lina', 'Theo', 'Ivy', 'Sami', 'Ezra', 'Mia', 'Hugo', 'Yara', 'Finn', 'Aria', 'Kai', 'Rosa']
@@ -127,6 +135,9 @@ export type PanelCtx = {
   jobs: { job: Job; by?: string }[]
   openJob: (toolId: string) => void
   jobView: string
+  /** A topic's title (Not started shows it), and asking Claude to start on a request now. */
+  topicTitle?: (id: string) => string | undefined
+  startRequest?: (m: MessageRef) => void
   /** Where each section's box is scrolled to (by section id), and the rows the panel has. */
   scroll: Record<string, number>
   height: number
@@ -198,6 +209,20 @@ function slide(text: string, n: number): string {
   let i = 0
   while (i < chars.length && skipped < n) skipped += cells(chars[i++]!)
   return '‹' + chars.slice(i).join('')
+}
+
+/** How long something has waited, in its largest unit: "40s", "12m", "3h", "2d". */
+export function waited(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86_400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86_400)}d`
+}
+
+/**
+ * Your requests Claude still owes work on with nothing on them right now: in progress, not active,
+ * and not among the messages `onIt` (running agents', and Claude's turn's). Longest waiting first.
+ */
+export function notStarted(messages: MessageRef[], onIt: ReadonlySet<string>): MessageRef[] {
+  return messages.filter(m => m.state === 'progress' && !m.active && !onIt.has(m.turn.key)).sort((a, b) => a.updatedAt - b.updatedAt)
 }
 
 export type PanelList = { start: number; end: number; total: number; max: number }
@@ -331,14 +356,23 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       const open = () => p.openAgent(a.id)
       const isOn = p.agentView === a.id
       const right = a.state === 'running' ? ago(now - a.startedAt) : `${a.state} ${ago(now - (a.endedAt ?? now))} ago`
+      const tasks = a.tasks.length
       rows.push(row(iw, [
         { text: isOn ? '▸' : ' ', style: { fg: C.magenta }, action: open },
         { text: `${icon.t} `, style: { fg: icon.fg }, action: open },
         { text: who(a, p.agents), style: { bold: a.state === 'running' || isOn, dim: a.state !== 'running' && !isOn, fg: isOn ? C.magenta : undefined }, action: open },
+        // Several tasks (Claude sent it more work): how many, before the first one's name.
+        { text: tasks > 1 ? ` · ${tasks} tasks` : '', style: { fg: C.magenta, dim: a.state !== 'running' }, action: open },
         { text: slide(` · ${a.name}`, p.hscroll), style: { fg: C.gray, dim: a.state !== 'running' }, action: open },
         { text: a.isBackground ? ' bg' : '', style: { fg: C.faint } },
       ], [{ text: right, style: { fg: a.state === 'running' ? C.cyan : C.faint } }]))
-      about(rows, a.for, a.state === 'running' ? (a.last ? `${a.last}${a.steps > 1 ? ` (${a.steps} steps)` : ''}` : 'starting') : '', a.state !== 'running', open)
+      const last = a.state === 'running' ? (a.last ? `${a.last}${a.steps > 1 ? ` (${a.steps} steps)` : ''}` : 'starting') : ''
+      if (tasks > 1) {
+        // The task it is on (the newest running one, else the last it had); its messages are in its view.
+        const n = currentTask(a)
+        rows.push(row(iw, [{ text: '   ' }, { text: slide(`↳ task ${n + 1} of ${tasks}: ${a.tasks[n]!.title}`, p.hscroll), style: { fg: C.gray, dim: a.state !== 'running' }, action: open }]))
+        about(rows, [], last, false, open)
+      } else about(rows, a.for, last, a.state !== 'running', open)
     }
     sections.push({
       id: 'agents',
@@ -347,6 +381,31 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       rows,
     })
   }
+
+  // ---- Not started: requests Claude still owes work on, with nothing on them now (no running agent
+  // is for them, and Claude's turn isn't on them). Oldest wait first.
+  const onIt = new Set([
+    ...p.agents.filter(a => a.state === 'running').flatMap(a => a.for),
+    ...(p.main?.for ?? []).flatMap(k => [k, p.turnOf(k)?.aboutRequest ?? '']),
+  ])
+  const idle = notStarted(messages, onIt)
+  if (idle.length)
+    sections.push({
+      id: 'notstarted',
+      cap: 5,
+      header: [row(width, [{ text: 'Not started', style: { bold: true, fg: C.yellow } }], [{ text: String(idle.length), style: { fg: C.yellow, bold: true } }])],
+      rows: idle.map(m => {
+        const open = () => p.openRequest(m.turn)
+        const title = (m.topicId && p.topicTitle?.(m.topicId)) || preview(m.turn.text, 200)
+        return row(iw, [
+          { text: ' ▷ ', style: { fg: C.yellow }, action: open },
+          { text: slide(title, p.hscroll), action: open },
+        ], [
+          ...(p.startRequest ? [{ text: '▶ start', style: { fg: C.cyan }, action: () => p.startRequest!(m) }, { text: ' ' }] : []),
+          { text: waited(now - m.updatedAt), style: { fg: C.faint }, action: open },
+        ])
+      }),
+    })
 
   // ---- Scheduled jobs (crons, /loop wakeups): what each is, when it runs next, how it stands.
   if (p.jobs.length) {

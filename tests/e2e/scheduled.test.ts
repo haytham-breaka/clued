@@ -67,8 +67,9 @@ describe('scheduled jobs', () => {
 
       // The cron fires: Claude's own turn, marked with the job, and a run in its view.
       app.release('fire')
-      s = await app.waitFor('⏰ scheduled job ran: “Check the deploy and tell me if it is green.”')
-      assert.match(s, /│ The deploy is green\. +│/)
+      await app.waitFor('⏰ scheduled job ran: “Check the deploy and tell me if it is green.”')
+      // Its answer, once its turn has ended (a frame before, it can still show its caret).
+      await app.waitFor(/│ The deploy is green\. +│/)
       s = await app.waitFor(/⏰ Check the deploy and tell me if it is gr.* ran once│/)
       await app.click('⏰ scheduled job ran', { area: 'chat' })
       s = await app.waitFor('Runs (1)')

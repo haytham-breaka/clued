@@ -20,6 +20,8 @@ export type Step = {
   isFull?: boolean
   /** The result's structured form, when Claude Code gave one (CronCreate's id and next run). */
   data?: unknown
+  /** When Claude made the call (from the session file). */
+  at?: number
 }
 
 /** How much of Claude's work a chat shows: one folded line, the file edits as diffs, or every step with its output. */
@@ -65,6 +67,28 @@ export type Turn = {
   isOpen: boolean
   error?: string
   durationMs?: number
+  /**
+   * From the session file: background agents' task notifications that came during this turn, each
+   * after this many of its steps.
+   */
+  agentEnds?: AgentEnd[]
+}
+
+/** A task notification in the session file: an agent's run ended. */
+export type AgentEnd = { taskId: string; toolUseId?: string; status: string; summary?: string; at: number; after: number }
+
+/** The task notifications in a message's text (<task-notification> blocks). */
+export function agentEndsIn(text: string, at: number, after: number): AgentEnd[] {
+  const out: AgentEnd[] = []
+  for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const field = (k: string) => m[1]!.match(new RegExp(`<${k}>([\\s\\S]*?)</${k}>`))?.[1]?.trim()
+    const taskId = field('task-id') ?? ''
+    const toolUseId = field('tool-use-id')
+    if (!taskId && !toolUseId) continue
+    const summary = field('summary')
+    out.push({ taskId, ...(toolUseId ? { toolUseId } : {}), status: field('status') ?? 'completed', ...(summary ? { summary } : {}), at, after })
+  }
+  return out
 }
 
 export type Reaction = { emoji: string; by: 'me' | 'claude' }
@@ -203,6 +227,15 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
     }
     if (e.isSidechain) continue
     const at = Date.parse(e.timestamp ?? '') || 0
+    // A background agent's run ended: Claude Code tells Claude with a task notification.
+    if (cur && (e.type === 'user' || (e.type === 'attachment' && e.attachment?.type === 'queued_command'))) {
+      const c = e.type === 'user' ? e.message?.content : e.attachment.prompt
+      const raw = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b: any) => b.type === 'text').map((b: any) => String(b.text)).join('\n') : ''
+      if (raw.includes('<task-notification>')) {
+        const ends = agentEndsIn(raw, at, cur.steps.length)
+        if (ends.length) cur.agentEnds = [...(cur.agentEnds ?? []), ...ends]
+      }
+    }
     // A message you sent while Claude worked: Claude Code stores it as a queued command.
     if (e.type === 'attachment' && e.attachment?.type === 'queued_command') {
       const pr = e.attachment.prompt
@@ -269,7 +302,7 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
             cur.early = [...(cur.early ?? []), stripTag(cur.pending)]
             cur.pending = ''
           }
-          const step: Step = { tool: { id: b.id, name: b.name, input: b.input ?? {} }, ...(cur.pending ? { said: stripTag(cur.pending) } : {}) }
+          const step: Step = { tool: { id: b.id, name: b.name, input: b.input ?? {} }, ...(cur.pending ? { said: stripTag(cur.pending) } : {}), ...(at ? { at } : {}) }
           cur.pending = ''
           cur.steps.push(step)
           byId.set(b.id, { turn: cur, step })
@@ -312,12 +345,14 @@ export type AgentFileEntry =
   | { kind: 'step'; tool: { id: string; name: string; input: Record<string, unknown> } }
   | { kind: 'text'; text: string }
   | { kind: 'result'; id: string; text: string; isError: boolean }
+  /** A message to it after its first (a SendMessage arriving). */
+  | { kind: 'prompt'; text: string }
 
 /**
  * A background agent's new entries since byte `from`, in Claude Code's file for it
  * (<project>/<session>/subagents/agent-<id>.jsonl), and where the next read starts. Only whole lines
- * are read: one still being written waits for the next read. The first entry, Claude's prompt to
- * it, is skipped (the app has it from the Agent call).
+ * are read: one still being written waits for the next read. The first message to it, Claude's
+ * prompt, is skipped (the app has it from the Agent call); later ones are SendMessage arriving.
  */
 export function readAgentFile(cwd: string, sessionId: string, agentId: string, from: number): { entries: AgentFileEntry[]; next: number } {
   const entries: AgentFileEntry[] = []
@@ -330,6 +365,7 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
     readSync(fd, buf, 0, buf.length, from)
     const end = buf.lastIndexOf(0x0a)
     if (end < 0) return { entries, next: from }
+    let isPrompted = from > 0
     for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
       let e: any
       try {
@@ -338,6 +374,13 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
         continue
       }
       const content = e.message?.content
+      // A message to the agent: the first is Claude's prompt (the app has it from the Agent call).
+      if (e.type === 'user' && !e.isMeta && (typeof content === 'string' || (Array.isArray(content) && !content.some((b: any) => b.type === 'tool_result')))) {
+        const text = typeof content === 'string' ? content : content.filter((b: any) => b.type === 'text').map((b: any) => String(b.text)).join('\n')
+        if (!isPrompted) isPrompted = true
+        else if (text.trim()) entries.push({ kind: 'prompt', text })
+        continue
+      }
       if (!Array.isArray(content)) continue
       for (const b of content) {
         if (e.type === 'assistant' && b.type === 'tool_use') entries.push({ kind: 'step', tool: { id: String(b.id), name: String(b.name), input: b.input ?? {} } })
