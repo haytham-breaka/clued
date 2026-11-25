@@ -113,7 +113,7 @@ The `⛓` button on a message opens everything connected to it: the replies, you
 
 ### Live views of Claude and its agents
 
-Click Claude or any agent under **Agents** for its own view: each step as it happens, with commands, output and diffs. Press Esc to go back to the chat.
+Click Claude or any agent under **Agents** for its own view: each step as it happens, with commands, output and diffs. That includes agents running in the background, whose steps Claude Code does not stream: the app reads them from the transcript Claude Code keeps for each agent. Press Esc to go back to the chat.
 
 ### Messages that never got an answer
 

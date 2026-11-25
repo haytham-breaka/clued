@@ -307,6 +307,55 @@ export function lastCwd(cwd: string, sessionId: string): string | undefined {
   return undefined
 }
 
+/** What a background agent did, read from its own transcript (Claude Code does not stream it). */
+export type AgentFileEntry =
+  | { kind: 'step'; tool: { id: string; name: string; input: Record<string, unknown> } }
+  | { kind: 'text'; text: string }
+  | { kind: 'result'; id: string; text: string; isError: boolean }
+
+/**
+ * A background agent's new entries since byte `from`, in Claude Code's file for it
+ * (<project>/<session>/subagents/agent-<id>.jsonl), and where the next read starts. Only whole lines
+ * are read: one still being written waits for the next read. The first entry, Claude's prompt to
+ * it, is skipped (the app has it from the Agent call).
+ */
+export function readAgentFile(cwd: string, sessionId: string, agentId: string, from: number): { entries: AgentFileEntry[]; next: number } {
+  const entries: AgentFileEntry[] = []
+  let fd: number | undefined
+  try {
+    fd = openSync(`${projectDir(cwd)}/${sessionId}/subagents/agent-${agentId}.jsonl`, 'r')
+    const size = fstatSync(fd).size
+    if (size <= from) return { entries, next: from }
+    const buf = Buffer.alloc(size - from)
+    readSync(fd, buf, 0, buf.length, from)
+    const end = buf.lastIndexOf(0x0a)
+    if (end < 0) return { entries, next: from }
+    for (const line of buf.subarray(0, end).toString('utf8').split('\n')) {
+      let e: any
+      try {
+        e = JSON.parse(line)
+      } catch {
+        continue
+      }
+      const content = e.message?.content
+      if (!Array.isArray(content)) continue
+      for (const b of content) {
+        if (e.type === 'assistant' && b.type === 'tool_use') entries.push({ kind: 'step', tool: { id: String(b.id), name: String(b.name), input: b.input ?? {} } })
+        else if (e.type === 'assistant' && b.type === 'text' && b.text) entries.push({ kind: 'text', text: String(b.text) })
+        else if (e.type === 'user' && b.type === 'tool_result') {
+          const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') : ''
+          entries.push({ kind: 'result', id: String(b.tool_use_id), text, isError: !!b.is_error })
+        }
+      }
+    }
+    return { entries, next: from + end + 1 }
+  } catch {
+    return { entries, next: from }
+  } finally {
+    if (fd != null) closeSync(fd)
+  }
+}
+
 export function lastUsage(cwd: string, sessionId: string): Record<string, number> | undefined {
   try {
     const lines = readFileSync(`${projectDir(cwd)}/${sessionId}.jsonl`, 'utf8').trimEnd().split('\n')

@@ -3,7 +3,8 @@
 // each user message with a scenario chosen by words in it (see `scenario` below). A scenario that has
 // to wait (streaming, a slow turn) waits for a file named release-<name> in $FAKE_DIR.
 
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { createInterface } from 'node:readline'
 
 const dir = process.env.FAKE_DIR ?? '.'
@@ -193,6 +194,13 @@ async function scenario(m: Msg) {
     tool('bg-1', 'Agent', { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true })
     toolResult('bg-1', 'Started in the background. agentId: bg-42')
     finish(m, 'Started it in the background.', 'claude')
+    // Claude Code streams none of its steps: it writes them to the agent's own transcript.
+    const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}/subagents/agent-bg-42.jsonl`
+    mkdirSync(dirname(file), { recursive: true })
+    const line = (o: unknown) => appendFileSync(file, JSON.stringify(o) + '\n')
+    line({ type: 'user', isSidechain: true, message: { content: 'Do the long job.' } })
+    line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'Checking the build first.' }, { type: 'tool_use', id: 'bg-s1', name: 'Bash', input: { command: 'make build', description: 'Build the project' } }] } })
+    line({ type: 'user', isSidechain: true, message: { content: [{ type: 'tool_result', tool_use_id: 'bg-s1', content: 'build ok' }] } })
     await release('bg', 20_000)
     out({ type: 'system', subtype: 'task_notification', task_id: 'bg-42', status: 'completed', summary: 'Long job finished' })
     say(`<<reply ${m.topic}>>\nThe background job is done.\n${tag([{ id: m.topic, status: 'done' }])}`)

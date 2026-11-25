@@ -645,7 +645,7 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
     { text: state, style: a.state === 'running' ? { fg: C.cyan, italic: true } : { fg: C.faint } },
   ])
   if (!a.log.length)
-    out.push([pad(IN), { text: a.isBackground ? 'It runs in the background: Claude Code does not stream its steps here. What it hands back shows below when it is done.' : a.state === 'running' ? `${ctx.spin} starting…` : 'No steps were streamed.', style: { fg: C.gray, italic: true } }])
+    out.push([pad(IN), { text: a.isBackground ? (a.state === 'running' ? `${ctx.spin} It runs in the background: its steps show here as Claude Code writes them down.` : 'It ran in the background, and no steps of it were found.') : a.state === 'running' ? `${ctx.spin} starting…` : 'No steps were streamed.', style: { fg: C.gray, italic: true } }])
   for (const e of a.log) {
     if ('text' in e) {
       const body = markdown(e.text, max, ctx.copy)

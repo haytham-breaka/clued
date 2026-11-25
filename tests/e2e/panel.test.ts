@@ -207,6 +207,12 @@ describe('panel', () => {
       assert.match(s, /Long job bg/)
       // The agent in the background is on it.
       assert.match(s, new RegExp(`${SPIN} background agent please +in progress`))
+      // Its steps come from its own transcript: under Agents, and in its view.
+      s = await app.waitFor('· Build the project')
+      await app.click('Long job', { area: 'panel' })
+      s = await app.waitFor('Checking the build first.')
+      assert.match(s, /build ok/)
+      app.keys('Escape')
       app.release('bg')
       s = await app.waitFor('The background job is done.')
       assert.match(s, /Claude · \d\d:\d\d · followed up/)

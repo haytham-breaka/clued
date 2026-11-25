@@ -40,7 +40,7 @@ import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
-import { lastCwd, lastUsage, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
+import { lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
@@ -339,6 +339,40 @@ function openAgent(id: string) {
 }
 
 /** An agent that finished and was continued: running again, from now. */
+/**
+ * Background agents: Claude Code streams none of their steps, but writes them to the agent's own
+ * transcript. Read each second while one runs (and once more after it ends), so its view and its
+ * row under Agents show what it is doing.
+ */
+function followBackgroundAgents() {
+  if (!S.sessionId) return
+  let moved = false
+  for (const a of S.agents.values()) {
+    if (!a.isBackground || !a.taskId) continue
+    if (a.state !== 'running' && a.fileAt != null && (a.endedAt ?? 0) < Date.now() - 5000) continue
+    const { entries, next } = readAgentFile(cwd, S.sessionId, a.taskId, a.fileAt ?? 0)
+    a.fileAt = next
+    for (const e of entries) {
+      moved = true
+      if (e.kind === 'step') {
+        if (a.log.some(x => 'step' in x && x.step.tool.id === e.tool.id)) continue
+        a.steps++
+        a.last = stepLabel({ tool: e.tool }, cwd).text
+        a.log.push({ step: { tool: e.tool } })
+      } else if (e.kind === 'text') a.log.push({ text: e.text })
+      else {
+        const hit = a.log.find(x => 'step' in x && x.step.tool.id === e.id)
+        if (hit && 'step' in hit) {
+          hit.step.result = e.text
+          hit.step.isError = e.isError
+        }
+      }
+    }
+  }
+  if (moved) draw()
+}
+setInterval(followBackgroundAgents, 1000).unref()
+
 function resumeAgent(a: Agent) {
   a.state = 'running'
   a.startedAt = Date.now()

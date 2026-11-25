@@ -33,6 +33,8 @@ export type Agent = {
   resultLabel?: string
   /** The name it goes by in the app (James, Jake…), given in the order agents start. */
   person?: string
+  /** A background agent's own transcript: how far the app has read it (bytes). */
+  fileAt?: number
 }
 
 const NAMES = ['James', 'Jake', 'Maya', 'Leo', 'Nora', 'Omar', 'Zoe', 'Ravi', 'Lina', 'Theo', 'Ivy', 'Sami', 'Ezra', 'Mia', 'Hugo', 'Yara', 'Finn', 'Aria', 'Kai', 'Rosa']
