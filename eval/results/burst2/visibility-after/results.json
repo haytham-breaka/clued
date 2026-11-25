@@ -1,0 +1,2795 @@
+{
+  "about": "Can you see what was answered? Ids, states, counts and scores only: no transcript text (that stays in raw/, which is never committed).",
+  "input": {
+    "results": "../clued-evaldata/burst2-after/results.json",
+    "runs": 10
+  },
+  "screen": {
+    "cols": 120,
+    "rows": 40,
+    "panel": 38
+  },
+  "models": {
+    "glance": "haiku",
+    "truth": "sonnet"
+  },
+  "spentUsd": 0.522,
+  "cap": 0.75,
+  "spend": {
+    "truth (sonnet)": {
+      "calls": 15,
+      "usd": 0.2284
+    },
+    "glance (haiku)": {
+      "calls": 234,
+      "usd": 0.2349
+    },
+    "full (haiku)": {
+      "calls": 30,
+      "usd": 0.0588
+    }
+  },
+  "stopped": "",
+  "truthSources": {
+    "judged": [
+      "burst-A-r1",
+      "burst-A-r2",
+      "burst-A-r3",
+      "burst-A-r4",
+      "burst-A-r5",
+      "burst-B-r1",
+      "burst-B-r2",
+      "burst-B-r3",
+      "burst-B-r4",
+      "burst-B-r5"
+    ],
+    "why": {
+      "burst-A-r1": [
+        "Claude asked a question",
+        "old judge: not fully, correctly or clearly answered",
+        "rules found no answer"
+      ],
+      "burst-A-r2": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-A-r3": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-A-r4": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-A-r5": [
+        "Claude asked a question",
+        "old judge: not fully, correctly or clearly answered",
+        "rules found no answer"
+      ],
+      "burst-B-r1": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r2": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r3": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r4": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r5": [
+        "Claude asked a question",
+        "rules found no answer"
+      ]
+    },
+    "rulesVsJudge": {
+      "msgs": 0,
+      "same": 0,
+      "flaggedMsgs": 0,
+      "flaggedSame": 0
+    }
+  },
+  "truthCounts": {
+    "A": {
+      "done": 135,
+      "waiting": 10,
+      "working": 130
+    },
+    "B": {
+      "done": 124,
+      "waiting": 11,
+      "working": 140
+    }
+  },
+  "reading": {
+    "A": {
+      "frames": 50,
+      "screenWords": 175,
+      "fullWordsAtEnd": 566,
+      "screenChars": 2585,
+      "fullCharsAtEnd": 7890
+    },
+    "B": {
+      "frames": 50,
+      "screenWords": 95,
+      "fullWordsAtEnd": 334,
+      "screenChars": 675,
+      "fullCharsAtEnd": 2359
+    }
+  },
+  "scores": {
+    "A panel": {
+      "all": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 125,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 8,
+        "falseOpen": 7,
+        "notAnswered": 130,
+        "openTruth": 140
+      },
+      "end": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.92,
+        "state": 0.92,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 3,
+        "falseOpen": 1,
+        "notAnswered": 1,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 125,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 8,
+        "falseOpen": 7,
+        "notAnswered": 130,
+        "openTruth": 140
+      },
+      "no offers": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 125,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 8,
+        "falseOpen": 7,
+        "notAnswered": 130,
+        "openTruth": 140
+      }
+    },
+    "B glance": {
+      "all": {
+        "n": 275,
+        "answered": 0.8545454545454545,
+        "open": 0.8327272727272728,
+        "state": 0.8327272727272728,
+        "link": 0.9824561403508771,
+        "linkN": 114,
+        "found": 0.9824561403508771,
+        "unknown": 0.14545454545454545,
+        "falseAnswered": 0,
+        "falseDone": 6,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 151
+      },
+      "end": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 0.9767441860465116,
+        "linkN": 43,
+        "found": 0.9767441860465116,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 2
+      },
+      "hard": {
+        "n": 275,
+        "answered": 0.8545454545454545,
+        "open": 0.8327272727272728,
+        "state": 0.8327272727272728,
+        "link": 0.9824561403508771,
+        "linkN": 114,
+        "found": 0.9824561403508771,
+        "unknown": 0.14545454545454545,
+        "falseAnswered": 0,
+        "falseDone": 6,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 151
+      },
+      "no offers": {
+        "n": 275,
+        "answered": 0.8545454545454545,
+        "open": 0.8327272727272728,
+        "state": 0.8327272727272728,
+        "link": 0.9824561403508771,
+        "linkN": 114,
+        "found": 0.9824561403508771,
+        "unknown": 0.14545454545454545,
+        "falseAnswered": 0,
+        "falseDone": 6,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 151
+      }
+    },
+    "B full read": {
+      "all": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 1,
+        "linkN": 43,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 2
+      },
+      "end": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 1,
+        "linkN": 43,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 2
+      },
+      "hard": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 1,
+        "linkN": 43,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 2
+      },
+      "no offers": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 1,
+        "linkN": 43,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 2
+      }
+    },
+    "A glance": {
+      "all": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9345454545454546,
+        "state": 0.9345454545454546,
+        "link": 0.984,
+        "linkN": 125,
+        "found": 0.984,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 6,
+        "falseOpen": 12,
+        "notAnswered": 130,
+        "openTruth": 140
+      },
+      "end": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.88,
+        "state": 0.88,
+        "link": 0.9523809523809523,
+        "linkN": 42,
+        "found": 0.9523809523809523,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 2,
+        "falseOpen": 4,
+        "notAnswered": 1,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9345454545454546,
+        "state": 0.9345454545454546,
+        "link": 0.984,
+        "linkN": 125,
+        "found": 0.984,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 6,
+        "falseOpen": 12,
+        "notAnswered": 130,
+        "openTruth": 140
+      },
+      "no offers": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9345454545454546,
+        "state": 0.9345454545454546,
+        "link": 0.984,
+        "linkN": 125,
+        "found": 0.984,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 6,
+        "falseOpen": 12,
+        "notAnswered": 130,
+        "openTruth": 140
+      }
+    },
+    "A full read": {
+      "all": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.84,
+        "state": 0.84,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 2,
+        "falseOpen": 6,
+        "notAnswered": 1,
+        "openTruth": 3
+      },
+      "end": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.84,
+        "state": 0.84,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 2,
+        "falseOpen": 6,
+        "notAnswered": 1,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.84,
+        "state": 0.84,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 2,
+        "falseOpen": 6,
+        "notAnswered": 1,
+        "openTruth": 3
+      },
+      "no offers": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.84,
+        "state": 0.84,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 2,
+        "falseOpen": 6,
+        "notAnswered": 1,
+        "openTruth": 3
+      }
+    }
+  },
+  "comparisons": {
+    "A glance vs B glance (all)": {
+      "answered": {
+        "diff": 0.13454545454545452,
+        "p": 0.018196360727854428
+      },
+      "open": {
+        "diff": 0.10181818181818159,
+        "p": 0.018196360727854428
+      },
+      "state": {
+        "diff": 0.10181818181818159,
+        "p": 0.018196360727854428
+      },
+      "link": {
+        "diff": 0.0015238095238094829,
+        "p": 0.8438312337532493
+      },
+      "found": {
+        "diff": 0.0015238095238094829,
+        "p": 0.8438312337532493
+      },
+      "unknown": {
+        "diff": -0.14545454545454545,
+        "p": 0.007798440311937612
+      },
+      "falseAnswered": {
+        "diff": 0.6,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 2.4,
+        "p": 0.046990601879624075
+      }
+    },
+    "A glance vs B glance (end)": {
+      "answered": {
+        "diff": -0.019999999999999907,
+        "p": 1
+      },
+      "open": {
+        "diff": -0.07999999999999985,
+        "p": 0.22995400919816036
+      },
+      "state": {
+        "diff": -0.07999999999999985,
+        "p": 0.22995400919816036
+      },
+      "link": {
+        "diff": -0.025000000000000022,
+        "p": 1
+      },
+      "found": {
+        "diff": -0.025000000000000022,
+        "p": 1
+      },
+      "unknown": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0.2,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0.8,
+        "p": 0.046990601879624075
+      }
+    },
+    "A glance vs B glance (hard)": {
+      "answered": {
+        "diff": 0.13454545454545452,
+        "p": 0.018196360727854428
+      },
+      "open": {
+        "diff": 0.10181818181818159,
+        "p": 0.018196360727854428
+      },
+      "state": {
+        "diff": 0.10181818181818159,
+        "p": 0.018196360727854428
+      },
+      "link": {
+        "diff": 0.0015238095238094829,
+        "p": 0.8438312337532493
+      },
+      "found": {
+        "diff": 0.0015238095238094829,
+        "p": 0.8438312337532493
+      },
+      "unknown": {
+        "diff": -0.14545454545454545,
+        "p": 0.007798440311937612
+      },
+      "falseAnswered": {
+        "diff": 0.6,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 2.4,
+        "p": 0.046990601879624075
+      }
+    },
+    "A glance vs B glance (no offers)": {
+      "answered": {
+        "diff": 0.13454545454545452,
+        "p": 0.018196360727854428
+      },
+      "open": {
+        "diff": 0.10181818181818159,
+        "p": 0.018196360727854428
+      },
+      "state": {
+        "diff": 0.10181818181818159,
+        "p": 0.018196360727854428
+      },
+      "link": {
+        "diff": 0.0015238095238094829,
+        "p": 0.8438312337532493
+      },
+      "found": {
+        "diff": 0.0015238095238094829,
+        "p": 0.8438312337532493
+      },
+      "unknown": {
+        "diff": -0.14545454545454545,
+        "p": 0.007798440311937612
+      },
+      "falseAnswered": {
+        "diff": 0.6,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 2.4,
+        "p": 0.046990601879624075
+      }
+    },
+    "A panel vs B glance (all)": {
+      "answered": {
+        "diff": 0.13454545454545452,
+        "p": 0.018196360727854428
+      },
+      "open": {
+        "diff": 0.11272727272727256,
+        "p": 0.007798440311937612
+      },
+      "state": {
+        "diff": 0.11272727272727256,
+        "p": 0.007798440311937612
+      },
+      "link": {
+        "diff": 0.017857142857142905,
+        "p": 0.4435112977404519
+      },
+      "found": {
+        "diff": 0.017857142857142905,
+        "p": 0.4435112977404519
+      },
+      "unknown": {
+        "diff": -0.14545454545454545,
+        "p": 0.007798440311937612
+      },
+      "falseAnswered": {
+        "diff": 0.6,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0.40000000000000013,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 1.4,
+        "p": 0.4481103779244151
+      }
+    },
+    "A panel vs B glance (end)": {
+      "answered": {
+        "diff": -0.019999999999999907,
+        "p": 1
+      },
+      "open": {
+        "diff": -0.039999999999999813,
+        "p": 0.52749450109978
+      },
+      "state": {
+        "diff": -0.039999999999999813,
+        "p": 0.52749450109978
+      },
+      "link": {
+        "diff": 0.025000000000000022,
+        "p": 1
+      },
+      "found": {
+        "diff": 0.025000000000000022,
+        "p": 1
+      },
+      "unknown": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0.2,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0.19999999999999996,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0.2,
+        "p": 1
+      }
+    },
+    "A panel vs B glance (hard)": {
+      "answered": {
+        "diff": 0.13454545454545452,
+        "p": 0.018196360727854428
+      },
+      "open": {
+        "diff": 0.11272727272727256,
+        "p": 0.007798440311937612
+      },
+      "state": {
+        "diff": 0.11272727272727256,
+        "p": 0.007798440311937612
+      },
+      "link": {
+        "diff": 0.017857142857142905,
+        "p": 0.4435112977404519
+      },
+      "found": {
+        "diff": 0.017857142857142905,
+        "p": 0.4435112977404519
+      },
+      "unknown": {
+        "diff": -0.14545454545454545,
+        "p": 0.007798440311937612
+      },
+      "falseAnswered": {
+        "diff": 0.6,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0.40000000000000013,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 1.4,
+        "p": 0.4481103779244151
+      }
+    },
+    "A panel vs B glance (no offers)": {
+      "answered": {
+        "diff": 0.13454545454545452,
+        "p": 0.018196360727854428
+      },
+      "open": {
+        "diff": 0.11272727272727256,
+        "p": 0.007798440311937612
+      },
+      "state": {
+        "diff": 0.11272727272727256,
+        "p": 0.007798440311937612
+      },
+      "link": {
+        "diff": 0.017857142857142905,
+        "p": 0.4435112977404519
+      },
+      "found": {
+        "diff": 0.017857142857142905,
+        "p": 0.4435112977404519
+      },
+      "unknown": {
+        "diff": -0.14545454545454545,
+        "p": 0.007798440311937612
+      },
+      "falseAnswered": {
+        "diff": 0.6,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0.40000000000000013,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 1.4,
+        "p": 0.4481103779244151
+      }
+    },
+    "A full read vs B full read (end)": {
+      "answered": {
+        "diff": -0.019999999999999907,
+        "p": 1
+      },
+      "open": {
+        "diff": -0.11999999999999988,
+        "p": 0.21275744851029793
+      },
+      "state": {
+        "diff": -0.11999999999999988,
+        "p": 0.21275744851029793
+      },
+      "link": {
+        "diff": -0.022222222222222143,
+        "p": 1
+      },
+      "found": {
+        "diff": -0.022222222222222143,
+        "p": 1
+      },
+      "unknown": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0.2,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 1.2,
+        "p": 0.046990601879624075
+      }
+    },
+    "A glance vs B full read (end)": {
+      "answered": {
+        "diff": -0.019999999999999907,
+        "p": 1
+      },
+      "open": {
+        "diff": -0.07999999999999985,
+        "p": 0.22995400919816036
+      },
+      "state": {
+        "diff": -0.07999999999999985,
+        "p": 0.22995400919816036
+      },
+      "link": {
+        "diff": -0.050000000000000044,
+        "p": 0.4411117776444711
+      },
+      "found": {
+        "diff": -0.050000000000000044,
+        "p": 0.4411117776444711
+      },
+      "unknown": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0.2,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0.8,
+        "p": 0.046990601879624075
+      }
+    }
+  },
+  "perScenario": {
+    "burst": {
+      "A panel": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 125,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 8,
+        "falseOpen": 7,
+        "notAnswered": 130,
+        "openTruth": 140
+      },
+      "B glance": {
+        "n": 275,
+        "answered": 0.8545454545454545,
+        "open": 0.8327272727272728,
+        "state": 0.8327272727272728,
+        "link": 0.9824561403508771,
+        "linkN": 114,
+        "found": 0.9824561403508771,
+        "unknown": 0.14545454545454545,
+        "falseAnswered": 0,
+        "falseDone": 6,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 151
+      },
+      "B full read": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 1,
+        "linkN": 43,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 2
+      },
+      "A glance": {
+        "n": 275,
+        "answered": 0.9890909090909091,
+        "open": 0.9345454545454546,
+        "state": 0.9345454545454546,
+        "link": 0.984,
+        "linkN": 125,
+        "found": 0.984,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 6,
+        "falseOpen": 12,
+        "notAnswered": 130,
+        "openTruth": 140
+      },
+      "A full read": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.84,
+        "state": 0.84,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 2,
+        "falseOpen": 6,
+        "notAnswered": 1,
+        "openTruth": 3
+      }
+    }
+  },
+  "waitingSplit": {
+    "A panel": {
+      "direct": {
+        "n": 10,
+        "seenOpen": 5,
+        "lookedDone": 5
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    },
+    "B glance": {
+      "direct": {
+        "n": 11,
+        "seenOpen": 5,
+        "lookedDone": 6
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    },
+    "B full read": {
+      "direct": {
+        "n": 2,
+        "seenOpen": 0,
+        "lookedDone": 2
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    },
+    "A glance": {
+      "direct": {
+        "n": 10,
+        "seenOpen": 7,
+        "lookedDone": 3
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    },
+    "A full read": {
+      "direct": {
+        "n": 2,
+        "seenOpen": 1,
+        "lookedDone": 1
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    }
+  },
+  "perRun": {
+    "A panel": {
+      "burst-A-r1": {
+        "n": 55,
+        "answered": 0.9454545454545454,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 25,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 27,
+        "openTruth": 28
+      },
+      "burst-A-r2": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-A-r3": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9636363636363636,
+        "state": 0.9636363636363636,
+        "link": 1,
+        "linkN": 24,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 26,
+        "openTruth": 29
+      },
+      "burst-A-r4": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 28,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 3,
+        "notAnswered": 24,
+        "openTruth": 25
+      },
+      "burst-A-r5": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9272727272727272,
+        "state": 0.9272727272727272,
+        "link": 1,
+        "linkN": 27,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 4,
+        "notAnswered": 25,
+        "openTruth": 26
+      }
+    },
+    "B glance": {
+      "burst-B-r1": {
+        "n": 55,
+        "answered": 0.7636363636363637,
+        "open": 0.7636363636363637,
+        "state": 0.7636363636363637,
+        "link": 0.9583333333333334,
+        "linkN": 24,
+        "found": 0.9583333333333334,
+        "unknown": 0.23636363636363636,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-B-r2": {
+        "n": 55,
+        "answered": 0.8727272727272727,
+        "open": 0.8727272727272727,
+        "state": 0.8727272727272727,
+        "link": 1,
+        "linkN": 24,
+        "found": 1,
+        "unknown": 0.12727272727272726,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-B-r3": {
+        "n": 55,
+        "answered": 0.9454545454545454,
+        "open": 0.8909090909090909,
+        "state": 0.8909090909090909,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0.05454545454545454,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-B-r4": {
+        "n": 55,
+        "answered": 0.8727272727272727,
+        "open": 0.8727272727272727,
+        "state": 0.8727272727272727,
+        "link": 1,
+        "linkN": 24,
+        "found": 1,
+        "unknown": 0.12727272727272726,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-B-r5": {
+        "n": 55,
+        "answered": 0.8181818181818182,
+        "open": 0.7636363636363637,
+        "state": 0.7636363636363637,
+        "link": 0.9523809523809523,
+        "linkN": 21,
+        "found": 0.9523809523809523,
+        "unknown": 0.18181818181818182,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      }
+    },
+    "B full read": {
+      "burst-B-r1": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-B-r2": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-B-r3": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-B-r4": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-B-r5": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      }
+    },
+    "A glance": {
+      "burst-A-r1": {
+        "n": 55,
+        "answered": 0.9454545454545454,
+        "open": 0.8909090909090909,
+        "state": 0.8909090909090909,
+        "link": 0.96,
+        "linkN": 25,
+        "found": 0.96,
+        "unknown": 0,
+        "falseAnswered": 3,
+        "falseDone": 3,
+        "falseOpen": 3,
+        "notAnswered": 27,
+        "openTruth": 28
+      },
+      "burst-A-r2": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9090909090909091,
+        "state": 0.9090909090909091,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 2,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-A-r3": {
+        "n": 55,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.9583333333333334,
+        "linkN": 24,
+        "found": 0.9583333333333334,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 26,
+        "openTruth": 29
+      },
+      "burst-A-r4": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 28,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 3,
+        "notAnswered": 24,
+        "openTruth": 25
+      },
+      "burst-A-r5": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9272727272727272,
+        "state": 0.9272727272727272,
+        "link": 1,
+        "linkN": 27,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 4,
+        "notAnswered": 25,
+        "openTruth": 26
+      }
+    },
+    "A full read": {
+      "burst-A-r1": {
+        "n": 10,
+        "answered": 0.9,
+        "open": 0.7,
+        "state": 0.7,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 1,
+        "falseOpen": 2,
+        "notAnswered": 1,
+        "openTruth": 1
+      },
+      "burst-A-r2": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.7,
+        "state": 0.7,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 2,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-A-r3": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-A-r4": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 1,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-A-r5": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 0.8888888888888888,
+        "linkN": 9,
+        "found": 0.8888888888888888,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 1,
+        "notAnswered": 0,
+        "openTruth": 0
+      }
+    }
+  },
+  "truth": {
+    "burst-A-r1": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C5",
+        "asksIn": "C3",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C5",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C6",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r2": [
+      {
+        "id": "m1",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C4",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "asksIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C5",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r3": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "asksIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r4": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C5",
+        "asksIn": "C3",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C5",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C6",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r5": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C5",
+        "asksIn": "C3",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C5",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C6",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r1": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r2": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C4",
+        "asksIn": "C3",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C5",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r3": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "asksIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C4",
+        "asksIn": "C3",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C5",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r4": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r5": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "asksIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ]
+  },
+  "panel": {
+    "burst-A-r1": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:done m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:done m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:done m2:claude m3:done m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:done m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r2": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:done m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r3": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:done m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:done m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:done m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r4": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:done m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:done m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:done m2:claude m3:done m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:me m2:done m3:me m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:me",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r5": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:done m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:done m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:done m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:me m2:done m3:me m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:me",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:me m10:done"
+    }
+  },
+  "misses": [
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "before m9",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "before m9",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "before m10",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r3",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r3",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r3",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r3",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "before m9",
+      "msg": "m3",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "before m9",
+      "msg": "m3",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m5",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m5",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m5",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m6",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m6",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m6",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m6",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m8",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m8",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m8",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m8",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m8",
+      "msg": "m6",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m8",
+      "msg": "m7",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m9",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m5",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m5",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m5",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m6",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m6",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m6",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m6",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m6",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m6",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m6",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m3",
+      "msg": "m1",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m3",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m8",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m8",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m8",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m8",
+      "msg": "m6",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m8",
+      "msg": "m7",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m7",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m7",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m7",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m7",
+      "msg": "m6",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m8",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m8",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m8",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m8",
+      "msg": "m5",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m8",
+      "msg": "m6",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m8",
+      "msg": "m7",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "end",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "B full read",
+      "run": "burst-B-r3",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B full read",
+      "run": "burst-B-r5",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m9",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "before m9",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "before m10",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r3",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "before m9",
+      "msg": "m3",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "working",
+      "claim": "done"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m5",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "waiting"
+    }
+  ]
+}

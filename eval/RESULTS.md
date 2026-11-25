@@ -68,6 +68,8 @@ The state logic is the same as the eval's frozen copy; only the guide text has c
 
 **Statistics.** Per-run rates. A − B is the mean over scenarios of (mean A − mean B). p is the same two-sided permutation test as below, with labels shuffled within each scenario (5,000 shuffles).
 
+**Later the same day,** the panel, the chat and the app changed to close the gap: see [Closing the gap](#closing-the-gap-2026-11-25-later). The tables below are the state before that.
+
 ### Results (995 pairs per arm; 280 at the end)
 
 | measure | A panel (no model) | A glance | B glance | A − B, glance | p |
@@ -208,6 +210,110 @@ At most 2 Claude processes ran at once.
 - `results/burst/summary.md` holds the session tables.
 - `results/burst/visibility/` holds the visibility results and tables (ids, states, counts and scores only).
 - Not committed, and no longer kept: `results/burst/results.json` (Claude's reply text), the streams in `results/burst/raw/`, and the prompts, answers and ledger in `results/burst/visibility/raw/`. They were deleted by mistake when the worktree was cleaned up, so these 10 runs can't be re-scored without running the sessions again (about $1.10).
+
+### Closing the gap (2026-11-25, later)
+
+The goal: clued at least ties plain Claude Code on every measure, and is clearly ahead on answered-or-not and on finding the answer, with the same readers and scoring.
+
+**Short answer.**
+- **Answered or not: clearly ahead on both sets.**
+  - Hard set: 993 of 995 messages read right from one screen, against 856 of 995 (+4 pt per run, p < 0.001).
+  - Burst set: 272 of 275 against 235 of 275 (+13.5 pt, p = 0.018).
+- **Finding the answer: ahead on the hard set, tied on the burst set, behind on the hard set's full read.**
+  - Hard set, from one screen: 90.8% against 82.7%, up from 81.7%. The per-run test gives +1.4 pt (p = 0.17) over all moments and +3.8 pt (p = 0.021) at the end. It weighs each run equally, and plain's misses sit in the long runs.
+  - Burst set, from one screen: 98.4% against 98.2%, up from 77.3%. That is a tie (p = 0.84), but no longer −18 pt.
+  - Full read: 93.9% against 97.9% (−5 pt, p = 0.021). This one doesn't win; see the caveats.
+- **What is still open: ahead when offers count, tied without them.** But clued shows a finished message as waiting on you more often than plain does: 23 of 659 against 2 of 694 on the hard set, and 12 of 135 against 0 of 124 on the burst set.
+- **What did most of it.** Two things, for two different failures:
+  - On the burst set, the app now asks Claude again, at once, for replies its tag settled but that never arrived. Without that, clued's sessions answered only about half of the burst.
+  - On the hard set, the panel's fixes: it trusts Claude's "waiting on you", and a follow-up can no longer close another message's question.
+
+**What changed in the app, one PR each, in this order.**
+1. **#21, panel.** The panel trusts the tag's "me" (waiting on you), even without a question mark. A `same_as` follow-up marked done no longer closes the question of the topic it merged into. A made-up id such as `T1-discount` maps to its real topic. A message the app guessed was your answer goes back to waiting if Claude's next tag ignores it. ✋ shows only on the message whose reply asked.
+2. **#25, chat.** In a reply of several parts, a short part (one or two lines, answering one message) has no box. It is one `↩ “Which port…”` line with the answer under it, so a burst of answers fits on one screen.
+3. **#29, panel.** Under each answered message in Your recent messages, a dim `→` row gives the answer's gist, room allowing. For a question, the words that restate it go (`→ 8137.`). For a request, the thing it changed stays as a label (`→ workers: now 6, per your correction.`).
+4. **#30, app.** Replies Claude's tag settled but never wrote are asked for again at once, in one message. See "Why the burst set was losing" below.
+5. **#31, app.** A reply part shows, and answers its message, as soon as its text block is complete. Before, it waited for Claude's next tool call. While one of your messages waited in queue, the chat hid the part too.
+
+Idea 4, a guide line about Claude's ✓ on a question, wasn't needed: the panel fixes solved that case in code.
+
+**Why the burst set was losing.** The burst set was run again with today's APP_GUIDE, 5 sessions per arm (`results/burst2/`). Sonnet with interleaved thinking often drafted the answer parts for the burst in its thinking blocks and never wrote them as text. The tag still marked those messages done, so the panel showed ⚠ reply lost. The judge found only 50% ± 28% of clued's messages answered fully, against 100% for plain (p = 0.045).
+
+A guide line asking for every part as reply text didn't help: 56% ± 13% (`summary-guide-try.md`), so it was dropped. Asking again in the app (#30) brought it to 98% ± 4% (`summary-retry.md`). That costs a turn: $0.090 a session for clued against $0.071 for plain.
+
+**Hard set (995 message-moments per arm, 280 at the end; same sessions, same saved truth).** "Before" is arm A as scored in the tables above. "After" is the app after #31.
+
+| measure | A glance before | A glance after | B glance | A − B after | p | (before: A − B, p) |
+|---|---|---|---|---|---|---|
+| answered or not | 992/995 | 993/995 | 856/995 | +4.3 pt | <0.001 | +4.2 pt, <0.001 |
+| … at the end | 279/280 | 279/280 | 240/280 | +7.2 pt | <0.001 | +7.2 pt, <0.001 |
+| answer found | 81.7% | 90.8% | 82.7% | +1.4 pt | 0.17 | +0.1 pt, 0.95 |
+| … at the end | 86.1% | 89.1% | 83.8% | +3.8 pt | 0.021 | +2.6 pt, 0.15 |
+| still open (offers count as waiting) | 929/995 | 959/995 | 765/995 | +8.0 pt | <0.001 | +7.2 pt, <0.001 |
+| still open, offers left out | 93.6% | 96.7% | 86.3% | −0.2 pt | 0.88 | −0.9 pt, 0.49 |
+| open, but looked done | 31/336 | 11/336 | 93/301 | −1.26 per run | <0.001 | −0.95, <0.001 |
+| done, but looked open | 33/659 | 23/659 | 2/694 | +0.32 per run | <0.001 | +0.48, <0.001 |
+| not answered, but looked answered | 0/141 | 0/141 | 4/135 | −0.06 per run | 0.22 | same |
+| full read at the end: answer found | 96.1% | 93.9% | 97.9% | −5.0 pt | 0.021 | −1.2 pt, 0.27 |
+
+The panel itself, with no model:
+- Still open: 92.8% before, 98.9% after.
+- Open, but looked done: 45 before, 3 after. The 3 left are offers.
+- Done, but looked open: 27 before, 8 after.
+- Answer found: 99.8% before and after.
+
+**Burst set (275 message-moments per arm, 50 at the end; 5 runs per arm).**
+- "Before" is the old app (`3ff1327`) on the sessions with today's guide.
+- "Display only" is the app after #31 on the same sessions.
+- "After" is the app after #31 on new clued sessions, run with #30's asking again.
+- Plain's sessions and readers are the same in every column.
+
+| measure | A glance before | display only | after | B glance | A − B after | p | (before: A − B, p) |
+|---|---|---|---|---|---|---|---|
+| answered or not | 213/275 | 212/275 | 272/275 | 235/275 | +13.5 pt | 0.018 | −8.0 pt, 0.28 |
+| … at the end | 25/50 | 25/50 | 49/50 | 50/50 | −2 pt | 1.0 | −50 pt, 0.047 |
+| can't tell | 62 | 63 | 0 | 40 | | | |
+| answer found | 77.3% (of 44) | 90.9% | 98.4% (of 127) | 98.2% (of 114) | +0.2 pt | 0.84 | −18.2 pt, 0.16 |
+| … at the end | 70.0% | 85.0% | 95.2% | 97.7% | −2.5 pt | 1.0 | −23.1 pt, 0.16 |
+| still open | 206/275 | 202/275 | 257/275 | 229/275 | +10.2 pt | 0.018 | −8.4 pt, 0.26 |
+| done, but looked open | 6/54 | 8/54 | 12/135 | 0/124 | +2.4 per run | 0.047 | +1.2, 0.16 |
+| open, but looked done | 1/221 | 2/221 | 6/140 | 6/151 | 0 | 1.0 | −1.0, 0.44 |
+| full read at the end: answered or not | 43/50 | 31/50 | 49/50 | 50/50 | −2 pt | 1.0 | −14 pt, 0.45 |
+| full read at the end: answer found | 95% | 95% | 97.6% | 100% | −2.2 pt | 1.0 | −10 pt, 1.0 |
+
+The display changes alone moved "answer found" from 77% to 91% on the same sessions. Answered-or-not only moved once the replies themselves arrived (#30).
+
+Of the misses left after #29's first version:
+- 4 were moments between a finished part and Claude's next step, fixed by #31.
+- 8 were the gist for a request cut off before its value, fixed by the label.
+
+**Caveats.**
+- **The panel rules were tuned on the hard set's misses,** so the hard set's panel gains are in-sample. The burst set was the check, but #29's label and #31 were written after looking at the burst set's misses too.
+- **The arms were not run side by side.** clued's "after" sessions ran later than plain's, with the same model, guide and fixture.
+- **Plain Claude Code has no counterpart to asking again,** and needs none: its replies are its text. The extra turn is in clued's cost.
+- **Not every reader was run again.**
+  - Plain's glance verdicts on the hard set are the earlier run's, read back from its saved misses (`--readers-from`), since plain's screens didn't change. That reproduces its scores exactly.
+  - Plain's full read on the hard set was sampled again for this comparison and scored 97.9% again (`visibility-after/b-full-again/`).
+  - clued's hard-set "before" verdicts were read with the old legend, which had no line for the `→` row.
+- **The full read got worse for clued: 96.1% to 93.9%, 9 misses to 14.** Every new miss is the reader paraphrasing without the fact ("Anna Weber and Lukas Brandt are from Germany" for "how many?"), not a missing answer. On one fresh sample, this can't be told apart from noise. clued's whole chat is longer than plain's: 566 words against 334 at the end of a burst run.
+- **5 runs per arm on the burst set.** One message moves a rate by 2-4 points, and the smallest p a 5-against-5 test can give is 0.008.
+
+**Spend: $3.12 of the $4 cap.**
+
+| item | $ |
+|---|---|
+| burst sessions with today's guide, both arms, and the blind judge | 0.9207 |
+| the guide-line try, 5 clued sessions | 0.5605 |
+| sessions with asking again, 5 clued sessions | 0.5138 |
+| burst set: truth, glances and full reads | 0.5803 |
+| hard set: clued glances and full reads, plain's full read again | 0.5454 |
+
+About $0.07 of the hard set's glances was a first pass stopped part-way. At most 2 Claude processes ran at once.
+
+**Files.**
+- `results/burst2/summary.md`, `summary-guide-try.md` and `summary-retry.md` hold the session tables.
+- `results/burst2/visibility-{before,display,after}/` and `results/visibility-after/` hold the visibility results: ids, states, counts and scores only.
+- The sessions' `results.json`, the streams and the model prompts and answers stay outside the repo.
 
 ## The bigger run (2026-11-25)
 

@@ -164,14 +164,17 @@ clued and plain Claude Code were given the same 13 scripted conversations, with 
 | Messages sent mid-task that were answered | 56 of 56 | 56 of 58 |
 | Project checks passed | 100% | 99% |
 | Judge: correct, and answers given to the wrong message | 100%, none | 100%, none |
-| From one screen, messages you can tell are answered or not | 99.7% | 86% |
-| [After 8 messages sent before the first reply](eval/RESULTS.md#a-burst-of-messages-before-the-first-reply-2026-11-25), answers you can find on one screen (5 runs) | 86% | 99% |
+| From one screen, messages you can tell are answered or not | 99.8% | 86% |
+| From one screen, answers you can find | 91% | 83% |
+| [After 8 messages sent before the first reply](eval/RESULTS.md#closing-the-gap-2026-11-25-later) (5 runs), answered or not / answers found on one screen | 99% / 98% | 86% / 98% |
 
 - **What clued adds:** you can see, for each message, whether it was answered and where.
 - **What it doesn't add:** Claude's answers aren't better.
 - **What it costs:** about 1,100 tokens of instructions per session, plus a short tag on each reply.
 
-A follow-up on the same runs found that one glance at clued shows whether each message was answered, even after older ones scroll off, but finds neither the answer itself nor what is still open any better ([details](eval/RESULTS.md#can-you-see-what-was-answered-2026-11-25)).
+A follow-up on the same runs found that one glance at clued shows whether each message was answered, even after older ones scroll off, but at first found neither the answer itself nor what is still open any better ([details](eval/RESULTS.md#can-you-see-what-was-answered-2026-11-25)). After the fixes in [Closing the gap](eval/RESULTS.md#closing-the-gap-2026-11-25-later), clued is clearly ahead on answered or not in both sets. It is ahead on finding the answer from one screen on the hard set (91% against 83%; significant at the end, p = 0.02, not over all moments, p = 0.17) and tied on the burst set. Two measures still go against it:
+- Reading the whole chat, the answer is found less often: 94% against 98%.
+- clued shows more finished messages as waiting on you.
 
 The full method and results are in [eval/RESULTS.md](eval/RESULTS.md), and the runner is in [eval/](eval/). In the eval files, clued appears under its earlier name, threadline.
 

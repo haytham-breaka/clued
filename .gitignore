@@ -5,8 +5,9 @@ coverage/
 # Raw eval transcripts and logs hold local paths and account details: never publish them.
 eval/results/**/raw/
 eval/results/*.log
-# The burst run's results.json holds Claude's reply text: it stays local (its summary.md and visibility/ are committed).
+# The burst runs' results.json hold Claude's reply text: it stays local (its summary.md and visibility/ are committed).
 eval/results/burst/results.json
+eval/results/burst2/results.json
 
 # Local and secret files.
 .env

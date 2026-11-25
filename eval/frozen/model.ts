@@ -1,6 +1,6 @@
 // Pure topic/thread logic: no $, so it is easy to test and reason about.
 
-import type { Answer, Board, Thread, Topic, TopicStatus } from '../../types/index.d.ts'
+import type { Answer, Board, Thread, Topic, TopicStatus } from '../types/index.d.ts'
 
 export const TOPICS_PER_THREAD = 3
 /** Threads Claude may sort a Main message into: active within this window. */
@@ -28,10 +28,11 @@ export function firstLine(text: string, max = 48): string {
 
 // ---- The tag Claude ends each reply with -------------------------------
 
-const TAG = /<threadline>([\s\S]*?)<\/threadline>/
+// Sessions from before the rename (threadline) used <threadline> and [threadline]; both still read.
+const TAG = /<(?:clued|threadline)>([\s\S]*?)<\/(?:clued|threadline)>/
 /** Removes the tag, including a half-streamed one at the end. */
 export const stripTag = (text: string) =>
-  text.replace(/\s*<threadline>[\s\S]*?<\/threadline>\s*/g, '\n').replace(/\s*<threadline>[\s\S]*$/, '').trim()
+  text.replace(/\s*<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>\s*/g, '\n').replace(/\s*<(?:clued|threadline)>[\s\S]*$/, '').trim()
 
 export type TagTopic = {
   id: string
@@ -39,6 +40,8 @@ export type TagTopic = {
   status?: TopicStatus
   /** Continues this earlier topic. */
   same_as?: string
+  /** Refers to this earlier topic (a follow-up, a fix, an answer to its question). */
+  about?: string
   /** Where an unsorted topic belongs: an existing thread's id, or "new". */
   thread?: number | 'new'
 }
@@ -62,6 +65,7 @@ export function parseTag(text: string): Tag | null {
           title: typeof o.title === 'string' && o.title.trim() ? o.title.trim().slice(0, 60) : undefined,
           status: STATUSES.includes(o.status as TopicStatus) ? (o.status as TopicStatus) : undefined,
           same_as: typeof o.same_as === 'string' ? o.same_as : undefined,
+          about: typeof o.about === 'string' ? o.about : undefined,
           thread,
         },
       ]
@@ -155,18 +159,32 @@ export function raiseTopic(
 
 // ---- Settling a turn ------------------------------------------------------
 
+/** Which status wins when two entries settle one topic. */
+const RANK: Record<TopicStatus, number> = { done: 0, claude: 1, me: 2 }
+
 /** No tag: a reply ending in a question waits on the user, any other is done. */
 export const guessStatus = (answer: string): TopicStatus => (/\?\s*$/.test(stripTag(answer)) ? 'me' : 'done')
+
+/** The topic a question belongs to: the one the reply mark above its last "?" names, else the turn's only topic. */
+function askingTopic(answer: string, topics: readonly Topic[], turnTopics: readonly string[]): Topic | undefined {
+  const text = stripTag(answer).replace(/```[\s\S]*?```/g, '')
+  const q = text.lastIndexOf('?')
+  if (q < 0) return undefined
+  const mark = [...text.slice(0, q).matchAll(/^[ \t]*<<reply\s+([^>]*)>>[ \t]*$/gim)].at(-1)
+  const ids = mark ? mark[1]!.split(/[\s,]+/).map(s => s.trim().toUpperCase().split('.')[0]!) : turnTopics.length === 1 ? [...turnTopics] : []
+  return topics.find(t => t.id === ids[0])
+}
 
 /**
  * Applies Claude's answer: merges continued topics, places unsorted ones, sets
  * titles and statuses, names threads and records the answer. Returns the
  * topics that now wait on the user.
  */
-export function settleTurn(board: Board, answer: string, now: number, opts: { flat?: boolean } = {}): { board: Board; nowWaiting: Topic[] } {
+export function settleTurn(board: Board, answer: string, now: number, opts: { flat?: boolean; partial?: boolean } = {}): { board: Board; nowWaiting: Topic[] } {
   const tag = parseTag(answer)
   const fallback = guessStatus(answer)
-  const before = new Map(board.topics.map(t => [t.id, t.status]))
+  // A question your plain message was guessed to answer still counts as open until the tag says.
+  const before = new Map(board.topics.map(t => [t.id, t.answerGuessed ? 'me' : t.status]))
   let topics = board.topics.map(t => ({ ...t, messageKeys: [...t.messageKeys] }))
   let threads = board.threads.map(t => ({ ...t, topicIds: [...t.topicIds] }))
   const touched = new Set<string>()
@@ -174,12 +192,20 @@ export function settleTurn(board: Board, answer: string, now: number, opts: { fl
     topics = topics.filter(t => t.id !== topic.id)
     threads = threads.map(th => ({ ...th, topicIds: th.topicIds.filter(id => id !== topic.id) }))
   }
-  // As in crewbase: "waiting on you" only when the reply asks something.
-  const asks = /\?/.test(stripTag(answer))
-  const settle = (topic: Topic, entry: TagTopic | undefined) => {
+  // Topics an entry of this tag settled with "claude" or "done": a "me" after that is a new question.
+  const settledNow = new Set<string>()
+  const held = new Set<string>()
+  const settle = (topic: Topic, entry: TagTopic | undefined, merged = false) => {
     if (entry?.title) topic.title = entry.title
+    // The tag's status is trusted, "me" too: Claude often says it still waits on you in a reply about
+    // something else, with no question mark there. Only the guess for a topic the tag left out reads the text.
+    // Two entries for one topic (its own, a follow-up folded in): waiting on you wins, then on Claude.
     const status = entry?.status ?? (touched.has(topic.id) ? topic.status : fallback)
-    topic.status = status === 'me' && !asks ? 'done' : status
+    // A question only kept open across a follow-up (held) gives way to the topic's own entry.
+    const keep = entry?.status && touched.has(topic.id) && !(held.has(topic.id) && !merged) && RANK[topic.status] > RANK[status]
+    topic.status = keep ? topic.status : status
+    if (!merged) held.delete(topic.id)
+    if (entry?.status && entry.status !== 'me' && !merged) settledNow.add(topic.id)
     delete topic.isProvisional
     topic.updatedAt = now
     if (topic.threadId === 0 && !opts.flat) {
@@ -194,23 +220,64 @@ export function settleTurn(board: Board, answer: string, now: number, opts: { fl
     touched.add(topic.id)
   }
 
+  // The messages each topic got this turn: a topic raised now has its own; an older one, those folded in.
+  const fresh = new Map(topics.filter(t => t.isProvisional).map(t => [t.id, [...t.messageKeys]]))
+  const raisedNow = new Set(fresh.keys())
+  const madeUp: TagTopic[] = []
   for (const entry of tag?.topics ?? []) {
     const topic = topics.find(t => t.id === entry.id)
-    if (!topic) continue
+    if (!topic) {
+      if (entry.status === 'me') madeUp.push(entry)
+      continue
+    }
     const into = entry.same_as && entry.same_as !== entry.id ? topics.find(t => t.id === entry.same_as) : undefined
     if (into && topic.isProvisional) {
-      // A continuation of an earlier topic: fold the message into it.
+      // A continuation of an earlier topic: fold the message into it. The follow-up's "done" is about
+      // the follow-up: a question the earlier topic waits on stays open (also one your plain message was
+      // guessed to answer) unless the tag settles that topic itself.
+      const stillAsks = !touched.has(into.id) && (into.status === 'me' || !!into.answerGuessed)
       into.messageKeys.push(...topic.messageKeys)
+      if (!raisedNow.has(into.id)) fresh.set(into.id, [...(fresh.get(into.id) ?? []), ...topic.messageKeys])
       drop(topic)
-      settle(into, { ...entry, id: into.id, thread: undefined })
+      if (stillAsks && entry.status !== 'me') held.add(into.id)
+      settle(into, { ...entry, id: into.id, thread: undefined, ...(stillAsks ? { status: 'me' as const } : {}) }, true)
       continue
     }
     settle(topic, entry)
+  }
+  // A question under an id Claude made up ("T1-discount", or a new "T3"): it waits on the topic it
+  // grew from, named by the id's start or by the reply mark of the part that asks.
+  for (const entry of madeUp) {
+    const owner = topics.find(t => t.id === entry.id.match(/^(T\d+)(?!\d)/)?.[1]) ?? askingTopic(answer, topics, board.turnTopics)
+    if (owner) settle(owner, { id: owner.id, status: 'me' })
+  }
+  // A plain message taken as the answer to a question: the tag takes it up (lists the topic, or links a
+  // message to it with "about"), or the message was about something else and the question is open again.
+  if (!opts.partial) {
+    const named = new Set((tag?.topics ?? []).flatMap(e => [e.id, e.about]).filter(Boolean))
+    for (const topic of topics) {
+      if (!topic.answerGuessed) continue
+      if (!touched.has(topic.id) && !named.has(topic.id)) topic.status = 'me'
+      delete topic.answerGuessed
+    }
   }
   // Topics raised this turn that the tag left out.
   for (const id of board.turnTopics) {
     const topic = topics.find(t => t.id === id)
     if (topic && !touched.has(id)) settle(topic, undefined)
+  }
+
+  // Which messages a question is for: the ones whose reply raised it. A follow-up folded into a topic
+  // that already waits on you isn't asked anything new, and a question raised by a follow-up's reply
+  // isn't the first message's.
+  // Without such messages (an older topic asked again), the panel decides from the replies.
+  for (const topic of topics) {
+    if (topic.status !== 'me') delete topic.askedBy
+    else if (before.get(topic.id) !== 'me' || settledNow.has(topic.id)) {
+      const keys = fresh.get(topic.id)
+      if (keys?.length) topic.askedBy = keys
+      else delete topic.askedBy
+    }
   }
 
   // A merge can empty a thread: drop it unless a fork hangs under it.
@@ -353,7 +420,7 @@ export function briefFor(
   const quoted = quote ? (quote.text.length > 600 ? `${quote.text.slice(0, 600)}…` : quote.text).replace(/^/gm, '> ') : ''
   const thread = board.threads.find(t => t.id === threadId)
   if (thread) {
-    lines.push(`[threadline] This message is provisional topic ${topicId}, a reply in thread #${thread.id} "${thread.name}" (topics ${thread.topicIds.join(', ')}).`)
+    lines.push(`[clued] This message is provisional topic ${topicId}, a reply in thread #${thread.id} "${thread.name}" (topics ${thread.topicIds.join(', ')}).`)
     const last = lastAnswerIn(board, replyTo ?? thread.id)
     if (quote) lines.push(`The user is replying to ${quote.who === 'claude' ? 'your' : 'their own'} message:\n${quoted}`)
     // Only repeat the thread's last message when it is not the answer Claude just gave.
@@ -362,7 +429,7 @@ export function briefFor(
       lines.push(`Your last message in that thread:\n${excerpt.replace(/^/gm, '> ')}`)
     }
   } else {
-    lines.push(`[threadline] This message is provisional topic ${topicId}, sent to Main: give it "thread" in your tag (an id below, or "new").`)
+    lines.push(`[clued] This message is provisional topic ${topicId}, sent to Main: give it "thread" in your tag (an id below, or "new").`)
     if (quote) lines.push(`The user is replying to ${quote.who === 'claude' ? 'your' : 'their own'} message (sort it with that message's thread unless it is a new subject):\n${quoted}`)
     const active = activeThreads(board, now).slice(0, 12)
     // As in crewbase: a short message soon after a reply usually answers it.
@@ -385,23 +452,23 @@ export function briefFor(
 }
 
 export const TAG_GUIDE = [
-  'This session runs the threadline interface. The user sends many messages; threadline groups them into topics and threads',
-  '(three topics a thread; a full thread forks a child). Each user message arrives with a [threadline] note naming its provisional topic.',
-  'End every reply with exactly one line, last, in this form (JSON inside the tag; threadline hides it from the user):',
-  '<threadline>{"topics":[{"id":"T7","title":"3-6 word title","status":"claude|me|done","thread":2,"same_as":"T3"}],"threads":{"2":"2-3 word name, at most 16 characters"}}</threadline>',
+  'This session runs the clued interface. The user sends many messages; clued groups them into topics and threads',
+  '(three topics a thread; a full thread forks a child). Each user message arrives with a [clued] note naming its provisional topic.',
+  'End every reply with exactly one line, last, in this form (JSON inside the tag; clued hides it from the user):',
+  '<clued>{"topics":[{"id":"T7","title":"3-6 word title","status":"claude|me|done","thread":2,"same_as":"T3"}],"threads":{"2":"2-3 word name, at most 16 characters"}}</clued>',
   'List every topic this turn touched. status: "claude" when you still owe work on it, "me" when it waits on the user',
   '(a question, a decision, something to check), "done" when nothing is pending. "thread" only for a topic sent to Main:',
   'the id of the active thread it belongs to; a follow-up, fix or tweak of recent work belongs to the thread of that work,',
   'and "new" is only for a subject none of the active threads covers. "same_as" only when a message continues an earlier',
   'topic. Name every thread the note lists as unnamed. When you need a yes before going on, ask it as a question:',
-  'the user may answer with a 👍 reaction, which threadline sends you as a go-ahead.',
+  'the user may answer with a 👍 reaction, which clued sends you as a go-ahead.',
 ].join(' ')
 
-/** The tag for the threadline app, which tracks your messages without threads. */
+/** The tag for the clued app, which tracks your messages without threads. */
 export const FLAT_GUIDE = [
-  'This session runs the threadline app. Each user message arrives with a [threadline] note naming its topic id (T52).',
+  'This session runs the clued app. Each user message arrives with a [clued] note naming its topic id (T52).',
   'End every reply with exactly one line, last, in this form (JSON inside the tag; the app hides it from the user):',
-  '<threadline>{"topics":[{"id":"T52","title":"3-6 word title","status":"claude|me|done","same_as":"T49"}]}</threadline>',
+  '<clued>{"topics":[{"id":"T52","title":"3-6 word title","status":"claude|me|done","same_as":"T49"}]}</clued>',
   'List every topic this turn touched. status: "claude" when you still owe work on it, "me" when it waits on the user',
   '(a question, a decision, something to check), "done" when nothing is pending. "same_as" only when a message continues',
   'an earlier topic. When you need a yes before going on, ask it as a question: the user may answer with a 👍 reaction,',
@@ -410,7 +477,7 @@ export const FLAT_GUIDE = [
 
 /** The app's note on a message: its topic, what it replies to, and the topics still open. */
 export function flatBrief(board: Board, topicId: string, quotes: { who: 'me' | 'claude'; text: string; topics?: string[] }[] = []): string {
-  const lines = [`[threadline] This message is topic ${topicId}.`]
+  const lines = [`[clued] This message is topic ${topicId}.`]
   const quoted = (q: (typeof quotes)[number]) => {
     const text = (q.text.length > 600 ? `${q.text.slice(0, 600)}…` : q.text).replace(/^/gm, '> ')
     return q.topics?.length ? `(your reply to ${q.topics.join(', ')})\n${text}` : text
@@ -453,7 +520,9 @@ export function isAsking(board: Board, answer: Answer | undefined, text: string)
   return /\?\s*$/.test(stripTag(text))
 }
 
-export const REACTION_PREFIX = '[threadline reaction]'
+export const REACTION_PREFIX = '[clued reaction]'
+/** The reaction text after its prefix, for this name or the old one; undefined when it isn't a reaction. */
+export const reactionText = (text: string) => text.match(/^\[(?:clued|threadline) reaction\]/) ? text.replace(/^\[(?:clued|threadline) reaction\]/, '') : undefined
 
 /** The message a reaction that asks for a turn sends Claude. */
 export function reactionPrompt(signal: Exclude<ReactionSignal, 'fyi'>, emoji: string, text: string, topicIds: readonly string[]): string {

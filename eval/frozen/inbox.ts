@@ -4,6 +4,7 @@
 import { stripTag } from './model.ts'
 import type { Board } from '../../types/index.d.ts'
 import type { Turn } from '../../app/session.ts'
+import { remember } from '../../app/text.ts'
 
 /** One reply in Claude's answer: `to` holds the topic ids (your messages) it answers. */
 export type Part = { to: string[]; text: string; id?: string; subs?: string[] }
@@ -13,34 +14,50 @@ export type Part = { to: string[]; text: string; id?: string; subs?: string[] }
  * Claude can answer one of them by number (T90.2 is the second question of T90).
  */
 export function questionsOf(text: string): string[] {
-  const qs = [...text.matchAll(/[^.?!\n]*[^.?!\n\s][^.?!\n]*\?/g)].map(m => m[0].trim()).filter(q => q.split(/\s+/).length >= 2)
-  return qs.length > 1 ? qs : []
+  // Asked of every message on every frame: worked out once per text.
+  const known = questionsCache.get(text)
+  if (known) return known
+  const all = [...text.matchAll(/[^.?!\n]*[^.?!\n\s][^.?!\n]*\?/g)].map(m => m[0].trim()).filter(q => q.split(/\s+/).length >= 2)
+  const qs = all.length > 1 ? all : []
+  remember(questionsCache, text, qs)
+  return qs
 }
+const questionsCache = new Map<string, string[]>()
+
 
 /** A line Claude starts a reply part with: <<reply T43,T44>> */
 const MARK = /^[ \t]*<<reply\s+([^>]*)>>[ \t]*$/gim
 
 export const REPLY_GUIDE = [
-  'Each of your replies answers some of the user\'s messages, which the [threadline] notes name (T43, T44...).',
+  'Each of your replies answers some of the user\'s messages, which the [clued] notes name (T43, T44...).',
   'When one reply answers several messages that are about different things, split it into parts: start each part',
   'with a line of its own, <<reply T43>> or <<reply T43,T44>> (several ids only when those messages belong together),',
   'then that part\'s answer. The app shows each part as its own bubble quoting the messages it answers.',
   'Leave the line out when the reply answers only the latest message. Ask anything you need from the user at the end of',
   'the part it belongs to, as a question, so the app can list it under "waiting on you".',
+  'When offering the user choices, ask with the AskUserQuestion tool, so the app shows them as options they can click.',
   'When one message asks several things, the note numbers them (T90.1, T90.2): a part answering only some of them names',
   'those (<<reply T90.2>>); a part naming the message (T90) quotes all of them.',
   'When a message refers to an earlier one of theirs without quoting it (a follow-up, a fix, "the second thing I asked",',
   'an answer to your question), add "about":"<that message\'s id>" to its entry in the tag (or "same_as" when it continues',
   'the same subject): the app then links the two, as if the user had replied to it.',
-  'Write every part in your final message of the turn: text written before a tool call may never reach the app, and',
-  'then the user cannot find your answer. For a long job that other messages need not wait on, consider a background',
-  'agent; when it comes back, start what you write about it with <<reply>> for the message it worked on.',
+  'When an answer is ready, write it then, as its own part, even in the middle of a turn: don\'t hold finished answers',
+  'for the end. A part written between tool calls reaches the user at once and is kept; end it with its own tag line',
+  'for the messages it settles, so their marks change then. Your last tag still lists every topic.',
+  'For a long job that other messages need not wait on, consider a background agent; when it comes back, start what',
+  'you write about it with <<reply>> for the message it worked on.',
   'The note lists topics still "on Claude": whenever one of them is finished, or now waits on the user, list it in your',
-  'tag with its new status, even when this turn is about something else; otherwise the app shows it as having no update.',
+  'tag with its new status, even when this turn is about something else; otherwise the app keeps showing it as waiting for Claude.',
   'A request is done only when its work is finished: while you still owe work on it (also right after "I will do it"),',
   'mark it "claude"; when you finish it, even later or in the background, write a short closing reply to its id',
   '(<<reply T5>> then "Done: ..." in a line) and mark it "done". If you cannot finish it, say so in a reply to its id.',
 ].join(' ')
+
+/** What the app sends when replies Claude's tag settled never arrived: write them again, one part each. */
+export function lostRepliesPrompt(ids: readonly string[]): string {
+  const many = ids.length > 1
+  return `Your ${many ? 'replies' : 'reply'} to ${ids.join(', ')} never reached the app: it shows no answer to ${many ? 'them' : 'it'}. Write ${many ? 'each of them' : 'it'} again now as reply text, ${many ? 'each in its own part starting with <<reply T…>> for its message' : `in a part starting with <<reply ${ids[0]}>>`}.`
+}
 
 /** Whether text holds reply marks (a reply written mid-turn, not narration). */
 export const hasMarks = (text: string) => /^[ \t]*<<reply\s+[^>]*>>[ \t]*$/im.test(text)
@@ -115,7 +132,9 @@ export type PartRef = { id: string; turn: Turn; index: number; part: Part; previ
  * claude ⏳ not answered yet (Claude is on this turn); progress ▶ answered, but Claude said it still owes
  * work, or an agent is on it; me ✋ the answer asks you something; done ✓ finished; failed ✕ the turn
  * failed; none ○ never answered; lost ⚠ Claude's tag named it, but no reply to it arrived (it went
- * missing on the way: text written before a tool call can). `stale`: in progress with nothing working on it (no update coming).
+ * missing on the way: text written before a tool call can). `active`: Claude's turn or an agent is on it now.
+ * `stale`: in progress with nothing working on it (shown as waiting for Claude). `queued`: sent while
+ * Claude worked on another message and not answered yet (shown as in queue).
  */
 export type MessageState = 'claude' | 'progress' | 'me' | 'done' | 'failed' | 'none' | 'lost'
 export type MessageRef = {
@@ -123,7 +142,11 @@ export type MessageRef = {
   topicId?: string
   state: MessageState
   replyId?: string
+  /** The text of that reply (the panel shows its gist under the message). */
+  replyText?: string
+  active?: boolean
   stale?: boolean
+  queued?: boolean
   /** When it last moved, and how: you sent it, Claude replied to it, or its status changed. */
   updatedAt: number
   event: 'sent' | 'replied' | 'status'
@@ -132,11 +155,11 @@ export type MessageRef = {
 /** What is busy right now: Claude's turn, and the messages agents are working on (turn keys). */
 export type Live = { isWorking: boolean; busy: ReadonlySet<string>; now: number; reacted?: ReadonlySet<string> }
 
-/** In progress this long with nothing working on it: flagged ⚠ no update. */
+/** In progress this long with nothing working on it: shown as waiting for Claude. */
 export const STALE_MS = 60 * 1000
 
 /** A message, or a part, as one plain line. */
-export function preview(text: string, max = 80): string {
+function previewOnce(text: string, max: number): string {
   const plain = stripMarks(stripTag(text))
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+[.)]|>)\s+/gm, '')
@@ -145,6 +168,39 @@ export function preview(text: string, max = 80): string {
     .replace(/\s+/g, ' ')
     .trim()
   return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain
+}
+
+/** A message, or a part, as one plain line (the panel asks for each on every frame: kept). */
+export function preview(text: string, max = 80): string {
+  const key = `${max}\0${text}`
+  let p = previews.get(key)
+  if (p == null) remember(previews, key, (p = previewOnce(text, max)))
+  return p
+}
+const previews = new Map<string, string>()
+
+/** Words that only link a restated question to its answer ("… is 8137"). */
+const LINKS = new Set(['is', 'are', 'was', 'were', 'uses', 'use', 'has', 'have', 'set', 'to', 'at', 'of', 'the', 'a', 'an', 'in', 'on', 'as'])
+
+/**
+ * The gist of a reply, in one line of `max` cells: its first sentence, without the words at its start
+ * that only restate your message ("The port in server.toml is 8137" to "8137"), cut to fit.
+ */
+export function answerGist(message: string, reply: string, max: number): string {
+  // "Done:" says nothing the ✓ doesn't.
+  const first = (preview(reply, 2000).replace(/^done[:.]\s+/i, '').split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}"“(])/u)[0] ?? '')
+  const asked = new Set(preview(message, 2000).toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])
+  const pieces = (t: string) => t.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []
+  const restated = (t: string) => pieces(t).length > 0 && pieces(t).every(w => asked.has(w))
+  const linking = (t: string) => pieces(t).length === 1 && LINKS.has(pieces(t)[0]!)
+  const toks = first.split(' ')
+  // Restated words and the linking words between them ("The port in server.toml is"), if any were restated.
+  let i = 0
+  let any = false
+  while (i < toks.length - 1 && (restated(toks[i]!) || linking(toks[i]!))) any = restated(toks[i++]!) || any
+  if (!any) i = 0
+  const gist = toks.slice(i).join(' ')
+  return gist.length > max ? `${gist.slice(0, max - 1).trimEnd()}…` : gist
 }
 
 /** The last question in a part, if it ends on one (what "waiting on you" shows). */
@@ -202,23 +258,32 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const isBusy = live.busy.has(turn.key)
     // "claude" after a settled tag means Claude still owes work: an "OK, I'll do it" is not done.
     const owes = !!topic && !topic.isProvisional && topic.status === 'claude'
+    const reply = replyId ? parts.find(p => p.id === replyId) : undefined
+    // A topic waiting on you shows ✋ on the messages whose reply asked (askedBy). Boards from before
+    // that: a follow-up merged in waits only if its own latest reply asks something.
+    const merged = !!topicId && !!topic && topic.id !== topicId
+    const waitsOnYou = topic?.status === 'me' && (topic.askedBy ? topic.askedBy.includes(turn.key) : !merged || !!(reply && questionOf(reply.part.text)))
     const state: MessageState = replyId
-      ? topic?.status === 'me' ? 'me' : owes || isBusy ? 'progress' : 'done'
+      ? waitsOnYou ? 'me' : owes || isBusy ? 'progress' : 'done'
       : turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'
       // A reaction can be the whole reply (✅ done); a topic Claude's tag settled had a reply that got lost.
       : live.reacted?.has(turn.key) ? 'done' : topic && !topic.isProvisional ? 'lost' : 'none'
     const stale = state === 'progress' && !live.isWorking && !isBusy && live.now - (topic?.updatedAt ?? turn.at) > STALE_MS
+    const queued = state === 'claude' && !!turn.queued && live.isWorking && !isBusy
+    const active = !queued && ((state === 'claude' && live.isWorking) || (state === 'progress' && isBusy))
     // The reply lands when its turn ends; the status moves when the topic does.
-    const replyTurn = replyId ? parts.find(p => p.id === replyId)?.turn : undefined
+    const replyTurn = reply?.turn
     const repliedAt = replyTurn ? replyTurn.at + (replyTurn.durationMs ?? 0) : 0
     const statusAt = topic?.updatedAt ?? 0
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)
     // The tag that came with a reply stamps its topic a moment later: that is still the reply.
     const event = updatedAt === turn.at ? 'sent' : repliedAt && updatedAt - repliedAt < 10_000 ? 'replied' : 'status'
-    messages.push({ turn, topicId, state, replyId, updatedAt, event, ...(stale ? { stale } : {}) })
+    messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}) })
   })
-  // Newest activity first; the same moment keeps the later message on top.
+  // What is being worked on first, then what waits in queue (oldest first: Claude takes them in
+  // order), then the rest by newest activity; the same moment keeps the later message on top.
   const order = new Map(messages.map((m, i) => [m, i]))
-  messages.sort((a, b) => b.updatedAt - a.updatedAt || order.get(b)! - order.get(a)!)
+  const rank = (m: MessageRef) => (m.active ? 0 : m.queued ? 1 : 2)
+  messages.sort((a, b) => rank(a) - rank(b) || (rank(a) === 1 ? order.get(a)! - order.get(b)! : b.updatedAt - a.updatedAt || order.get(b)! - order.get(a)!))
   return { unread: parts.filter(p => !read.has(p.id)), waiting, messages }
 }
