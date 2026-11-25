@@ -133,7 +133,7 @@ Sometimes a reply never arrives: Claude's tag settles a message, but no reply pa
 
 ### Images
 
-Ctrl+V adds the image on the clipboard. This works with the Windows clipboard from WSL, with macOS, and with Wayland or X11. Pasting or dropping an image file's path attaches that image.
+Ctrl+V adds the image on the clipboard. This works with the Windows clipboard from WSL, with macOS, and with Wayland or X11. Pasting or dropping an image file's path attaches that image. Once sent, a click on `[image N]` in your message (in the chat, the panel or a request's view) opens that image in your image viewer: Windows' own from WSL, `open` on macOS, `xdg-open` on Linux.
 
 ### Permissions
 

@@ -1,6 +1,7 @@
 // The panel on the left: replies you haven't read, questions waiting on you, who is working on
 // what, where your messages stand. Narrower than MIN_FULL (or folded) it is an icon view.
 
+import { imageSpans } from './images.ts'
 import { answerGist, matches, preview } from './inbox.ts'
 import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
@@ -128,6 +129,8 @@ export type PanelCtx = {
   saved?: readonly Saved[]
   openSaved?: (anchor: string) => void
   unsave?: (anchor: string) => void
+  /** A click on `[image N]` in one of your messages: opens that image, when the app knows its file. */
+  image?: (t: Turn) => (n: number) => (() => void) | undefined
   isResultsOnly: boolean
   isWorking: boolean
   /** The spinner's frame, for messages something is working on now. */
@@ -293,6 +296,8 @@ export function notStarted(messages: MessageRef[], onIt: ReadonlySet<string>): M
 export type PanelList = { start: number; end: number; total: number; max: number }
 
 export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: number; lists?: Record<string, PanelList> } {
+  /** The clicks on a message's [image N] markers. */
+  const imagesOf = (t: Turn | undefined) => (t ? p.image?.(t) : undefined)
   if (p.isFolded || width < MIN_FULL) {
     const open = () => p.fold(false)
     const L: Line[] = [
@@ -411,7 +416,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         return row(iw, [
           { text: ' ✕', style: { fg: C.gray }, action: () => p.unsave?.(x.anchor) },
           { text: x.who === 'me' ? ' you ' : ' ✻ ', style: { fg: x.who === 'me' ? C.cyan : C.gray }, action: open },
-          { text: slide(preview(x.text, 200), p.hscroll), action: open },
+          ...imageSpans(slide(preview(x.text, 200), p.hscroll), imagesOf(x.who === 'me' ? p.turnOf(x.anchor.slice(3)) : undefined), undefined, open),
         ], [{ text: stamp(x.at, now), style: { fg: C.faint }, action: open }])
       }),
     })
@@ -425,7 +430,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
     const turns = keys.map(p.turnOf).filter((t): t is Turn => !!t)
     const toMessage = () => turns[0] && p.openMessage(turns[0])
     const msg = turns.length ? `↳ “${preview(turns[0]!.text, 60)}”${turns.length > 1 ? ` +${turns.length - 1}` : ''}` : ''
-    if (msg) rows.push(row(iw, [{ text: '   ' }, { text: slide(msg, p.hscroll), style: { fg: C.gray, dim, underline: true }, action: toMessage }]))
+    if (msg) rows.push(row(iw, [{ text: '   ' }, ...imageSpans(slide(msg, p.hscroll), imagesOf(turns[0]), { fg: C.gray, dim, underline: true }, toMessage)]))
     if (last) rows.push(row(iw, [{ text: '   ' }, { text: slide(`· ${last}`, p.hscroll), style: { fg: C.faint }, action: openLast }]))
   }
   // One section for everyone working: Claude first, then each agent it started, by name and role.
@@ -542,7 +547,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         const title = (m.homeId && p.topicTitle?.(m.homeId)) || (m.topicId && p.topicTitle?.(m.topicId)) || preview(m.turn.text, 200)
         return row(iw, [
           { text: ' ▷ ', style: { fg: C.yellow }, action: open },
-          { text: slide(title, p.hscroll), action: open },
+          ...imageSpans(slide(title, p.hscroll), imagesOf(m.turn), undefined, open),
         ], [
           // Claude idle: ▶ start begins it now. Claude busy: + queue sends it to wait its turn (Claude reads
           // it at its next step).
@@ -610,7 +615,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
           { text: isOn ? '▸' : isPicked ? '›' : ' ', style: { fg: isPicked ? C.yellow : C.blue, bold: true }, action: open },
           { text: m.active ? (p.spin ?? mark[m.state]) : mark[m.state], style: { fg: markFg[m.state] }, action: chain },
           { text: ' ', action: open },
-          { text: slide(preview(m.turn.text, 200), p.hscroll), style: { dim: m.state === 'done' && !isOn && !isPicked, bold: isOn || isPicked, fg: isOn ? C.blue : isPicked ? C.yellow : undefined }, action: open },
+          ...imageSpans(slide(preview(m.turn.text, 200), p.hscroll), imagesOf(m.turn), { dim: m.state === 'done' && !isOn && !isPicked, bold: isOn || isPicked, fg: isOn ? C.blue : isPicked ? C.yellow : undefined }, open),
         ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? busyNote : m.queued ? 'in queue' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active || m.queued ? C.cyan : C.faint }, action: open }])
       }),
       // Under the newest answered messages, the answer's gist (→ 8137); a click opens the reply.

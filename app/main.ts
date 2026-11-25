@@ -41,6 +41,7 @@ import type { Job } from './scheduled.ts'
 import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
+import { imageSpans, openerFor } from './images.ts'
 import { Btw } from './btw.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
 import type { Card, Ctx as LocalCtx } from './local.ts'
@@ -1508,6 +1509,8 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     }
   })
   if (isNow) S.images = []
+  // Kept by its turn key, so a click on its [image N] opens the file it was sent from, on resume too.
+  if (images.length) S.kept.images = { ...S.kept.images, [turn.key]: at.images.map(i => i.path) }
   logSend('sent', { topic: turn.topicId, text, ...(hidden ? { note: hidden } : {}), ...(images.length ? { images: images.length } : {}) })
   // On its way: sending, sent once written, received when Claude Code echoes it back.
   turn.uuid = randomUUID()
@@ -2248,6 +2251,26 @@ function attachImage(path: string) {
   toast('Image added: it goes with your next message.')
 }
 
+/** Opens an image you sent in the system's image viewer (on WSL, Windows' own), or says it is gone. */
+function openImage(path: string, n: number) {
+  if (!existsSync(path)) return toast(`Image ${n} is gone: ${path.replace(homedir(), '~')} isn't there anymore.`)
+  const win = IS_WSL ? spawnSync('wslpath', ['-w', path], { encoding: 'utf8', timeout: 5000 }).stdout?.trim() || undefined : undefined
+  const [cmd, args] = openerFor(path, process.platform, IS_WSL, win)
+  execFile(cmd, args, { timeout: 30000 }, err => {
+    if (err) toast(`Couldn't open image ${n} with ${cmd}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'it isn\'t installed' : err.message.split('\n')[0]}.`)
+  })
+  toast(`Opening image ${n}…`)
+}
+
+/** The click on `[image N]` in a message sent with these images (paths), when it has an Nth. */
+const imageClick = (paths: readonly string[] | undefined) => (n: number) => {
+  const path = paths?.[n - 1]
+  return path ? () => openImage(path, n) : undefined
+}
+
+/** A message's words as a link to it (a view's header), its [image N] links to its images. */
+const messageLink = (t: Turn, max: number): Span[] => imageSpans(`“${preview(t.text, max)}”`, imageClick(S.kept.images?.[t.key]), { fg: C.gray, underline: true }, () => openMessage(t))
+
 /** A pasted or dropped path to an image file (possibly quoted or with escaped spaces), else undefined. */
 function imagePath(text: string): string | undefined {
   let p = text.trim().replace(/^['"]|['"]$/g, '').replace(/\\ /g, ' ')
@@ -2445,6 +2468,7 @@ function paint() {
         agents: [...S.agents.values()],
         main: S.isWorking ? { for: S.turns.filter(x => !x.isDone && !x.reaction && !waiting(x)).flatMap(x => x.followUp ?? [x.key]), last: (() => { const s = openTurn()?.steps.at(-1); return s ? stepLabel(s, cwd).text : 'thinking' })(), pulse: leadPulse(Date.now()) } : undefined,
         turnOf: key => S.turns.findLast(x => x.key === key),
+        image: t => imageClick(S.kept.images?.[t.key]),
         openAgent,
         agentView: S.agentView,
         continueAgent,
@@ -2506,7 +2530,7 @@ function paint() {
     ? [
         { text: ` $ Background · ${clip(shellName(shell, 40), 40)} `, style: { bg: C.cyan, fg: 16, bold: true } },
         { text: `  ${shellState(shell)}`, style: { fg: shell.state === 'failed' ? C.red : C.cyan, bold: true } },
-        ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, { text: `“${preview(jobFor[0].text, 40)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(jobFor[0]!) }] : []),
+        ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, ...messageLink(jobFor[0], 40)] : []),
         { text: '  · ', style: { fg: C.faint } },
         { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
@@ -2514,7 +2538,7 @@ function paint() {
     ? [
         { text: ` ${jobMark(job)} Scheduled · ${clip(jobName(job, 40), 40)} `, style: { bg: C.yellow, fg: 16, bold: true } },
         { text: `  ${stateLabel(job)}`, style: { fg: C.cyan, bold: true } },
-        ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, { text: `“${preview(jobFor[0].text, 40)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(jobFor[0]!) }] : []),
+        ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, ...messageLink(jobFor[0], 40)] : []),
         { text: '  · ', style: { fg: C.faint } },
         { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
@@ -2522,7 +2546,7 @@ function paint() {
     ? [
         { text: ` ▣ Request ${req.topicId ?? ''} `, style: { bg: C.blue, fg: 16, bold: true } },
         { text: ` ${reqInfo.mark} ${reqInfo.state}  `, style: { fg: reqInfo.isStale ? C.gray : C.cyan, bold: true } },
-        { text: `“${preview(req.text, 50)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(req) },
+        ...messageLink(req, 50),
         { text: '  · ', style: { fg: C.faint } },
         { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
@@ -2531,7 +2555,7 @@ function paint() {
         isMain
           ? { text: ` ✻ Claude, live${inside.state === 'running' ? '' : ` · ${inside.state}`} `, style: { bg: C.claude, fg: 231, bold: true } }
           : { text: ` ◇ ${who(inside, S.agents.values())} · ${clip(inside.name, 40)} `, style: { bg: C.magenta, fg: 16, bold: true } },
-        ...(insideFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, { text: `“${preview(insideFor[0].text, 50)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(insideFor[0]!) }] : []),
+        ...(insideFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, ...messageLink(insideFor[0], 50)] : []),
         { text: '  · ', style: { fg: C.faint } },
         { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
@@ -2554,6 +2578,7 @@ function paint() {
       jump,
       save: (anchor, who, text) => saveMessage(anchor, who, text),
       copy: text => copyText(text),
+      image: t => imageClick(S.kept.images?.[t.key]),
       hover: S.hover,
       unread: new Set(S.box.unread.map(p => p.id)),
       waiting: new Set(S.box.waiting.map(p => p.id)),
@@ -2630,7 +2655,7 @@ function paint() {
     ? heldLines(S.held.map(h => {
         const qs = h.from.replyTo?.quotes ?? []
         const queued = waitsForClaude(h)
-        return { id: h.id, text: h.text, ...(qs.length ? { quote: qs.length > 1 ? `${qs.length} messages` : preview(qs[0]!.text, 60) } : {}), secs: Math.max(1, Math.ceil((h.until - Date.now()) / 1000)), ...(queued ? { queued, sendNow: () => sendHeldNow(h) } : {}), edit: () => editHeld(h), drop: () => dropHeld(h) }
+        return { id: h.id, text: h.text, ...(qs.length ? { quote: qs.length > 1 ? `${qs.length} messages` : preview(qs[0]!.text, 60) } : {}), secs: Math.max(1, Math.ceil((h.until - Date.now()) / 1000)), ...(queued ? { queued, sendNow: () => sendHeldNow(h) } : {}), edit: () => editHeld(h), drop: () => dropHeld(h), image: imageClick(h.from.images.map(i => i.path)) }
       }), cw - 2)
     : undefined
   const anchors = held ? { ...base.anchors, ...Object.fromEntries(Object.entries(held.anchors).map(([k, v]) => [k, v + base.lines.length])) } : base.anchors

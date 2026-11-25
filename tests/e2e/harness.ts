@@ -45,9 +45,12 @@ export async function launch(opts: LaunchOpts = {}) {
   // Windows toasts and clipboard (WSL), Linux notifications and clipboard: logged, never real.
   for (const name of ['powershell.exe', 'notify-send', 'osascript'])
     script(name, `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\ncase "$*" in *GetImage*) [ -f ${q(join(dir, 'clip.png'))} ] && echo 'C:\\fake\\clip.png' ;; esac\nexit 0`)
-  script('wslpath', `[ "$1" = -u ] && shift; case "$1" in 'C:\\fake\\clip.png') echo ${q(join(dir, 'clip.png'))} ;; *) echo "$1" ;; esac`)
+  // -w: a Windows path to the file, as WSL gives one (\\wsl.localhost\<distro>\…).
+  script('wslpath', `[ "$1" = -w ] && { printf '%s%s\\n' '\\\\wsl.localhost\\Fake' "$(printf %s "$2" | tr / '\\\\')"; exit 0; }\n[ "$1" = -u ] && shift; case "$1" in 'C:\\fake\\clip.png') echo ${q(join(dir, 'clip.png'))} ;; *) echo "$1" ;; esac`)
   script('wl-paste', `[ -f ${q(join(dir, 'clip.png'))} ] && cat ${q(join(dir, 'clip.png'))} || exit 1`)
   script('xclip', `exit 1`)
+  // Opening a file in the system's viewer (macOS, Linux): logged, never real.
+  for (const name of ['open', 'xdg-open']) script(name, `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'open.log'))}`)
   opts.setup?.({ dir, home, work })
 
   const W = opts.width ?? 120

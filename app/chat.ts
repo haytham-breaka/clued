@@ -2,6 +2,7 @@
 // Claude's answer in a bubble on the left, with reply and reactions under it.
 
 import { firstLine, stripTag } from '../hooks/model.ts'
+import { imageSpans } from './images.ts'
 import { markdown } from './markdown.ts'
 import { preview, questionsOf, splitAnswer, stripMarks } from './inbox.ts'
 import { block, codeRows, diffHead, diffRows, hunkGap, K, langOf, readRows, shellRows } from './code.ts'
@@ -40,6 +41,8 @@ export type ChatCtx = {
   save?: (anchor: string, who: 'me' | 'claude', text: string) => void
   /** Puts text on the clipboard. */
   copy: (text: string) => void
+  /** A click on `[image N]` in your message: opens that image, when the app knows its file. */
+  image?: (t: Turn) => (n: number) => (() => void) | undefined
   /** The message under the pointer (`me:<key>` or `claude:<key>`): only it shows its actions. */
   hover: string
   /** Reply parts not read yet, and those that wait on your answer (`<turn key>:<index>`). */
@@ -319,7 +322,7 @@ export function delivered(turn: Turn): Span {
 
 /** A message you sent that the app still holds back (/hold): `secs` until it goes. */
 /** `queued`: its hold is over, but it waits for Claude's turn to end (➤ send now sends it into the turn). */
-export type HeldView = { id: string; text: string; quote?: string; secs: number; queued?: boolean; sendNow?: () => void; edit: () => void; drop: () => void }
+export type HeldView = { id: string; text: string; quote?: string; secs: number; queued?: boolean; sendNow?: () => void; edit: () => void; drop: () => void; image?: (n: number) => (() => void) | undefined }
 
 /**
  * Messages held back before they go to Claude Code, at the end of the chat: your bubble, dimmed, and
@@ -334,7 +337,7 @@ export function heldLines(list: readonly HeldView[], width: number): { lines: Li
   for (const h of list) {
     const from = out.length
     out.push([])
-    const body = wrap([{ text: h.text }], meMax)
+    const body = wrap(imageSpans(h.text, h.image), meMax)
     const head: Line | undefined = h.quote ? [{ text: '↩ ', style: { fg: C.cyan } }, { text: clip(`“${h.quote}”`, meMax - 4), style: { fg: C.gray, italic: true } }] : undefined
     const inner = Math.max(snug(body, meMax), head ? Math.min(meMax, lineCells(head)) : 0)
     const left = Math.max(0, width - inner - 4 - 1)
@@ -433,7 +436,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     } else {
       out.push([])
       const link = ctx.kept.links[turn.key]
-      const body = wrap([{ text: turn.text }], meMax)
+      const body = wrap(imageSpans(turn.text, ctx.image?.(turn)), meMax)
       // What it replies to: one line each (a click goes there), so a reply to several lists them all.
       const quotes = link ? (link.all?.length ? link.all : [{ anchor: link.anchor ?? `${link.who}:${link.key}`, text: link.text }]) : []
       const heads: Line[] = quotes.map(q => {
