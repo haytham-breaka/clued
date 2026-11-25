@@ -8,7 +8,7 @@
 [![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-informational.svg)](.claude-plugin/plugin.json)
 [![Runs on Claude Code](https://img.shields.io/badge/runs%20on-Claude%20Code-d97757.svg)](https://claude.com/claude-code)
 
-![clued in a real session: a message sent while Claude works waits in queue, then gets its own answer; Claude asks with a card you click; the Overview lists unread replies and jumps to them; a request's chain; ☆ save a reply and come back to it from ★ Saved; a background agent's live steps](docs/demo.gif)
+<img src="docs/demo.gif" width="600" alt="clued in a real session: a message sent while Claude works waits in queue, then gets its own answer; Claude asks with a card you click; the Overview lists unread replies and jumps to them; a request's chain; ☆ save a reply and come back to it from ★ Saved; a background agent's live steps">
 
 **[▶ Watch with sound](docs/demo.mp4)** (82 s, narrated)
 
