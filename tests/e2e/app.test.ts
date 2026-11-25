@@ -279,6 +279,60 @@ describe('app', () => {
       app.keys('C-a', 'Down', 'Down', 'Up')
     }))
 
+  test('deleting a word: Ctrl+Backspace, Alt+Backspace and CSI 127;5u before the cursor, Alt+D and Ctrl+Delete after it', () =>
+    withApp({}, async app => {
+      const box = () => app.lines().filter(l => /│ [^─]/.test(l) && !l.includes('Fake')).map(l => l.split('│')[2]?.trim()).filter(Boolean)
+      const expect = async (text: string) => app.waitFor(() => box().at(-1) === text)
+      app.type('alpha beta gamma')
+      await expect('alpha beta gamma')
+      // Ctrl+Backspace as Windows Terminal sends it (^H): the word before the cursor.
+      app.raw('\b')
+      app.type('X')
+      await expect('alpha beta X')
+      // Alt+Backspace (ESC DEL), twice: the word, then the word and the space after it.
+      app.raw('\x1b\x7f')
+      await expect('alpha beta')
+      app.raw('\x1b\x7f')
+      app.type('Y')
+      await expect('alpha Y')
+      // Ctrl+Backspace as kitty-style terminals send it (CSI 127;5u): a run of marks is a word of its own.
+      app.raw('\x1b[127;5u')
+      app.type('path/to')
+      await expect('alpha path/to')
+      app.raw('\x1b[127;5u')
+      await expect('alpha path/')
+      app.raw('\x1b[127;5u')
+      await expect('alpha path')
+      // Alt+D at the start: the word after the cursor, and the cursor stays.
+      app.keys('C-a')
+      app.raw('\x1bd')
+      await expect('path')
+      app.type('Z')
+      await expect('Z path')
+      // Ctrl+Delete: the spaces and the word after the cursor.
+      app.raw('\x1b[3;5~')
+      await expect('Z')
+      // The Alt forms of the same keys: CSI 127;3u, ESC ^H, and Alt+Delete.
+      app.type(' one two three')
+      await expect('Z one two three')
+      app.raw('\x1b[127;3u')
+      await expect('Z one two')
+      app.raw('\x1b\b')
+      app.type('W')
+      await expect('Z one W')
+      app.keys('C-a')
+      app.raw('\x1b[3;3~')
+      app.type('V')
+      await expect('V one W')
+      // Nothing more to delete: the keys do nothing at either end.
+      app.keys('C-e')
+      app.raw('\x1b[3;5~')
+      app.keys('C-a')
+      app.raw('\b')
+      app.type('>')
+      await expect('>V one W')
+    }))
+
   test('images: a pasted image path goes with the message as the image; text pastes as text', () =>
     withApp({ setup: ({ work, home }) => { writeFileSync(join(work, 'pic one.png'), PNG); writeFileSync(join(home, 'pic.jpg'), PNG) } }, async app => {
       app.raw(`\x1b[200~'${app.work}/pic one.png'\x1b[201~`)

@@ -1437,6 +1437,20 @@ const wordOn = () => {
   const m = S.text.slice(S.cursor).match(/^\s*\S+/)
   S.cursor += m ? m[0].length : 0
 }
+/** A word for deleting: letters and digits, or a run of other marks, with the spaces beside it. */
+const WORD_BACK = /(?:[\p{L}\p{N}_]+|[^\p{L}\p{N}_\s]+)?\s*$/u
+const WORD_ON = /^\s*(?:[\p{L}\p{N}_]+|[^\p{L}\p{N}_\s]+)?/u
+/** Ctrl+Backspace, Alt+Backspace: the word before the cursor. */
+const deleteWordBack = () => {
+  const before = S.text.slice(0, S.cursor).replace(WORD_BACK, '')
+  S.text = before + S.text.slice(S.cursor)
+  S.cursor = before.length
+}
+/** Ctrl+Delete, Alt+D: the word after the cursor. */
+const deleteWordOn = () => {
+  const n = S.text.slice(S.cursor).match(WORD_ON)?.[0].length ?? 0
+  S.text = S.text.slice(0, S.cursor) + S.text.slice(S.cursor + n)
+}
 
 /**
  * The image on the clipboard, saved as a PNG under ~/.clued/images (the terminal can't paste one):
@@ -1991,7 +2005,7 @@ function key(k: string) {
       S.sel = null
       return draw()
     }
-    if (k === '\x7f' || k === '\b' || k === '\x1b[3~') {
+    if (['\x7f', '\b', '\x1b[3~', '\x1b\x7f', '\x1b\b', '\x1b[127;5u', '\x1b[127;3u', '\x1bd', '\x1b[3;5~', '\x1b[3;3~', '\x17'].includes(k)) {
       if (cutSelection()) return draw()
     }
     if (S.sel?.area !== 'input' || k.startsWith('\x1b') || k < ' ') S.sel = null
@@ -2027,8 +2041,21 @@ function key(k: string) {
     case '\n':
       insert('\n')
       break
-    case '\x7f':
     case '\b':
+    case '\x1b\x7f':
+    case '\x1b\b':
+    case '\x1b[127;5u':
+    case '\x1b[127;3u':
+      // Ctrl+Backspace (Windows Terminal sends ^H for it, kitty-style terminals CSI 127;5u) or
+      // Alt+Backspace (⌥⌫ in iTerm2 with Option as Esc+): the word before the cursor.
+      deleteWordBack()
+      break
+    case '\x1bd':
+    case '\x1b[3;5~':
+    case '\x1b[3;3~':
+      deleteWordOn()
+      break
+    case '\x7f':
       if (S.cursor > 0) {
         const n = prevChar(S.cursor)
         S.text = S.text.slice(0, S.cursor - n) + S.text.slice(S.cursor)
@@ -2358,7 +2385,7 @@ function input(data: string) {
       continue
     }
     // Alt+letter keys the app uses come as ESC and the letter: read them as one key (Alt+V would otherwise be Esc, then v).
-    const seq = s.match(/^\x1b\[[0-9;]*[A-Za-z~]|^\x1bO[A-Za-z]|^\x1b[\r\x7fbfvV]|^\x1b(?!\[)/)
+    const seq = s.match(/^\x1b\[[0-9;]*[A-Za-z~]|^\x1bO[A-Za-z]|^\x1b[\r\x7f\bbdfvV]|^\x1b(?!\[)/)
     if (seq) {
       key(seq[0] === '\x1bOA' ? '\x1b[A' : seq[0] === '\x1bOB' ? '\x1b[B' : seq[0] === '\x1bOC' ? '\x1b[C' : seq[0] === '\x1bOD' ? '\x1b[D' : seq[0] === '\x1bOH' ? '\x1b[H' : seq[0] === '\x1bOF' ? '\x1b[F' : seq[0])
       s = s.slice(seq[0].length)

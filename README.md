@@ -82,6 +82,8 @@ Drag the divider to resize the panel, and click `☰` to fold it to icons. Your 
 | Ctrl+O | show or hide Claude's steps |
 | ↑ / ↓ | move between rows of a long message; from the top row, earlier messages |
 | Ctrl+← / Ctrl+→ | jump words |
+| Ctrl+Backspace / Alt+Backspace (⌥⌫) | delete the word before the cursor (Ctrl+W: up to the last space) |
+| Ctrl+Delete / Alt+D | delete the word after the cursor |
 | Ctrl+V or Alt+V | add the image on the clipboard |
 | PgUp / PgDn | scroll |
 
