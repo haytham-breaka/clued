@@ -259,3 +259,16 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
   finish()
   return turns
 }
+
+/** The token usage of a session's last main-agent reply (what its context holds), from its file. */
+export function lastUsage(cwd: string, sessionId: string): Record<string, number> | undefined {
+  try {
+    const lines = readFileSync(`${projectDir(cwd)}/${sessionId}.jsonl`, 'utf8').trimEnd().split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i]!.includes('"usage"')) continue
+      const e = JSON.parse(lines[i]!)
+      if (e.type === 'assistant' && !e.isSidechain && e.message?.usage) return e.message.usage
+    }
+  } catch {}
+  return undefined
+}

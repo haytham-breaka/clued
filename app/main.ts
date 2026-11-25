@@ -36,7 +36,7 @@ import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
-import { listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
+import { lastUsage, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
@@ -92,7 +92,7 @@ function logSend(what: string, fields: Record<string, unknown>) {
 }
 const prefs = (() => {
   try {
-    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean }
+    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number> }
   } catch {
     return {}
   }
@@ -204,9 +204,12 @@ const S = {
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'demo']
 
+/** Each model's context size as Claude Code last reported it, for the status line before the first reply. */
+const knownWindows: Record<string, number> = { ...(prefs.windows ?? {}) }
+
 function savePrefs() {
   mkdirSync(`${homedir()}/.clued`, { recursive: true })
-  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded }))
+  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows }))
 }
 
 /** Questions you dismissed since your last message: the next one tells Claude not to wait for them. */
@@ -542,6 +545,8 @@ function start(resume?: string) {
   if (resume) {
     S.sessionId = resume
     S.turns = loadHistory(cwd, resume)
+    // The context as the session left it, so the status line isn't empty until the next reply.
+    S.usage = lastUsage(cwd, resume) ?? S.usage
     S.kept = loadKept(resume, cwd)
     S.kept.board = prune(S.kept.board, Date.now())
     // Mid-turn replies the transcript lost, from the app's own copy.
@@ -681,6 +686,7 @@ function onEvent(e: ClaudeEvent) {
     }
     case 'usage':
       S.usage = e.usage
+      statusSoon()
       break
     case 'agent-step': {
       const a = S.agents.get(e.parent)
@@ -725,12 +731,19 @@ function onEvent(e: ClaudeEvent) {
     case 'rate': {
       const w = (e.info.unifiedWindows ?? {}) as Record<string, { utilization?: number; resetsAt?: number }>
       for (const [k, v] of Object.entries(w)) S.rate[k] = { used_percentage: Math.round((v.utilization ?? 0) * 100), resets_at: v.resetsAt }
+      statusSoon()
       break
     }
     case 'result':
       finishTurn(e.text, e.isError, e.durationMs)
       S.costUsd = e.costUsd || S.costUsd
-      if (e.contextWindow) S.contextWindow = e.contextWindow
+      if (e.contextWindow) {
+        S.contextWindow = e.contextWindow
+        if (S.model && knownWindows[S.model] !== e.contextWindow) {
+          knownWindows[S.model] = e.contextWindow
+          savePrefs()
+        }
+      }
       if (e.sessionId) S.sessionId = e.sessionId
       refreshStatus()
       break
@@ -907,6 +920,7 @@ function submit(text: string, opts: { reaction?: string } = {}) {
   S.images = []
   logSend('sent', { topic: turn.topicId, text, ...(hidden ? { note: hidden } : {}), ...(images.length ? { images: images.length } : {}) })
   S.claude!.send(text, hidden, images)
+  statusSoon()
   if (S.isDemo && !opts.reaction && !text.startsWith('/')) demoAgents(turn)
   keep()
   draw()
@@ -1059,11 +1073,27 @@ const modelName = (id: string) => {
 }
 
 let statusBusy = false
+let statusAgain = false
+let statusTimer: NodeJS.Timeout | undefined
+/** Runs the status line again soon: at most once a second, like Claude Code on each update. */
+function statusSoon() {
+  if (statusTimer) return
+  statusTimer = setTimeout(() => {
+    statusTimer = undefined
+    refreshStatus()
+  }, 1000)
+}
+// And now and then with nothing happening, for the clock and the "ago" times it shows.
+setInterval(() => refreshStatus(), 15_000).unref()
 function refreshStatus() {
-  if (!statusCommand || statusBusy) return
+  if (!statusCommand) return
+  if (statusBusy) {
+    statusAgain = true
+    return
+  }
   statusBusy = true
   // What Claude Code reports; before the first reply, a guess from the model's name.
-  const size = S.contextWindow || (/\[1m\]|1m/.test(S.model) ? 1_000_000 : 200_000)
+  const size = S.contextWindow || knownWindows[S.model] || (/\[1m\]|1m/.test(S.model) ? 1_000_000 : 200_000)
   const used = (S.usage.input_tokens ?? 0) + (S.usage.cache_read_input_tokens ?? 0) + (S.usage.cache_creation_input_tokens ?? 0)
   const payload = {
     session_id: S.sessionId || 'new',
@@ -1074,6 +1104,8 @@ function refreshStatus() {
     ...(effortLevel ? { effort: { level: effortLevel } } : {}),
     context_window: { used_percentage: used ? Math.round((used / size) * 100) : 0, context_window_size: size, current_usage: S.usage },
     cost: { total_cost_usd: S.costUsd },
+    // The share of the last request read from the cache.
+    ...(used ? { prompt_cache: { hit_ratio: (S.usage.cache_read_input_tokens ?? 0) / used } } : {}),
     rate_limits: S.rate,
     permission_mode: S.permissionMode,
   }
@@ -1081,6 +1113,10 @@ function refreshStatus() {
     statusBusy = false
     if (!err) S.statusRows = stdout.replace(/\n+$/, '').split('\n').slice(0, 6)
     draw()
+    if (statusAgain) {
+      statusAgain = false
+      statusSoon()
+    }
   })
   child.stdin?.end(JSON.stringify(payload))
 }
