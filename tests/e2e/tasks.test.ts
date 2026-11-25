@@ -171,6 +171,7 @@ describe('not started', () => {
       assert.match(s, /↩ you: “please do it later”/)
       assert.equal(app.sent().at(-1)!.text, 'Please start on T1 now.')
       assert.match(app.sent().at(-1)!.note, /request T1/)
+      app.release('started')
       app.release('later')
       app.release('later-agent')
       s = await app.waitFor('The later work is done.')
@@ -188,9 +189,11 @@ describe('not started', () => {
       await app.click('+ queue', { area: 'panel' })
       // Claude is still on "hold on": the start request waits in queue until Claude Code takes it in.
       s = await app.waitFor(/⏳ Please start on T1 now\. +in queue/)
-      assert.match(s, /↳ “hold on” \+1/)
+      // Claude hasn't taken it in yet: its row is on "hold on" alone.
+      assert.match(s, /↳ “hold on”(?! \+)/)
       assert.equal(app.sent().at(-1)!.text, 'Please start on T1 now.')
       app.release('slow')
+      app.release('started')
       app.release('later')
       app.release('later-agent')
     }))

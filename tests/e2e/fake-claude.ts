@@ -247,6 +247,14 @@ async function scenario(m: Msg) {
     toolResult('agent-1', 'Found the main file.')
     return finish(m, 'The agent found the main file.')
   }
+  // Claude thinks a while, then starts an agent: a message sent meanwhile isn't Claude's yet (not
+  // echoed), so the agent isn't working for it.
+  if (t.includes('delegate after a wait')) {
+    await release('delegate', 20_000)
+    tool('dl-1', 'Agent', { description: 'Delegated job', subagent_type: 'general-purpose', prompt: 'Do it.', run_in_background: true })
+    toolResult('dl-1', 'Async agent launched successfully. agentId: dl-9')
+    return finish(m, 'Delegated it.', 'claude')
+  }
   if (t.includes('background agent')) {
     tool('bg-1', 'Agent', { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true })
     toolResult('bg-1', 'Started in the background. agentId: bg-42')
@@ -327,14 +335,23 @@ async function scenario(m: Msg) {
     toolResult('cont-1', `Agent ${cont[1]} was stopped; resumed it in the background with your message.`)
     return finish(m, `Resumed ${cont[1]}.`, 'claude')
   }
+  // Asked to start on a request now: Claude works on it until release-started.
+  if (/^please start on \S+ now\./.test(t)) {
+    await release('started', 20_000)
+    return finish(m, 'Started on it.', 'claude')
+  }
   if (t.includes('do it later')) {
     finish(m, "OK, I'll get to it after the current work.", 'claude')
-    if (!(await release('later'))) return
-    tool('lt-1', 'Agent', { description: 'Do the later work', subagent_type: 'general-purpose', prompt: 'Do the work.' })
-    await release('later-agent')
-    toolResult('lt-1', 'Did the work.')
-    say(`<<reply ${m.topic}>>\nThe later work is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
-    return result()
+    // Idle after that turn: the next message is taken in at once while this one waits to go on.
+    void (async () => {
+      if (!(await release('later'))) return
+      tool('lt-1', 'Agent', { description: 'Do the later work', subagent_type: 'general-purpose', prompt: 'Do the work.' })
+      await release('later-agent')
+      toolResult('lt-1', 'Did the work.')
+      say(`<<reply ${m.topic}>>\nThe later work is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
+      result()
+    })()
+    return
   }
   if (t.includes('rate limit')) {
     out({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.42, resetsAt: 1_900_000_000 } } } })

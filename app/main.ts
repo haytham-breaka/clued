@@ -420,7 +420,9 @@ const resumeAgent = (a: Agent) => resumeRun(a, Date.now())
  * stands for the messages it follows up on), else your latest.
  */
 function openFor(): string[] {
-  const open = S.turns.filter(x => !x.isDone && !x.reaction)
+  // Only messages Claude has taken in: one still on its way (sent mid-turn, not echoed yet) isn't
+  // what a tool call now works for.
+  const open = S.turns.filter(x => !x.isDone && !x.reaction && !waiting(x))
   return [...new Set((open.length ? open : S.turns.filter(x => !x.reaction).slice(-1)).flatMap(x => x.followUp ?? [x.key]))]
 }
 
@@ -905,7 +907,7 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'tool':
       // A scheduling call: the job it makes shows under Scheduled once its result says so.
-      onCall(S.jobs, e.tool, Date.now(), { for: t?.followUp ?? (S.turns.filter(x => !x.isDone && !x.reaction).length ? S.turns.filter(x => !x.isDone && !x.reaction) : S.turns.filter(x => !x.reaction).slice(-1)).map(x => x.key) })
+      onCall(S.jobs, e.tool, Date.now(), { for: t?.followUp ?? openFor() })
       // A message to an agent is a task of its own: it waits while the agent runs, and continues
       // one that finished (back under Agents, running).
       if (e.tool.name === 'SendMessage') {
@@ -2100,7 +2102,7 @@ function paint() {
         work: S.kept.work ?? 'folded',
         setWork: w => { setWork(w); draw() },
         agents: [...S.agents.values()],
-        main: S.isWorking ? { for: S.turns.filter(x => !x.isDone && !x.reaction).flatMap(x => x.followUp ?? [x.key]), last: (() => { const s = openTurn()?.steps.at(-1); return s ? stepLabel(s, cwd).text : 'thinking' })(), pulse: leadPulse(Date.now()) } : undefined,
+        main: S.isWorking ? { for: S.turns.filter(x => !x.isDone && !x.reaction && !waiting(x)).flatMap(x => x.followUp ?? [x.key]), last: (() => { const s = openTurn()?.steps.at(-1); return s ? stepLabel(s, cwd).text : 'thinking' })(), pulse: leadPulse(Date.now()) } : undefined,
         turnOf: key => S.turns.findLast(x => x.key === key),
         openAgent,
         agentView: S.agentView,

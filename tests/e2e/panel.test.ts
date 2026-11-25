@@ -203,6 +203,24 @@ describe('panel', () => {
       assert.match(app.sent().at(-1)!.note, /The app shows your agents by these names: James \(explorer\) = "Explore the code" \(done; Agent tool use agent-1, agent id task-1\)/)
     }))
 
+  test('an agent works for the messages Claude has taken in, not one still on its way', () =>
+    withApp({ unfocused: true, setup: widePanel }, async app => {
+      await app.send('delegate after a wait')
+      await app.waitFor(/delegate after a wait +in progress|delegate after a wait +Claude/)
+      // Sent while Claude works, before it starts the agent: not taken in yet.
+      await app.send('and a second thing')
+      await app.waitFor('✓ sent')
+      app.release('delegate')
+      const s = await app.waitFor('Delegated it.')
+      const rows = s.split('\n').map(l => [...l].slice(0, app.divider()).join(''))
+      const at = rows.findIndex(l => l.includes('Delegated job'))
+      assert.ok(at >= 0, 'the agent is listed')
+      const forLines = rows.slice(at + 1, at + 4).filter(l => l.includes('↳'))
+      assert.ok(forLines.some(l => l.includes('delegate after a wait')), 'for the message it was started from')
+      assert.ok(!forLines.some(l => l.includes('a second thing') || l.includes('+1')), 'not for the message still on its way')
+      assert.ok(!rows.some(l => l.includes('and a second thing') && l.includes('James')), 'nor shown as on it')
+    }))
+
   test('a background agent: Claude goes on by itself when it comes back', () =>
     withApp({ unfocused: true, setup: widePanel }, async app => {
       await app.send('background agent please')
