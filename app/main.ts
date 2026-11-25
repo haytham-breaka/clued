@@ -465,7 +465,7 @@ function requestInfo(req: Turn): RequestInfo {
   const turns = S.turns.filter(t => keys.has(t.key) || t.followUp?.some(k => keys.has(k)) || t.parts?.some(p => p.to.some(id => ids.has(id))))
   const agents = [...S.agents.values()].filter(a => a.for.some(k => keys.has(k)))
   const ref = S.box.messages.find(m => m.turn === req)
-  const state = ref?.active ? 'in progress' : ref?.stale ? 'waiting for Claude' : ({ claude: 'waiting', progress: 'in progress', me: 'needs you', done: 'done', failed: 'failed', none: 'not answered', lost: 'reply lost' } as const)[ref?.state ?? 'claude']
+  const state = ref?.active ? 'in progress' : ref?.queued ? 'in queue' : ref?.stale ? 'waiting for Claude' : ({ claude: 'waiting', progress: 'in progress', me: 'needs you', done: 'done', failed: 'failed', none: 'not answered', lost: 'reply lost' } as const)[ref?.state ?? 'claude']
   const mark = ref?.active ? SPIN[S.spinAt % SPIN.length]! : ({ claude: '⏳', progress: '▶', me: '✋', done: '✓', failed: '✕', none: '○', lost: '⚠' } as const)[ref?.state ?? 'claude']
   return { state, mark, isStale: !!ref?.stale, ids: [...ids], agents, turns, keys }
 }

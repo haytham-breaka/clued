@@ -127,7 +127,8 @@ export type PartRef = { id: string; turn: Turn; index: number; part: Part; previ
  * work, or an agent is on it; me ✋ the answer asks you something; done ✓ finished; failed ✕ the turn
  * failed; none ○ never answered; lost ⚠ Claude's tag named it, but no reply to it arrived (it went
  * missing on the way: text written before a tool call can). `active`: Claude's turn or an agent is on it now.
- * `stale`: in progress with nothing working on it (shown as waiting for Claude).
+ * `stale`: in progress with nothing working on it (shown as waiting for Claude). `queued`: sent while
+ * Claude worked on another message and not answered yet (shown as in queue).
  */
 export type MessageState = 'claude' | 'progress' | 'me' | 'done' | 'failed' | 'none' | 'lost'
 export type MessageRef = {
@@ -137,6 +138,7 @@ export type MessageRef = {
   replyId?: string
   active?: boolean
   stale?: boolean
+  queued?: boolean
   /** When it last moved, and how: you sent it, Claude replied to it, or its status changed. */
   updatedAt: number
   event: 'sent' | 'replied' | 'status'
@@ -235,7 +237,8 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
       // A reaction can be the whole reply (✅ done); a topic Claude's tag settled had a reply that got lost.
       : live.reacted?.has(turn.key) ? 'done' : topic && !topic.isProvisional ? 'lost' : 'none'
     const stale = state === 'progress' && !live.isWorking && !isBusy && live.now - (topic?.updatedAt ?? turn.at) > STALE_MS
-    const active = (state === 'claude' && live.isWorking) || (state === 'progress' && isBusy)
+    const queued = state === 'claude' && !!turn.queued && live.isWorking && !isBusy
+    const active = !queued && ((state === 'claude' && live.isWorking) || (state === 'progress' && isBusy))
     // The reply lands when its turn ends; the status moves when the topic does.
     const replyTurn = reply?.turn
     const repliedAt = replyTurn ? replyTurn.at + (replyTurn.durationMs ?? 0) : 0
@@ -243,10 +246,12 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)
     // The tag that came with a reply stamps its topic a moment later: that is still the reply.
     const event = updatedAt === turn.at ? 'sent' : repliedAt && updatedAt - repliedAt < 10_000 ? 'replied' : 'status'
-    messages.push({ turn, topicId, state, replyId, updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}) })
+    messages.push({ turn, topicId, state, replyId, updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}) })
   })
-  // Newest activity first; the same moment keeps the later message on top.
+  // What is being worked on first, then what waits in queue (oldest first: Claude takes them in
+  // order), then the rest by newest activity; the same moment keeps the later message on top.
   const order = new Map(messages.map((m, i) => [m, i]))
-  messages.sort((a, b) => b.updatedAt - a.updatedAt || order.get(b)! - order.get(a)!)
+  const rank = (m: MessageRef) => (m.active ? 0 : m.queued ? 1 : 2)
+  messages.sort((a, b) => rank(a) - rank(b) || (rank(a) === 1 ? order.get(a)! - order.get(b)! : b.updatedAt - a.updatedAt || order.get(b)! - order.get(a)!))
   return { unread: parts.filter(p => !read.has(p.id)), waiting, messages }
 }

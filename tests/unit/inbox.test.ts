@@ -191,6 +191,27 @@ describe('inbox', () => {
     assert.deepEqual(box.messages.map(m => m.turn.text), ['two', 'one'])
   })
 
+  test('in progress first, then in queue (in the order sent), then the rest newest first', () => {
+    const old = turn('old done', { topicId: 'T1', answer: 'Done.' })
+    const agent = turn('agent on it', { topicId: 'T2', answer: 'Started.', at: NOW + 1 })
+    const cur = turn('working on', { topicId: 'T3', at: NOW + 2, isDone: false })
+    const q1 = turn('queued one', { topicId: 'T4', at: NOW + 3, queued: true, isDone: false })
+    const q2 = turn('queued two', { topicId: 'T5', at: NOW + 4, queued: true, isDone: false })
+    // Newest activity of all, but done: it goes after.
+    const board = boardOf(topic('T1', [old.key], 'done', { updatedAt: NOW + 60_000 }), topic('T2', [agent.key], 'claude'))
+    assignParts([old, agent, cur, q1, q2], board)
+    const box = inbox([old, agent, cur, q1, q2], board, new Set(), live({ isWorking: true, busy: new Set([agent.key]) }))
+    assert.deepEqual(box.messages.map(m => [m.turn.text, m.active ? 'in progress' : m.queued ? 'in queue' : m.state]), [
+      ['working on', 'in progress'],
+      ['agent on it', 'in progress'],
+      ['queued one', 'in queue'],
+      ['queued two', 'in queue'],
+      ['old done', 'done'],
+    ])
+    // Once Claude stops working, nothing is in queue.
+    assert.ok(!inbox([old, agent, cur, q1, q2], board, new Set(), live()).messages.some(m => m.queued))
+  })
+
   test('a status change long after the reply is a status event', () => {
     const a = turn('later', { topicId: 'T1', answer: 'Reply.' })
     const board = boardOf(topic('T1', [a.key], 'done', { updatedAt: NOW + 60_000 }))

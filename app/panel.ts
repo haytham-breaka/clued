@@ -168,6 +168,7 @@ function legendLines(width: number, close: () => void): Line[] {
     item(mark.claude, markFg.claude, 'Claude is on it, no reply yet'),
     item(mark.progress, markFg.progress, 'replied, still owes work'),
     item('⠋', C.cyan, 'in progress: being worked on'),
+    item(mark.claude, markFg.claude, 'in queue: sent while Claude works, not taken up yet'),
     item(mark.me, markFg.me, 'waiting on you'),
     item(mark.done, C.gray, 'done'),
     item(mark.failed, markFg.failed, 'failed'),
@@ -431,7 +432,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
     })
   }
 
-  // ---- Your recent messages, newest first, with when you sent them.
+  // ---- Your recent messages: in progress, then in queue, then the rest newest first.
   const found = p.query ? messages.filter(m => matches(m.turn.text, p.query!)) : messages
   if (messages.length)
     sections.push({
@@ -457,7 +458,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
           { text: m.active ? (p.spin ?? mark[m.state]) : mark[m.state], style: { fg: markFg[m.state] }, action: chain },
           { text: ' ', action: open },
           { text: slide(preview(m.turn.text, 200), p.hscroll), style: { dim: m.state === 'done' && !isOn && !isPicked, bold: isOn || isPicked, fg: isOn ? C.blue : isPicked ? C.yellow : undefined }, action: open },
-        ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? 'in progress' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active ? C.cyan : C.faint }, action: open }])
+        ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? 'in progress' : m.queued ? 'in queue' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active || m.queued ? C.cyan : C.faint }, action: open }])
       }),
     })
 

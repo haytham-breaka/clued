@@ -365,6 +365,12 @@ describe('panel', () => {
       await app.waitFor('Slow work')
       // Claude is on it: a spinner (its mark, just left of the text) and "in progress".
       s = await app.waitFor(new RegExp(`${SPIN} hold on +in progress`))
+      // Sent while it works: in queue, under what is in progress and above what is answered.
+      await app.send('and this too')
+      s = await app.waitFor(/⏳ and this too +in queue/)
+      const rows = s.split('\n').slice(s.split('\n').findIndex(l => l.includes('Your recent messages')))
+      const at = (t: string) => rows.findIndex(l => l.slice(0, 34).includes(t))
+      assert.ok(at(' hold on ') < at('and this too') && at('and this too') < at('fix the login'), 'in progress, then in queue, then answered')
       await app.click(' hold on ', { area: 'panel', dx: -1 })
       s = await app.waitFor('ask for status')
       assert.match(s, new RegExp(`${SPIN} in progress`))
