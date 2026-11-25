@@ -11,7 +11,8 @@ bad=0
 say() { echo "check-private: $*" >&2; bad=1; }
 
 # Files that never belong in the repo.
-echo "$files" | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|id_rsa|(^|/)raw/.*\.jsonl$|\.log$|sent\.log|\.tgz$' | while read -r f; do echo "check-private: $f should not be committed" >&2; done | grep -q . && bad=1
+# (Each finding goes through say, in this shell: a pipeline's loop runs in a subshell, where bad=1 is lost.)
+while IFS= read -r f; do [ -n "$f" ] && say "$f should not be committed"; done < <(echo "$files" | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|id_rsa|(^|/)raw/.*\.jsonl$|\.log$|sent\.log|\.tgz$')
 
 own="$(git config --global user.email 2>/dev/null || true)"
 # Emails other than the safe kinds (GitHub noreply, Anthropic's noreply, example domains).
@@ -23,11 +24,13 @@ home='/(home|Users)/[a-z][a-z0-9_-]+/|C:\\\\Users\\\\[A-Za-z]'
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   [ "$f" = "scripts/check-private.sh" ] && continue
+  # Binary files (images): their bytes make false matches, and a shell variable can't hold them.
+  grep -qI . "$f" || continue
   if git ls-files --error-unmatch "$f" >/dev/null 2>&1 && [ "${1:-}" != "--all" ]; then content=$(git show ":$f" 2>/dev/null); else content=$(cat "$f"); fi
   [ -n "$own" ] && grep -qF "$own" <<<"$content" && say "$f contains your git email"
-  grep -oE "$email" <<<"$content" | grep -vE "$safe" | head -3 | while read -r m; do echo "check-private: $f contains the email $m" >&2; done | grep -q . && bad=1
+  while IFS= read -r m; do [ -n "$m" ] && say "$f contains the email $m"; done < <(grep -oE "$email" <<<"$content" | grep -vE "$safe" | head -3)
   grep -qE "$secrets" <<<"$content" && say "$f looks like it contains a token or key"
   grep -qE "$home" <<<"$content" && say "$f contains a home-folder path ($(grep -oE "$home" <<<"$content" | head -1))"
 done <<<"$files"
 
-[ "$bad" -eq 0 ] || { echo "check-private: fix the above, or commit with --no-verify if you are sure." >&2; exit 1; }
+[ "$bad" -eq 0 ] || { echo "check-private: fix the above before committing." >&2; exit 1; }
