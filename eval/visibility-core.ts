@@ -55,7 +55,8 @@ export function submit(S: AppState, text: string, now: number, quote?: { who: 'm
   const quoted = quote?.topics ?? []
   const asked = S.kept.board.topics.filter(t => t.status === 'me')
   const answered = new Set(quoted.length ? quoted : asked.length === 1 && !/\?\s*$/.test(text) ? [asked[0]!.id] : [])
-  S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now } : t)) }
+  const guess = !quoted.length ? { answerGuessed: true as const } : {}
+  S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now, ...guess } : t)) }
   const raised = raiseTopic(S.kept.board, { text, key: turn.key, replyTo: null }, now)
   turn.topicId = raised.topicId
   S.kept.board = raised.board
@@ -145,7 +146,7 @@ export function onEvent(S: AppState, ev: ClaudeEvent, now: number) {
       if (hasMarks(t.pending)) {
         if (/<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/.test(t.pending)) {
           const was = S.kept.board.turnTopics
-          S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, now, { flat: true }).board, turnTopics: was }
+          S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, now, { flat: true, partial: true }).board, turnTopics: was }
         }
         t.early = [...(t.early ?? []), stripTag(t.pending)]
         t.pending = ''

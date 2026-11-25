@@ -221,4 +221,14 @@ describe('a follow-up merged into a topic that waits on you', () => {
     // Its own reply asks something: it waits on you as well.
     assert.deepEqual(state([first, follow('There are two hosts. Which one do you mean?')]), { 'Add a': 'me', Meanw: 'me' })
   })
+
+  test('askedBy names the messages whose reply asked, whatever the replies say', () => {
+    const first = turn('Add a discount function.', { topicId: 'T1', answer: 'Done. Should I fix member_price?', parts: [{ to: ['T1'], text: 'Done. Should I fix member_price?' }] })
+    // The follow-up's reply asks the same question again: it is still the first message's question.
+    const follow = turn('Reject negative percentages too.', { topicId: 'T2', answer: 'Done. Should I fix member_price?', parts: [{ to: ['T2'], text: 'Done. Should I fix member_price?' }] })
+    const state = (askedBy: string[]) => Object.fromEntries(inbox([first, follow], boardOf(topic('T1', [first.key, follow.key], 'me', { askedBy })), new Set()).messages.map(m => [m.turn.text.slice(0, 5), m.state]))
+    assert.deepEqual(state([first.key]), { 'Add a': 'me', Rejec: 'done' })
+    // A question the follow-up's reply raised is the follow-up's, not the first message's.
+    assert.deepEqual(state([follow.key]), { 'Add a': 'done', Rejec: 'me' })
+  })
 })

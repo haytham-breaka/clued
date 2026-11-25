@@ -225,10 +225,10 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     // "claude" after a settled tag means Claude still owes work: an "OK, I'll do it" is not done.
     const owes = !!topic && !topic.isProvisional && topic.status === 'claude'
     const reply = replyId ? parts.find(p => p.id === replyId) : undefined
-    // A follow-up merged into a topic that waits on you waits too only if its own latest reply asks
-    // something: the question may be about the first message, already settled for this one.
+    // A topic waiting on you shows ✋ on the messages whose reply asked (askedBy). Boards from before
+    // that: a follow-up merged in waits only if its own latest reply asks something.
     const merged = !!topicId && !!topic && topic.id !== topicId
-    const waitsOnYou = topic?.status === 'me' && (!merged || !!(reply && questionOf(reply.part.text)))
+    const waitsOnYou = topic?.status === 'me' && (topic.askedBy ? topic.askedBy.includes(turn.key) : !merged || !!(reply && questionOf(reply.part.text)))
     const state: MessageState = replyId
       ? waitsOnYou ? 'me' : owes || isBusy ? 'progress' : 'done'
       : turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'

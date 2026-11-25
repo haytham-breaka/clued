@@ -859,7 +859,7 @@ function onEvent(e: ClaudeEvent) {
           if (/<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/.test(t.pending)) {
             // Only the topics it lists: the messages it leaves out are still being worked on.
             const was = S.kept.board.turnTopics
-            S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, Date.now(), { flat: true }).board, turnTopics: was }
+            S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, Date.now(), { flat: true, partial: true }).board, turnTopics: was }
           }
           t.early = [...(t.early ?? []), stripTag(t.pending)]
           // Kept by the app too: the transcript may lose it.
@@ -1098,7 +1098,9 @@ function submit(text: string, opts: { reaction?: string; about?: string } = {}) 
     const quoted = reply?.quotes.flatMap(q => q.topics ?? []) ?? []
     const asked = S.kept.board.topics.filter(t => t.status === 'me')
     const answered = new Set(quoted.length ? quoted : asked.length === 1 && !/\?\s*$/.test(text) ? [asked[0]!.id] : [])
-    S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now } : t)) }
+    // Without a quote it is a guess: if the reply's tag doesn't take it up, the question is open again.
+    const guess = !quoted.length ? { answerGuessed: true as const } : {}
+    S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now, ...guess } : t)) }
     const raised = raiseTopic(S.kept.board, { text, key: turn.key, replyTo: null }, now)
     turn.topicId = raised.topicId
     hidden = flatBrief(raised.board, raised.topicId, reply?.quotes ?? [])

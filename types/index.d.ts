@@ -14,6 +14,13 @@ export type Topic = {
   messageKeys: string[]
   /** Set while the title is the mod's first guess, before Claude names it. */
   isProvisional?: true
+  /**
+   * Set when your plain message was taken as the answer to this topic's question (it was the only
+   * one open): the next reply's tag confirms it, or the question is open again.
+   */
+  answerGuessed?: true
+  /** While it waits on you: the messages (keys) whose reply asked, so the others in the topic don't show ✋. */
+  askedBy?: string[]
   updatedAt: number
 }
 

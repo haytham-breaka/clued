@@ -70,12 +70,12 @@ describe('the tag', () => {
     assert.equal(stripTag('Hi <clued>{"topics":['), 'Hi')
   })
   test('parseTag reads topics, statuses, threads and names', () => {
-    const t = parseTag(`x ${tag({ topics: [{ id: 'T1', title: ' A title ', status: 'me', thread: '#2', same_as: 'T0' }, { id: 'T2', status: 'bogus', thread: 'new' }, { id: 3 }, null, { id: 'T4', title: '  ' }], threads: { '#2': 'Some name', '3': 5 } })}`)
+    const t = parseTag(`x ${tag({ topics: [{ id: 'T1', title: ' A title ', status: 'me', thread: '#2', same_as: 'T0', about: 'T0' }, { id: 'T2', status: 'bogus', thread: 'new' }, { id: 3 }, null, { id: 'T4', title: '  ' }], threads: { '#2': 'Some name', '3': 5 } })}`)
     assert.deepEqual(t, {
       topics: [
-        { id: 'T1', title: 'A title', status: 'me', same_as: 'T0', thread: 2 },
-        { id: 'T2', title: undefined, status: undefined, same_as: undefined, thread: 'new' },
-        { id: 'T4', title: undefined, status: undefined, same_as: undefined, thread: undefined },
+        { id: 'T1', title: 'A title', status: 'me', same_as: 'T0', about: 'T0', thread: 2 },
+        { id: 'T2', title: undefined, status: undefined, same_as: undefined, about: undefined, thread: 'new' },
+        { id: 'T4', title: undefined, status: undefined, same_as: undefined, about: undefined, thread: undefined },
       ],
       threads: { '2': 'Some name' },
     })
@@ -115,9 +115,69 @@ describe('raising and settling topics', () => {
     assert.equal(board.answers.at(-1)!.text, 'Which?')
   })
 
-  test('"me" without a question is done', () => {
+  test('the tag\'s "me" is trusted, with or without a question mark', () => {
+    // Claude often says a topic still waits on you in a reply about something else.
     const { board } = settleTurn(raised('x'), `All set.\n${tag({ topics: [{ id: 'T1', status: 'me' }] })}`, NOW, { flat: true })
-    assert.equal(board.topics[0]!.status, 'done')
+    assert.equal(board.topics[0]!.status, 'me')
+    assert.deepEqual(board.topics[0]!.askedBy, [keyOf('x')])
+    // Left out of the tag, the guess still reads the text.
+    assert.equal(settleTurn(raised('y'), 'All set.', NOW, { flat: true }).board.topics[0]!.status, 'done')
+  })
+
+  test('a follow-up\'s "done" does not settle the question of the topic it continues', () => {
+    const asked = settleTurn(raised('Add a discount function'), `Done. Should I fix member_price?\n${tag({ topics: [{ id: 'T1', status: 'me' }] })}`, NOW, { flat: true }).board
+    const b = raiseTopic(asked, { text: 'Round it to cents.', key: 'k2', replyTo: null }, NOW + 1).board
+    const after = (entries: unknown[]) => settleTurn(b, `Rounded.\n${tag({ topics: entries })}`, NOW + 2, { flat: true }).board.topics
+    const merged = after([{ id: 'T2', status: 'done', same_as: 'T1' }])
+    assert.deepEqual(merged.map(t => [t.id, t.status]), [['T1', 'me']])
+    // Still the first message's question: the follow-up isn't asked anything.
+    assert.deepEqual(merged[0]!.askedBy, [keyOf('Add a discount function')])
+    // The topic's own entry decides, in either order.
+    assert.equal(after([{ id: 'T2', status: 'done', same_as: 'T1' }, { id: 'T1', status: 'done' }])[0]!.status, 'done')
+    assert.equal(after([{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done', same_as: 'T1' }])[0]!.status, 'done')
+    assert.equal(after([{ id: 'T1', status: 'me' }, { id: 'T2', status: 'done', same_as: 'T1' }])[0]!.status, 'me')
+    // The old question settled and the follow-up's reply asks a new one: it is the follow-up's.
+    const fresh = after([{ id: 'T1', status: 'done' }, { id: 'T2', status: 'me', same_as: 'T1' }])[0]!
+    assert.equal(fresh.status, 'me')
+    assert.deepEqual(fresh.askedBy, ['k2'])
+    // Once nothing waits on you, askedBy goes.
+    assert.equal(after([{ id: 'T2', status: 'done', same_as: 'T1' }, { id: 'T1', status: 'done' }])[0]!.askedBy, undefined)
+  })
+
+  test('a question under a made-up id waits on the topic it grew from', () => {
+    // "T1-discount": the id's start names the topic.
+    const a = settleTurn(raised('Add a fee', 'What port?'), `Added. Should I fix the discount?\n${tag({ topics: [{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done' }, { id: 'T1-discount', status: 'me' }] })}`, NOW, { flat: true }).board
+    assert.deepEqual(a.topics.map(t => [t.id, t.status]), [['T1', 'me'], ['T2', 'done']])
+    // A new id: the reply mark above the question names it.
+    const text = `<<reply T1>>\nOne.\n\n<<reply T2>>\nTwo. Should I fix the test?\n${tag({ topics: [{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done' }, { id: 'T3', status: 'me' }] })}`
+    assert.deepEqual(settleTurn(raised('one', 'two'), text, NOW, { flat: true }).board.topics.map(t => t.status), ['done', 'me'])
+    // No mark: the turn's only topic; with several and no mark, nobody (it can't tell).
+    assert.equal(settleTurn(raised('one'), `Should I?\n${tag({ topics: [{ id: 'T1', status: 'done' }, { id: 'T9', status: 'me' }] })}`, NOW, { flat: true }).board.topics[0]!.status, 'me')
+    assert.deepEqual(settleTurn(raised('one', 'two'), `Should I?\n${tag({ topics: [{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done' }, { id: 'T9', status: 'me' }] })}`, NOW, { flat: true }).board.topics.map(t => t.status), ['done', 'done'])
+    // No question at all: nothing to attach.
+    assert.equal(settleTurn(raised('one', 'two'), `Done.\n${tag({ topics: [{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done' }, { id: 'T9', status: 'me' }] })}`, NOW, { flat: true }).board.topics[0]!.status, 'done')
+  })
+
+  test('a plain message guessed to answer a question: the tag confirms it, or the question is open again', () => {
+    const asked = settleTurn(raised('Add a reorder check'), `Which threshold?\n${tag({ topics: [{ id: 'T1', status: 'me' }] })}`, NOW, { flat: true }).board
+    // As app/main.ts submit() does for a plain message while one question is open.
+    const guessed = { ...asked, topics: asked.topics.map(t => ({ ...t, status: 'claude' as const, answerGuessed: true as const })) }
+    const b = raiseTopic(guessed, { text: 'What host?', key: 'k2', replyTo: null }, NOW + 1).board
+    const settle = (entries: unknown[], opts = {}) => settleTurn(b, `It binds to 127.0.0.1.\n${tag({ topics: entries })}`, NOW + 2, { flat: true, ...opts }).board.topics
+    // The tag leaves T1 out: the message was about something else.
+    const open = settle([{ id: 'T2', status: 'done' }])
+    assert.deepEqual(open.map(t => [t.id, t.status]), [['T1', 'me'], ['T2', 'done']])
+    assert.equal(open[0]!.answerGuessed, undefined)
+    assert.deepEqual(open[0]!.askedBy, [keyOf('Add a reorder check')])
+    // The tag lists it, or links the message to it: the guess stands.
+    assert.equal(settle([{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done' }])[0]!.status, 'done')
+    assert.equal(settle([{ id: 'T2', status: 'claude', about: 'T1' }])[0]!.status, 'claude')
+    // A follow-up folded in with same_as only continues the subject: the question stays open.
+    assert.equal(settle([{ id: 'T2', status: 'done', same_as: 'T1' }])[0]!.status, 'me')
+    // A reply written mid-turn leaves the guess for the turn's last tag.
+    const mid = settle([{ id: 'T2', status: 'done' }], { partial: true })
+    assert.equal(mid[0]!.status, 'claude')
+    assert.equal(mid[0]!.answerGuessed, true)
   })
 
   test('same_as folds a provisional topic into the earlier one', () => {

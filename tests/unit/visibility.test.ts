@@ -51,12 +51,13 @@ describe('arm A: the recorded stream through the app', () => {
   test('the panel: on Claude, then done and waiting on you, then the reaction counts as done', () => {
     assert.deepEqual(states('before m2'), { m1: 'claude' })
     assert.deepEqual(states('before m3'), { m1: 'done', m2: 'me' })
-    // m3 is a plain message while one question was open, so the app takes it as the answer: m2 goes back to Claude.
-    assert.deepEqual(states('end'), { m1: 'done', m2: 'progress', m3: 'done' })
+    // m3 is a plain message while one question was open, so the app takes it as the answer at first; the
+    // reply's tag leaves T2 out (m3 was about the port), so m2's question is open again.
+    assert.deepEqual(states('end'), { m1: 'done', m2: 'me', m3: 'done' })
     const end = frames.at(-1)!.panel!
     assert.match(end.find(p => p.id === 'm1')!.replyText!, /8137/)
     assert.equal(end.find(p => p.id === 'm3')!.reacted, true)
-    assert.deepEqual(end.map(panelClaim), ['done', 'working', 'done'])
+    assert.deepEqual(end.map(panelClaim), ['done', 'waiting', 'done'])
     assert.deepEqual(frames[1]!.panel!.map(panelClaim), ['done', 'waiting'])
   })
   test('the screen holds the panel and the chat; the end frame also holds the whole chat', () => {

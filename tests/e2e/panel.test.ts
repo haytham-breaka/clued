@@ -118,9 +118,12 @@ describe('panel', () => {
       await app.waitFor('Waiting on you')
       await app.send('the first way')
       const s = await app.waitFor('Echo: the first way')
-      assert.ok(!s.includes('Waiting on you'))
-      // The question's topic went back to Claude, and this answer left it there: still owed.
-      assert.match(s, /▶ ask me now/)
+      // The note told Claude the question's topic was back on it.
+      assert.match(app.sent().at(-1)!.note, /T1[^\n]*on Claude/)
+      // The reply's tag didn't take it up (it lists only the new message): the answer was a guess, and
+      // the question is open again.
+      assert.match(s, /Waiting on you/)
+      assert.match(s, /✋ ask me now/)
     }))
 
   test('/demo agents: listed under Agents, each with its own view to write from', () =>

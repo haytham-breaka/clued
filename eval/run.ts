@@ -271,7 +271,8 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
       const quotedTopics = q?.topics ?? []
       const asked = board.topics.filter(t => t.status === 'me')
       const answered = new Set(quotedTopics.length ? quotedTopics : asked.length === 1 && !/\?\s*$/.test(m.text) ? [asked[0]!.id] : [])
-      board = { ...board, topics: board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now } : t)) }
+      const guess = !quotedTopics.length ? { answerGuessed: true as const } : {}
+      board = { ...board, topics: board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now, ...guess } : t)) }
       const raised = raiseTopic(board, { text: m.text, key: keyOf(m.text), replyTo: null }, now)
       topicId = raised.topicId
       note = flatBrief(raised.board, raised.topicId, q ? [{ who: m.quote!.who, text: q.text, ...(q.topics ? { topics: q.topics } : {}) }] : [])
