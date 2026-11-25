@@ -275,21 +275,23 @@ describe('panel', () => {
       await app.waitFor(() => app.read('home/.clued/sessions/s1.json').includes('"follow-bg-42:0"'))
     }))
 
+  /** A session whose background agent (bg-9, agent lj-9) the app's /reload stopped. */
+  const stoppedAgent = (a: { home: string; work: string }) => {
+    widePanel(a)
+    const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString()
+    writeSession(a.home, a.work, 'cut-1', [
+      { type: 'user', timestamp: at(0), message: { role: 'user', content: 'start the long job' } },
+      { type: 'assistant', timestamp: at(1), message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'bg-9', name: 'Agent', input: { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true } }] } },
+      { type: 'user', timestamp: at(2), message: { content: [{ type: 'tool_result', tool_use_id: 'bg-9', content: 'Async agent launched successfully. agentId: lj-9' }] } },
+      { type: 'assistant', timestamp: at(3), message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Started the long job.' }] } },
+    ])
+    // The app quit by /reload while it ran.
+    mkdirSync(join(a.home, '.clued', 'sessions'), { recursive: true })
+    writeFileSync(join(a.home, '.clued', 'sessions', 'cut-1.json'), JSON.stringify({ board: {}, reactions: {}, links: {}, readInit: true, readIds: 2, stopped: { 'bg-9': 'reload' } }))
+  }
+
   test('an agent a /reload stopped says so, and ▶ continue asks Claude to resume it', () => {
-    const setup = (a: { home: string; work: string }) => {
-      widePanel(a)
-      const at = (s: number) => new Date(Date.now() - 60_000 + s * 1000).toISOString()
-      writeSession(a.home, a.work, 'cut-1', [
-        { type: 'user', timestamp: at(0), message: { role: 'user', content: 'start the long job' } },
-        { type: 'assistant', timestamp: at(1), message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'bg-9', name: 'Agent', input: { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true } }] } },
-        { type: 'user', timestamp: at(2), message: { content: [{ type: 'tool_result', tool_use_id: 'bg-9', content: 'Async agent launched successfully. agentId: lj-9' }] } },
-        { type: 'assistant', timestamp: at(3), message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Started the long job.' }] } },
-      ])
-      // The app quit by /reload while it ran.
-      mkdirSync(join(a.home, '.clued', 'sessions'), { recursive: true })
-      writeFileSync(join(a.home, '.clued', 'sessions', 'cut-1.json'), JSON.stringify({ board: {}, reactions: {}, links: {}, readInit: true, readIds: 2, stopped: { 'bg-9': 'reload' } }))
-    }
-    return withApp({ setup, args: ['--resume', 'cut-1'], ready: 'Started the long job.', height: 44, width: 150 }, async app => {
+    return withApp({ setup: stoppedAgent, args: ['--resume', 'cut-1'], ready: 'Started the long job.', height: 44, width: 150 }, async app => {
       let s = await app.waitFor('stopped when the app reloaded  ▶ continue')
       assert.match(s, /Agents +1 stopped/)
       assert.match(rowOf(s, 'Long job'), /■ \w+ \(implementer\).*stopped .* ago/)
@@ -307,6 +309,32 @@ describe('panel', () => {
       assert.match(s, /Agents +1 working/)
     })
   })
+
+  test('▶ continue twice asks Claude once, and leaves the reply you are writing in the box', () =>
+    withApp({ setup: stoppedAgent, args: ['--resume', 'cut-1'], ready: 'Started the long job.', height: 44, width: 150 }, async app => {
+      await app.waitFor('stopped when the app reloaded  ▶ continue')
+      // Claude busy, so the continue is not taken in at once.
+      await app.send('hold on please')
+      await app.waitFor('Starting the slow work.')
+      await app.hover('Started the long job.', { area: 'chat' })
+      await app.click('↩ reply', { area: 'chat' })
+      await app.waitFor('↩ Replying to Claude')
+      app.type('one more thing')
+      await app.click('▶ continue', { area: 'panel' })
+      await app.waitFor('Asked Claude to continue')
+      await app.click('▶ continue', { area: 'panel' })
+      const s = await app.waitFor('Already asked Claude to continue')
+      const asked = app.sent().filter(m => m.text.startsWith('Continue '))
+      assert.equal(asked.length, 1)
+      // The app's message took neither the reply nor the box's text: both are still there.
+      assert.doesNotMatch(asked[0]!.note, /The user is replying/)
+      assert.match(s, /↩ Replying to Claude/)
+      assert.match(s, /│ one more thing/)
+      app.keys('Enter')
+      app.release('slow')
+      await app.waitLog(e => e.type === 'user' && JSON.stringify(e.message.content).includes('one more thing'))
+      assert.match(app.sent().find(m => m.text === 'one more thing')!.note, /The user is replying to your message:\n> Started the long job\./)
+    }))
 
   test('on resume, a reply Claude wrote when an agent came back keeps its id: read stays read', () => {
     const note = '<task-notification>\n<task-id>bg-42</task-id>\n<tool-use-id>bg-1</tool-use-id>\n<status>completed</status>\n<summary>Long job finished</summary>\n</task-notification>'

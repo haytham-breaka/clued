@@ -110,4 +110,28 @@ describe('images', () => {
       assert.equal((await waitOpened(app, 2))[1], opener(pic, wsl))
     })
   })
+
+  test('an image in the box stays there while the app sends a message of its own (a reaction), and goes with yours', () =>
+    withApp({ unfocused: true }, async app => {
+      await app.send('ask me which')
+      await app.waitIdle('Which one do you want?')
+      const pic = join(app.work, 'kept.png')
+      writeFileSync(pic, PNG)
+      await attach(app, pic)
+      app.type('this one')
+      // 👍 on a question goes to Claude at once, as the app's own message: without your image.
+      await app.hover('Which one do you want?', { area: 'chat' })
+      await app.click('👍', { area: 'chat' })
+      let s = await app.waitIdle('Echo: [clued reaction]')
+      assert.equal(app.sent().at(-1)!.images, 0)
+      assert.match(s, /│ \[image 1\] this one/)
+      app.keys('Enter')
+      s = await app.waitFor('I got 1 image(s).')
+      const last = app.sent().at(-1)!
+      assert.equal(last.text, '[image 1] this one')
+      assert.equal(last.images, 1)
+      // Its [image 1] opens the file it was sent from.
+      await app.click('[image 1] this one', { area: 'chat' })
+      assert.deepEqual(await waitOpened(app, 1), [opener(pic, isWsl())])
+    }))
 })

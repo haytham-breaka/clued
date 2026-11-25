@@ -430,14 +430,21 @@ function continueAgent(id: string) {
   if (!a) return
   const name = a.person ?? a.name
   const now = Date.now()
-  if (canContinue(a)) {
-    submit(continueText(a, name), { agent: a.id })
-    toast(`Asked Claude to continue ${name}.`)
-  } else if (isQuiet(a, now)) {
-    submit(nudgeText(a, name, ago(now - pulseOf(a, now).since)), { agent: a.id })
-    toast(`Asked Claude to check on ${name}.`)
-  }
+  const isCut = canContinue(a)
+  const text = isCut ? continueText(a, name) : isQuiet(a, now) ? nudgeText(a, name, ago(now - pulseOf(a, now).since)) : ''
+  if (!text) return
+  // Asked already, and Claude hasn't taken that one in yet (or it was just now): not twice.
+  const prev = continued.get(id)
+  const sent = prev ? S.turns.findLast(t => t.key === prev.key) : undefined
+  if (prev && (now - prev.at < CONTINUE_MS || (sent && sent.delivery && !sent.isDone && !sent.deleted))) return toast(`Already asked Claude to continue ${name}.`)
+  submit(text, { agent: a.id })
+  continued.set(id, { key: S.turns.at(-1)!.key, at: now })
+  toast(isCut ? `Asked Claude to continue ${name}.` : `Asked Claude to check on ${name}.`)
 }
+
+/** The last continue or check-on asked for each agent: its turn key, and when. */
+const continued = new Map<string, { key: string; at: number }>()
+const CONTINUE_MS = 15_000
 
 function openAgent(id: string) {
   if (!S.agents.has(id)) return toast('That agent is no longer here.')
@@ -1508,11 +1515,12 @@ const here = (): From => ({ replyTo: S.replyTo, about: S.requestView, job: S.job
 /** `about`: the request (turn key) it is part of, as when written inside that request's view. */
 /** `agent`: the agent (Agent tool use id) it is about, as when written inside that agent's view. */
 /** `deletes`: the app telling Claude to ignore a message you deleted (its topic id). */
-/** `from`: where it was written (a held message's, from when you pressed Enter); else here and now. */
+/** `from`: where it was written (a held message's, from when you pressed Enter). Without it, the app
+ * sends it of its own: from the view you are in, but not the reply or images you are writing, which
+ * stay in the box. */
 function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; shell?: string; retry?: string[]; deletes?: string } = {}, from?: From) {
   if (!S.claude) start(S.sessionId || undefined)
-  const isNow = !from
-  const at = from ?? here()
+  const at = from ?? { ...here(), replyTo: null, images: [] }
   const now = Date.now()
   const turn = newTurn(text, now)
   if (opts.reaction) turn.reaction = opts.reaction
@@ -1576,8 +1584,6 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     S.kept.board = raised.board
     const first = reply?.quotes[0]
     if (first) S.kept.links[turn.key] = { key: first.key, who: first.who, text: preview(first.text, 60), ...(first.anchor ? { anchor: first.anchor } : {}), ...(reply!.quotes.length > 1 ? { more: reply!.quotes.length - 1, all: reply!.quotes.map(q => ({ anchor: q.anchor ?? `${q.who}:${q.key}`, text: preview(q.text, 120) })) } : {}) }
-    // A held message's reply was cleared when you pressed Enter: the one in the box now is another.
-    if (isNow) S.replyTo = null
     if (dismissed.length) {
       hidden += `\nThe user dismissed your question${dismissed.length > 1 ? 's' : ''} on ${dismissed.join(', ')} without answering: don't wait for an answer, and ask again only if it still matters.`
       dismissed = []
@@ -1604,7 +1610,6 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
       return []
     }
   })
-  if (isNow) S.images = []
   // Kept by its turn key, so a click on its [image N] opens the file it was sent from, on resume too.
   if (images.length) S.kept.images = { ...S.kept.images, [turn.key]: at.images.map(i => i.path) }
   logSend('sent', { topic: turn.topicId, text, ...(hidden ? { note: hidden } : {}), ...(images.length ? { images: images.length } : {}) })
@@ -1886,9 +1891,10 @@ function readList(): PartRef[] {
 
 /** A message whose reply went missing: asks Claude, quoting it, to write that reply again. */
 function askAgain(t: Turn) {
-  S.replyTo = { quotes: [{ who: 'me', text: t.text, key: t.key, anchor: `me:${t.key}` }] }
   const id = t.topicId ?? S.kept.board.topics.find(x => x.messageKeys.includes(t.key))?.id
-  submit(`Your reply to this message${id ? ` (${id})` : ''} never reached the app: it shows no answer. Please write that reply again${id ? `, as a part starting with <<reply ${id}>>` : ''}.`)
+  // A reply to that message; the reply and images in the box stay there.
+  const from = { ...here(), replyTo: { quotes: [{ who: 'me' as const, text: t.text, key: t.key, anchor: `me:${t.key}` }] }, images: [] }
+  submit(`Your reply to this message${id ? ` (${id})` : ''} never reached the app: it shows no answer. Please write that reply again${id ? `, as a part starting with <<reply ${id}>>` : ''}.`, {}, from)
   draw()
 }
 
@@ -3121,7 +3127,14 @@ function enter() {
   S.cursor = 0
   S.menuAt = 0
   // Slash commands go at once (Claude Code's own ones too); a message waits out the hold first.
-  if (text.startsWith('/')) return runCommand(text) ? undefined : submit(text)
+  if (text.startsWith('/')) {
+    if (runCommand(text)) return
+    // The reply and the images in the box go with it, and the box starts afresh.
+    const from = here()
+    S.replyTo = null
+    S.images = []
+    return submit(text, {}, from)
+  }
   sendTyped(text)
 }
 
