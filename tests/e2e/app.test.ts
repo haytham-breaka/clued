@@ -4,7 +4,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { keyOf } from '../../hooks/model.ts'
 import { withApp, writeSession } from './harness.ts'
@@ -14,15 +14,20 @@ const MAIN = join(import.meta.dirname, '..', '..', 'app', 'main.ts')
 /** A 1×1 PNG. */
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
 
+const IS_WSL = !!process.env.WSL_DISTRO_NAME || (process.platform === 'linux' && /microsoft/i.test(readFileSync('/proc/version', 'utf8')))
+
 /** Whether the fake notifier (notify-send on Linux, powershell.exe on WSL) was asked to show `title`. */
 function notified(app: App, title: string): boolean {
   return app.read('notify.log').split('\n').some(l => {
     if (l.includes('notify-send') || l.includes('osascript')) return l.includes(title)
     if (!l.includes('powershell.exe') || l.includes('Clipboard')) return false
-    // The toast's title goes base64-encoded in the PowerShell script.
-    return [...l.matchAll(/FromBase64String\('([^']*)'\)/g)].some(m => Buffer.from(m[1]!, 'base64').toString('utf8') === title)
+    // The toast's XML goes base64-encoded in the PowerShell script.
+    return toasts(l).some(x => x.includes(`<text>${title}</text>`))
   })
 }
+
+/** The toasts (their XML) in a line of the fake powershell.exe's log. */
+const toasts = (l: string) => [...l.matchAll(/FromBase64String\('([^']*)'\)/g)].map(m => Buffer.from(m[1]!, 'base64').toString('utf8')).filter(x => x.startsWith('<toast'))
 
 /** Two earlier sessions in this folder, the newer one with what the app kept for it. */
 function sessions({ home, work }: { home: string; work: string }) {
@@ -147,12 +152,12 @@ describe('app', () => {
       await app.waitFor('Sent a test notification.')
       await app.waitFor(() => notified(app, 'Claude asks you · test'))
       await app.send('/notify')
-      await app.waitFor('You get a notification for every question Claude asks.')
+      await app.waitFor('Notifications always: each time Claude waits on you, even while you type.')
       await app.send('/notify')
       await app.waitFor('Notifications off.')
       await app.waitFor(() => app.read('home/.clued/panel.json').includes('"notify":"off"'))
       await app.send('/notify on')
-      await app.waitFor('You get a notification when Claude asks something')
+      await app.waitFor("Notifications on: each time Claude waits on you, unless you're typing here.")
       await app.send('need permission')
       await app.waitFor('Allow (y)')
       await app.waitFor(() => notified(app, 'Claude wants to use Bash · work'))
@@ -168,6 +173,46 @@ describe('app', () => {
       await app.waitFor('Waiting on you')
       await app.waitFor(() => notified(app, 'Claude asks you · work'))
       assert.equal(app.title(), '✋ 1 · clued · work')
+      // With its sound: notify-send plays none, so a sound player follows; osascript names one.
+      const log = () => app.read('notify.log')
+      if (process.platform === 'darwin') assert.match(log(), /sound name "Glass"/)
+      else if (!IS_WSL) await app.waitFor(() => log().includes('canberra-gtk-play -i message-new-instant -d clued'))
+    }))
+
+  test('WSL in Windows Terminal: an AskUserQuestion card notifies once, with sound and a click to this tab, even in a focused window', () =>
+    withApp({ env: { WSL_DISTRO_NAME: 'Fake', WT_SESSION: '0b7c0b6e-0000-4000-8000-000000000001', CLUED_ACTIVE_MS: '3000' }, height: 44 }, async app => {
+      // You type, then look away without leaving the tab (or the terminal never says it lost focus).
+      await app.send('offer choices later')
+      await new Promise(r => setTimeout(r, 3300))
+      writeFileSync(join(app.dir, 'release-ask'), '')
+      await app.waitFor('❓ Claude asks')
+      await app.waitFor(() => notified(app, 'Claude asks you · work'))
+      // Only one toast, however often the app draws meanwhile.
+      await new Promise(r => setTimeout(r, 800))
+      const sent = app.read('notify.log').split('\n').flatMap(toasts)
+      assert.equal(sent.length, 1)
+      assert.match(sent[0]!, /<audio src="ms-winsoundevent:Notification.Default"\/>/)
+      assert.match(sent[0]!, /activationType="protocol" launch="clued-focus:\?id=[0-9a-f]{4}&amp;where=work"/)
+      assert.match(sent[0]!, /<text>Which database should we use\? · Which extras do you want\?<\/text>/)
+      // The tab's title ends with its invisible tag, and the click handler is set up with the toast.
+      assert.match(app.title(), /^✋ 1 · clued · work[\u200b\u2060]{16}$/)
+      assert.match(app.read('notify.log'), /CluedVersion/)
+      // Typing right as Claude asks again: you are looking, no toast.
+      app.type('1')
+      app.keys('Enter')
+      app.type('1')
+      app.keys('Enter')
+      await app.waitFor('You chose:')
+      await app.send('offer choices now')
+      await app.waitFor('❓ Claude asks')
+      await new Promise(r => setTimeout(r, 800))
+      assert.equal(app.read('notify.log').split('\n').flatMap(toasts).length, 1)
+      // /notify uninstall removes the handler and turns notifications off.
+      app.keys('Escape')
+      await app.send('/notify uninstall')
+      await app.waitFor('Removed the click handler')
+      await app.waitFor(() => app.read('notify.log').includes("Remove-Item -Path 'HKCU:"))
+      await app.waitFor(() => app.read('home/.clued/panel.json').includes('"notify":"off"'))
     }))
 
   test('/resume lists this folder\'s sessions and opens one with its history', () =>

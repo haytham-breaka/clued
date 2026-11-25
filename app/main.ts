@@ -44,6 +44,8 @@ import { Claude } from './claude.ts'
 import { imageSpans, openerFor } from './images.ts'
 import { cleanImages, limits, trimLogFile } from './retention.ts'
 import { Btw } from './btw.ts'
+import { ACTIVE_MS, focusUri, linuxCommands, macCommand, NOTIFY_MODES, oscNotification, shouldNotify, tabId, tabTag, targetOf, toastScript, uninstallScript, Waits } from './notify.ts'
+import type { Notify } from './notify.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
 import type { Card, Ctx as LocalCtx } from './local.ts'
 import { PLUGIN_COMMANDS, Plugins } from './plugin.ts'
@@ -252,15 +254,22 @@ const local = new Local(() => draw())
 /** /plugin: Claude Code's plugin CLI, then the session reloads its plugins. */
 const plugins = new Plugins(local.cards)
 
-// ---- Notifications: a system notification when Claude asks you something ---------------------
+// ---- Notifications: a system notification, with a sound, each time Claude waits on you -----------
 
-/** on: when the window isn't focused; always: also when it is; off: never. Set with /notify. */
-type Notify = 'on' | 'always' | 'off'
 let notifyMode: Notify = prefs.notify ?? 'on'
 const appStart = Date.now()
-const notified = new Set<string>()
+/** Each wait notifies once: a question in a reply, a permission, an AskUserQuestion card. */
+const waits = new Waits()
+/** Your last key press or click in the app (focus reports, pointer moves and the wheel don't count). */
+let lastInputAt = 0
+/** How recent that must be for /notify on to count you as looking at this tab (CLUED_ACTIVE_MS in the tests). */
+const activeMs = Number(process.env.CLUED_ACTIVE_MS) || ACTIVE_MS
 
-/** Notifies about questions that just joined Waiting on you (the ones there at start are only noted). */
+const IS_WT = !!process.env.WT_SESSION
+/** Windows Terminal: this tab's id, ending its title as an invisible tag, so a click on a toast finds the tab. */
+const TAB_ID = IS_WT ? tabId(process.env.WT_SESSION!) : ''
+const folder = () => cwd.split('/').pop() || cwd
+
 /**
  * The tab says when Claude waits on you, so with several tabs you can see which one: its title starts
  * with ✋ and the count, and in Windows Terminal the tab (and taskbar button) shows a paused, yellow mark.
@@ -268,8 +277,7 @@ const notified = new Set<string>()
 let tabMark = ''
 function markTab() {
   const n = S.box.waiting.length + S.permissions.length + S.asks.length
-  const where = cwd.split('/').pop() || cwd
-  const title = `${n ? `✋ ${n} · ` : ''}clued · ${where}`
+  const title = `${n ? `✋ ${n} · ` : ''}clued · ${folder()}${TAB_ID ? tabTag(TAB_ID) : ''}`
   if (title === tabMark) return
   const had = tabMark.startsWith('✋')
   tabMark = title
@@ -277,41 +285,43 @@ function markTab() {
   if (IS_WT && (n > 0) !== had) out.write(n ? '\x1b]9;4;4;100\x07' : '\x1b]9;4;0;0\x07')
 }
 
+/** A new wait: notifies once for `key`, unless /notify says not now (see shouldNotify). */
+function notifyWait(key: string, title: string, body: string) {
+  if (waits.isNew(key) && shouldNotify(notifyMode, S.isFocused, lastInputAt, Date.now(), activeMs)) notify(title, body)
+}
+
+/** Questions that just joined Waiting on you notify (the ones there in the first seconds are only noted). */
 function notifyNewQuestions() {
-  const fresh = S.box.waiting.filter(w => !notified.has(w.id))
-  for (const w of fresh) notified.add(w.id)
-  if (!fresh.length || Date.now() - appStart < 5000 || notifyMode === 'off' || (notifyMode === 'on' && S.isFocused)) return
-  const where = cwd.split('/').pop() || cwd
-  notify(fresh.length > 1 ? `Claude asks you ${fresh.length} things · ${where}` : `Claude asks you · ${where}`, preview(fresh.at(-1)!.question, 200))
+  const fresh = S.box.waiting.filter(w => waits.isNew(`reply:${w.id}`))
+  if (!fresh.length || Date.now() - appStart < 5000 || !shouldNotify(notifyMode, S.isFocused, lastInputAt, Date.now(), activeMs)) return
+  notify(fresh.length > 1 ? `Claude asks you ${fresh.length} things · ${folder()}` : `Claude asks you · ${folder()}`, preview(fresh.at(-1)!.question, 200))
+}
+
+/** A program run for a notification: its failure (not there, say) runs `orElse`, if any. */
+function run(c: { cmd: string; args: string[] }, orElse?: () => void) {
+  try {
+    execFile(c.cmd, c.args, err => err && orElse?.())
+  } catch {
+    orElse?.()
+  }
 }
 
 /**
- * Terminals that post a notification themselves (OSC 9, or kitty's OSC 99): a click on it
- * goes back to the very tab that sent it. Everywhere else the system's own notification is used.
+ * A system notification with a sound: from the terminal itself when it can (kitty, iTerm2, WezTerm,
+ * Ghostty: a click opens this tab), else a Windows toast (from WSL too; in Windows Terminal a click
+ * opens this tab), macOS Notification Center, or notify-send and a sound on Linux.
  */
-const TERM_NOTIFIES = process.env.TERM_PROGRAM === 'iTerm.app' || process.env.TERM_PROGRAM === 'WezTerm' || process.env.TERM_PROGRAM === 'ghostty' || !!process.env.KITTY_WINDOW_ID
-const IS_WT = !!process.env.WT_SESSION
-
-/** A system notification: from the terminal itself when it can (so a click opens this tab), else a Windows toast (from WSL too), macOS Notification Center, or notify-send. */
 function notify(title: string, body: string) {
-  const text = `${title}: ${body}`.replace(/[\x00-\x1f\x7f]/g, ' ')
-  try {
-    if (process.env.KITTY_WINDOW_ID) out.write(`\x1b]99;;${text}\x1b\\`)
-    else if (TERM_NOTIFIES) out.write(`\x1b]9;${text}\x07`)
-    else if (IS_WSL || process.platform === 'win32') {
-      const b64 = (t: string) => Buffer.from(t, 'utf8').toString('base64')
-      const ps = [
-        `$u=[Text.Encoding]::UTF8; $t=$u.GetString([Convert]::FromBase64String('${b64(title)}')); $m=$u.GetString([Convert]::FromBase64String('${b64(body)}'))`,
-        '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null',
-        '$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
-        "$e=$x.GetElementsByTagName('text'); [void]$e.Item(0).AppendChild($x.CreateTextNode($t)); [void]$e.Item(1).AppendChild($x.CreateTextNode($m))",
-        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x))",
-      ].join('; ')
-      execFile(IS_WSL ? 'powershell.exe' : 'powershell', ['-NoProfile', '-Command', ps], () => {})
-    } else if (process.platform === 'darwin') {
-      execFile('osascript', ['-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, body], () => {})
-    } else execFile('notify-send', ['-a', 'clued', title, body], () => {})
-  } catch {}
+  const target = targetOf(process.env, process.platform, IS_WSL)
+  if (target === 'kitty' || target === 'osc9') out.write(oscNotification(target, title, body))
+  else if (target === 'windows') run({ cmd: IS_WSL ? 'powershell.exe' : 'powershell', args: ['-NoProfile', '-Command', toastScript(title, body, TAB_ID ? focusUri(TAB_ID, folder()) : undefined)] })
+  else if (target === 'mac') run(macCommand(title, body))
+  else {
+    const { show, sounds } = linuxCommands(title, body)
+    run(show)
+    const next = (i: number): void => void (sounds[i] && run(sounds[i]!, () => next(i + 1)))
+    next(0)
+  }
 }
 
 /** Each model's context size as Claude Code last reported it, for the status line before the first reply. */
@@ -1279,8 +1289,7 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'permission':
       S.permissions.push({ requestId: e.requestId, tool: e.tool, input: e.input })
-      if (notifyMode === 'always' || (notifyMode === 'on' && !S.isFocused))
-        notify(`Claude wants to use ${e.tool} · ${cwd.split('/').pop() || cwd}`, preview(String(e.input.description ?? e.input.command ?? e.input.file_path ?? e.input.url ?? ''), 200))
+      notifyWait(`perm:${e.requestId}`, `Claude wants to use ${e.tool} · ${folder()}`, preview(String(e.input.description ?? e.input.command ?? e.input.file_path ?? e.input.url ?? ''), 200))
       break
     case 'mode':
       S.permissionMode = e.mode
@@ -1292,8 +1301,7 @@ function onEvent(e: ClaudeEvent) {
       // No question in it: ask about the tool like any other.
       if (!a) return onEvent({ kind: 'permission', requestId: e.requestId, tool: 'AskUserQuestion', input: e.input })
       S.asks.push(a)
-      if (notifyMode === 'always' || (notifyMode === 'on' && !S.isFocused))
-        notify(`Claude asks you · ${cwd.split('/').pop() || cwd}`, preview(a.questions.map(q => q.question).join(' · '), 200))
+      notifyWait(`ask:${e.requestId}`, `Claude asks you · ${folder()}`, preview(a.questions.map(q => q.question).join(' · '), 200))
       break
     }
     case 'status':
@@ -3060,17 +3068,26 @@ function runCommand(text: string): boolean {
       return true
     }
     case 'notify': {
-      // /notify on|always|off, or /notify alone to go round them.
+      // /notify on|always|off, or /notify alone to go round them; test sends one; uninstall removes
+      // the Windows click handler (and turns notifications off, as the next toast would set it up again).
       if (arg.trim() === 'test') {
         notify('Claude asks you · test', 'This is how a question from Claude will look.')
         toast('Sent a test notification.')
         return true
       }
-      const order: Notify[] = ['on', 'always', 'off']
-      const want = arg.trim() as Notify
-      notifyMode = order.includes(want) ? want : order[(order.indexOf(notifyMode) + 1) % 3]!
+      const want = arg.trim() as Notify | 'uninstall'
+      if (want === 'uninstall') {
+        if (!IS_WSL && process.platform !== 'win32') return toast('Nothing to remove: only Windows has a click handler (clued-focus).'), true
+        run({ cmd: IS_WSL ? 'powershell.exe' : 'powershell', args: ['-NoProfile', '-Command', uninstallScript()] })
+        notifyMode = 'off'
+        savePrefs()
+        toast('Removed the click handler (clued-focus) and turned notifications off. /notify on sets them up again.')
+        draw()
+        return true
+      }
+      notifyMode = NOTIFY_MODES.includes(want) ? want : NOTIFY_MODES[(NOTIFY_MODES.indexOf(notifyMode) + 1) % 3]!
       savePrefs()
-      toast(notifyMode === 'off' ? 'Notifications off.' : notifyMode === 'always' ? 'You get a notification for every question Claude asks.' : 'You get a notification when Claude asks something while this window is in the background.')
+      toast(notifyMode === 'off' ? 'Notifications off.' : notifyMode === 'always' ? 'Notifications always: each time Claude waits on you, even while you type.' : "Notifications on: each time Claude waits on you, unless you're typing here.")
       draw()
       return true
     }
@@ -3149,6 +3166,7 @@ function key(k: string) {
     }
     return
   }
+  lastInputAt = Date.now()
   S.quitArmed = k === '\x03' ? S.quitArmed : false
   // With text selected: Ctrl+C copies it, Esc drops it, typing or Backspace replaces it in the input box.
   if (S.sel) {
@@ -3551,6 +3569,7 @@ function input(data: string) {
         return
       }
       pasteBuf += s.slice(0, end)
+      lastInputAt = Date.now()
       // A dropped or pasted image file goes with the message as the image, not as its path.
       const img = imagePath(pasteBuf)
       if (img) attachImage(img)
@@ -3568,6 +3587,8 @@ function input(data: string) {
     }
     const m = s.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])/)
     if (m) {
+      // A click (a button pressed, not a move or the wheel) is you at this tab.
+      if (m[4] === 'M' && Number(m[1]) < 64 && !(Number(m[1]) & 32)) lastInputAt = Date.now()
       mouse(Number(m[1]), Number(m[2]), Number(m[3]), m[4] === 'M')
       s = s.slice(m[0].length)
       continue

@@ -41,6 +41,7 @@ app/
   markdown.ts      Markdown to terminal text
   diff.ts, text.ts diffs and text width
   migrate.ts       moves the old ~/.threadline folder to ~/.clued
+  notify.ts        notifications: when one goes, and how each system posts it (and the Windows click handler)
 hooks/model.ts     the tag and topic model shared with the classic mod
 eval/              the comparison with plain Claude Code (see eval/README.md)
 docs/classic.md    the older tmux layout and its Claude Code mod

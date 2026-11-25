@@ -77,11 +77,22 @@ When Claude asks you something with options (its AskUserQuestion tool), the ques
 
 ## Notifications
 
-When Claude asks you something, or needs a permission, you get a notification with the question and the project folder, while the clued window is in the background. `/notify always` notifies even when it's in front, `/notify off` stops them, `/notify test` sends a sample.
+Each time Claude starts waiting on you (a reply that asks you something, a permission, a question card), you get a notification with a sound, showing the question and the project folder. Each wait notifies once.
 
-- **iTerm2, WezTerm, Ghostty and kitty** post the notification themselves, so a click on it opens the very tab that asked.
-- **Windows Terminal (and WSL)** gets a Windows toast. Windows has no way to open a given tab from a notification, so the tab marks itself instead: its title starts with `✋ 1 ·` and the tab and taskbar button turn yellow until you answer.
-- **Elsewhere** it's Notification Center on macOS and `notify-send` on Linux, and the tab title starts with ✋ while Claude waits.
+- `/notify on` (the default) notifies every time, unless you typed or clicked in this very tab in the last 15 seconds and it still has focus: then you are looking at it already. Focus alone doesn't silence it, because a terminal can't always say whether you are looking (clued starts out counting itself focused, and you can sit in front of a window while reading something else).
+- `/notify always` notifies even while you type here, `/notify off` stops them, `/notify test` sends a sample.
+
+Where it comes from, and what a click does:
+
+- **iTerm2, WezTerm, Ghostty and kitty** post the notification themselves, so a click on it opens the very tab that asked. kitty plays the system's notification sound; iTerm2, WezTerm and Ghostty play what the system's notification settings say for that terminal. clued also rings the terminal's bell, which each terminal plays or shows as it is set to.
+- **Windows Terminal (and WSL)** gets a Windows toast with the default notification sound, which stays in the Action Center. A click on it opens the very tab that asked and brings its window to the front, even with several windows and tabs. The tab's title also starts with `✋ 1 ·`, and the tab and taskbar button turn yellow, until you answer.
+- **Other terminals on Windows** get the same toast and tab title, but a click doesn't open the tab.
+- **macOS** (other terminals): Notification Center, with the Glass sound.
+- **Linux**: `notify-send`, which plays no sound itself, so clued also plays the freedesktop `message-new-instant` sound with `canberra-gtk-play`, or with `paplay` when that isn't installed. With neither, there's no sound. The tab title starts with ✋ while Claude waits.
+
+**How a click finds the tab in Windows Terminal.** Windows Terminal gives clued no way to name a tab from outside, so clued sets up a small click handler for your Windows user with the first toast. It writes `%LOCALAPPDATA%\clued\focus.ps1` and registers a `clued-focus:` link in `HKCU\Software\Classes\clued-focus` (your user only, no admin rights). The toast opens that link. The handler runs hidden, finds the tab by its title through Windows' UI Automation, selects it and brings its window to the front. The title ends with an invisible tag made from the tab's `WT_SESSION`, so two clued tabs on the same folder are told apart. It is set up only once, and again only when clued's handler changes. `/notify uninstall` removes both and turns notifications off. `/notify on` turns them back on, and the next toast sets the handler up again. With the profile setting `suppressApplicationTitle`, the tab can't be found by its title, so a click only brings the window to the front.
+
+Windows Terminal Preview 1.26 can post notifications itself (OSC 777, off by default: `compatibility.allowOSC777`). clued doesn't use that yet, so you won't get two notifications for one question.
 
 The notification shows the question's words, so they can appear on a shared screen or a lock screen. `/notify off` if that matters.
 

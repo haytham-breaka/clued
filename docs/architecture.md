@@ -45,7 +45,7 @@ To remove everything clued keeps, delete `~/.clued`; your sessions stay in Claud
 - `bin/clued` is a bash loop around `node app/main.ts`. `/reload` exits with code 75, and the loop starts the app again on the same session.
 - `/btw` runs a second Claude Code, forked from the session with `--fork-session` and `--no-session-persistence`, so the side question never enters the session itself.
 - `/plugin` runs Claude Code's own `claude plugin` CLI, then the session reloads its plugins.
-- Notifications use the terminal's own notification sequence where it has one, a Windows toast from WSL, `osascript` on macOS or `notify-send` on Linux.
+- Notifications (`app/notify.ts`) use the terminal's own notification sequence where it has one, a Windows toast from WSL, `osascript` on macOS or `notify-send` and a sound on Linux. In Windows Terminal a click runs a per-user `clued-focus:` handler that selects the tab through UI Automation (see [usage](usage.md#notifications)).
 
 ## The classic layout
 

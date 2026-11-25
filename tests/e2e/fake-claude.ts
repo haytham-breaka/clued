@@ -271,6 +271,8 @@ async function scenario(m: Msg) {
   // AskUserQuestion: Claude Code asks the app for permission to run it, and the answers come back
   // in the tool's input.
   if (t.includes('offer choices')) {
+    // "later": the card comes once the test writes release-ask.
+    if (t.includes('later')) while (!existsSync(`${dir}/release-ask`)) await sleep(40)
     const id = `ask-${Date.now()}`
     const questions = [
       { question: 'Which database should we use?', header: 'Database', multiSelect: false, options: [

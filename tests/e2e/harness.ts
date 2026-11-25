@@ -48,8 +48,8 @@ export async function launch(opts: LaunchOpts = {}) {
   }
   // The fake Claude Code; its own process writes no coverage.
   script('claude', `unset NODE_V8_COVERAGE\nexec node --no-warnings ${q(FAKE)} "$@"`)
-  // Windows toasts and clipboard (WSL), Linux and macOS notifications and clipboard: logged, never real.
-  for (const name of ['powershell.exe', 'notify-send'])
+  // Windows toasts and clipboard (WSL), Linux and macOS notifications, sounds and clipboard: logged, never real.
+  for (const name of ['powershell.exe', 'notify-send', 'canberra-gtk-play', 'paplay'])
     script(name, `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\ncase "$*" in *GetImage*) [ -f ${q(join(dir, 'clip.png'))} ] && echo 'C:\\fake\\clip.png' ;; esac\nexit 0`)
   // macOS: the clipboard's PNG (clip.png, when there is one) written to the file in the script's
   // \`POSIX file "…"\`, as AppleScript would; anything else is a notification.
