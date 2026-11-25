@@ -6,6 +6,7 @@
 import { preview } from './inbox.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Turn } from './session.ts'
+import type { Shell } from './shells.ts'
 
 export type TaskState = 'queued' | 'running' | 'done' | 'failed' | 'stopped'
 
@@ -56,6 +57,33 @@ export function agentFor(agents: Iterable<Agent>, to: string): Agent | undefined
   if (!to) return undefined
   for (const a of agents) if (a.taskId === to || a.id === to || a.alias === to || a.name === to) return a
   return undefined
+}
+
+/**
+ * The messages (turn keys) an agent or background command was working for, by its task id or its
+ * call's id: an agent's latest task's, a command's own (one an agent ran: that agent's). Undefined
+ * when the app doesn't know it, or knows no message for it.
+ */
+export function workedFor(agents: Iterable<Agent>, shells: readonly Shell[], id: string): string[] | undefined {
+  if (!id) return undefined
+  const all = [...agents]
+  const a = all.find(x => x.taskId === id || x.id === id)
+  const s = a ? undefined : shells.find(x => x.taskId === id || x.id === id)
+  const keys = a ? (a.tasks.at(-1)?.for ?? a.for) : s?.by ? (workedFor(all, [], s.by) ?? s.for) : s?.for
+  return keys?.length ? keys : undefined
+}
+
+/**
+ * The messages a turn Claude started on its own, after these agents or commands ended, follows up
+ * on: the ones they all worked for. Undefined when there are none, the app doesn't know one, or
+ * they worked for different messages (the caller guesses then).
+ */
+export function notifiedFor(agents: Iterable<Agent>, shells: readonly Shell[], ids: readonly string[]): string[] | undefined {
+  const all = [...agents]
+  const each = ids.map(id => workedFor(all, shells, id))
+  const first = each[0]
+  if (!first || !each.every(k => k && k.length === first.length && k.every(x => first.includes(x)))) return undefined
+  return first
 }
 
 /**

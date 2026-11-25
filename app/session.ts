@@ -8,6 +8,8 @@ import type { Board } from '../types/index.d.ts'
 import type { ToolUse } from './claude.ts'
 import { deletedAsked, hasMarks, lostRepliesAsked } from './inbox.ts'
 import type { Part } from './inbox.ts'
+import { shellsFromTurns } from './shells.ts'
+import { agentsFromTurns, notifiedFor } from './tasks.ts'
 
 export type Step = {
   tool: ToolUse
@@ -333,11 +335,16 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
         // (same key, so what you read stays read).
         if (ended && e.type === 'user' && ends[0]) {
           const id = ends[0].taskId || ends[0].toolUseId!
+          // About the messages the agents or commands that ended worked for, as live; else a guess.
+          // Read from the first turn that started one of them, not the whole file again each time.
+          const ids = ends.map(x => x.taskId || x.toolUseId!)
+          const since = turns.findIndex(t => t.steps.some(s => ends.some((x, i) => s.tool.id === x.toolUseId || (s.result ?? '').includes(ids[i]!))))
+          const told = since < 0 ? undefined : notifiedFor(agentsFromTurns(turns.slice(since)), shellsFromTurns(turns.slice(since)).list, ids)
           const from = turns.find(t => t.steps.some(s => (s.tool.name === 'Agent' || s.tool.name === 'Task') && (s.tool.id === ends[0]!.toolUseId || (s.result ?? '').includes(id))))
           finish()
           cur = newTurn('', at)
           cur.key = followKey(turns, id)
-          cur.followUp = from ? (from.followUp ?? [from.key]) : turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
+          cur.followUp = told ?? (from ? (from.followUp ?? [from.key]) : turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key))
           turns.push(cur)
           ended = false
           continue

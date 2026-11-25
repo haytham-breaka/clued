@@ -51,7 +51,7 @@ import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
 import type { Pulse } from './tasks.ts'
-import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, handingBack, isQuiet, nudgeText, pulseOf, QUIET_MS, resume as resumeRun, sendFailed, sendTask, taskArrived, touch, workingFor } from './tasks.ts'
+import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, handingBack, isQuiet, notifiedFor, nudgeText, pulseOf, QUIET_MS, resume as resumeRun, sendFailed, sendTask, taskArrived, touch, workingFor } from './tasks.ts'
 import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept, toggleSaved } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
@@ -86,6 +86,8 @@ const APP_GUIDE = [
   'Never wait on anything long in the foreground (CI runs, merges, polling loops, long test suites, anything over about',
   'a minute): run it in the background (Bash with run_in_background, or an agent) and reply to the user meanwhile, as',
   'their messages can only be answered between tool calls, so a 10-minute foreground wait leaves them unanswered for 10 minutes.',
+  'In a turn a background notification started (an agent or command ended), start every part with <<reply Tn>> for the',
+  'message that work was for; if it brings nothing new for the user, write no text at all.',
   'To react to the user\'s latest message, add "react" to your tag. The user likes reactions: use one whenever it fits.',
   '"✅" a small request you finished with nothing more to say: the reaction is the whole reply, no "Done" text;',
   '"👍" noted: an FYI, a decision, or a go-ahead you act on; "👀" seen, on it: a message sent while you were busy;',
@@ -619,7 +621,7 @@ function cancelJob(j: Job) {
 function firedTurn(now: number, source: string): Turn {
   const turn = newTurn('', now)
   turn.key = firedKey(now)
-  endedIdle = undefined
+  endedIdle = []
   const job = onFire(S.jobs, now, { turn: turn.key, source })
   turn.fired = job ? { prompt: job.prompt, source, job: job.toolId } : { source }
   turn.followUp = job?.for.length ? job.for : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
@@ -922,8 +924,11 @@ function start(resume?: string) {
   draw()
 }
 
-/** The first agent that ended while Claude was idle: Claude's next words answer it. */
-let endedIdle: string | undefined
+/** The agents and commands that ended while Claude was idle, first first: Claude's next words answer them. */
+let endedIdle: string[] = []
+const endIdle = (id: string | undefined) => {
+  if (id && !endedIdle.includes(id)) endedIdle.push(id)
+}
 
 /** The turn Claude's events belong to: the newest one still open. */
 const openTurn = () => S.turns.findLast(t => !t.isDone && !waiting(t))
@@ -957,11 +962,14 @@ function followUpTurn(): Turn {
   const bg = [...S.agents.values()].filter(a => a.isBackground)
   const back = bg.filter(a => a.endedAt && now - a.endedAt < 2 * 60 * 1000)
   const from = [...(back.length ? back : bg.filter(a => a.state === 'running')), ...S.shells.list.filter(x => x.endedAt && now - x.endedAt < 2 * 60 * 1000)]
-  const keys = from.length ? [...new Set(from.flatMap(a => a.for))] : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
+  // The ones whose end started it, when they all worked for the same messages: what Claude writes
+  // without a <<reply>> line is about those, not your latest message. Else a guess from what ended lately.
+  const told = notifiedFor(S.agents.values(), S.shells.list, endedIdle)
+  const keys = told ?? (from.length ? [...new Set(from.flatMap(a => a.for))] : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key))
   const turn = newTurn('', now)
   // Keyed by the agent whose end it answers, as the session file will show it on resume.
-  turn.key = endedIdle ? followKey(S.turns, endedIdle) : `follow-${now.toString(36)}`
-  endedIdle = undefined
+  turn.key = endedIdle[0] ? followKey(S.turns, endedIdle[0]) : `follow-${now.toString(36)}`
+  endedIdle = []
   turn.followUp = keys
   S.turns.push(turn)
   S.isWorking = true
@@ -1161,7 +1169,7 @@ function onEvent(e: ClaudeEvent) {
       // An agent's command: the agent is the task Claude Code names as its parent.
       const owner = e.parentTaskId ? [...S.agents.values()].find(x => x.taskId === e.parentTaskId) : undefined
       if (onShellTask(S.shells, e, Date.now(), { for: owner?.for ?? openFor(), ...(owner ? { by: owner.id } : {}) })) {
-        if (e.phase === 'done' && !t) endedIdle ??= e.taskId || e.toolUseId
+        if (e.phase === 'done' && !t) endIdle(e.taskId || e.toolUseId)
         break
       }
       if (e.phase === 'updated') break
@@ -1175,7 +1183,7 @@ function onEvent(e: ClaudeEvent) {
         // Its transcript is read once a second: what it did last is read now, so the view never has
         // it handed back before the steps that came first.
         followAgent(a)
-        if (!t) endedIdle ??= e.taskId || e.toolUseId
+        if (!t) endIdle(e.taskId || e.toolUseId)
         endRun(a, e.status === 'failed' ? 'failed' : e.status === 'stopped' || e.status === 'killed' ? 'stopped' : 'done', Date.now())
         if (e.text) {
           a.last = e.text
@@ -1452,7 +1460,7 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   const at = from ?? here()
   const now = Date.now()
   const turn = newTurn(text, now)
-  endedIdle = undefined
+  endedIdle = []
   if (opts.reaction) turn.reaction = opts.reaction
   if (opts.retry) turn.retry = opts.retry
   if (opts.deletes) turn.deletes = opts.deletes

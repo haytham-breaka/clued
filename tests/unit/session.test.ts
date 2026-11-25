@@ -187,6 +187,53 @@ describe('session files', () => {
     assignParts(turns, emptyBoard())
     assert.deepEqual(turns.slice(1, 3).map(t => t.parts?.map(p => p.id)), [['follow-bg-42:0'], ['follow-bg-42.2:0']])
   })
+  test('loadHistory: a turn a notification started follows up on what the ended agent or command worked for, not your latest message', async () => {
+    const note = (...ids: string[]) => ids.map(id => `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Done</summary>\n</task-notification>`).join('\n')
+    const ended = (text: string, at: string) => ({ type: 'assistant', timestamp: at, message: { stop_reason: 'end_turn', content: [{ type: 'text', text }] } })
+    const call = (id: string, name: string, input: Record<string, unknown>) => ({ type: 'assistant', message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name, input }] } })
+    write('notified', [
+      user('run the suite', { timestamp: '2026-11-25T10:00:00.000Z' }),
+      call('tu-b1', 'Bash', { command: 'npm test', run_in_background: true }),
+      user([{ type: 'tool_result', tool_use_id: 'tu-b1', content: 'Command running in background with ID: rb1. Output is being written to: /tmp/rb1.output.' }]),
+      ended('Started it.', '2026-11-25T10:00:01.000Z'),
+      user('fix the docs', { timestamp: '2026-11-25T10:01:00.000Z' }),
+      call('tu-a1', 'Agent', { description: 'Docs', run_in_background: true }),
+      user([{ type: 'tool_result', tool_use_id: 'tu-a1', content: 'Started. agentId: ag-1' }]),
+      ended('On it.', '2026-11-25T10:01:01.000Z'),
+      user('something else', { timestamp: '2026-11-25T10:02:00.000Z' }),
+      ended('Sure.', '2026-11-25T10:02:01.000Z'),
+      // The suite's command ended: about "run the suite", the reply without a line and the one with its own.
+      user(note('rb1'), { timestamp: '2026-11-25T10:03:00.000Z' }),
+      ended('The suite passed.\n\n<<reply T9>>\nAnd the other one.', '2026-11-25T10:03:01.000Z'),
+      user('and the readme', { timestamp: '2026-11-25T10:04:00.000Z' }),
+      // Sent more for "and the readme": the agent's end is about that one now.
+      call('sm-1', 'SendMessage', { to: 'ag-1', message: 'The readme too.' }),
+      user([{ type: 'tool_result', tool_use_id: 'sm-1', content: 'Sent.' }]),
+      ended('Asked it.', '2026-11-25T10:04:01.000Z'),
+      user(note('ag-1'), { timestamp: '2026-11-25T10:05:00.000Z' }),
+      ended('The docs and readme are fixed.', '2026-11-25T10:05:01.000Z'),
+      // Two that worked for different messages: a guess, as before (the first one's Agent call).
+      user(note('ag-1', 'rb1'), { timestamp: '2026-11-25T10:06:00.000Z' }),
+      ended('Both again.', '2026-11-25T10:06:01.000Z'),
+      // One the app knows nothing of: your latest message.
+      user(note('who'), { timestamp: '2026-11-25T10:07:00.000Z' }),
+      ended('Something ended.', '2026-11-25T10:07:01.000Z'),
+    ])
+    const turns = S.loadHistory(CWD, 'notified')
+    const key = (text: string) => turns.find(t => t.text === text)!.key
+    const follow = (answer: string) => turns.find(t => t.answer === answer)!.followUp
+    assert.deepEqual(follow('The suite passed.\n\n<<reply T9>>\nAnd the other one.'), [key('run the suite')])
+    assert.deepEqual(follow('The docs and readme are fixed.'), [key('and the readme')])
+    assert.deepEqual(follow('Both again.'), [key('fix the docs')])
+    assert.deepEqual(follow('Something ended.'), [key('and the readme')])
+    const { assignParts } = await import('../../app/inbox.ts')
+    const { emptyBoard } = await import('../../hooks/model.ts')
+    const board = emptyBoard()
+    board.topics.push({ id: 'T1', title: 'Suite', status: 'done', messageKeys: [key('run the suite')], updatedAt: 0 } as never)
+    assignParts(turns, board)
+    // The part with no line is for the command's message; the one with a line follows it.
+    assert.deepEqual(turns.find(t => t.key === 'follow-rb1')!.parts!.map(p => [p.to, p.text]), [[['T1'], 'The suite passed.'], [['T9'], 'And the other one.']])
+  })
   test('loadHistory: a compaction marks the turn it came in (what came before is left to the summary)', () => {
     write('compact', [
       user('first', { timestamp: '2026-11-25T10:00:00.000Z' }),

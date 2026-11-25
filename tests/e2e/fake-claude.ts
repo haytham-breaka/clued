@@ -361,6 +361,25 @@ async function scenario(m: Msg) {
     say('Sent helper one more to do.')
     return result()
   }
+  // A background agent for this message; the next message runs a quick background command of its own.
+  // On release-wj-end the agent ends and Claude, in a turn of its own, writes about it without a
+  // <<reply>> line, then a part with one for the quick command's message.
+  if (t.startsWith('start a watched job')) {
+    tool('wj-1', 'Agent', { description: 'Watched job', subagent_type: 'general-purpose', prompt: 'Watch the job.', run_in_background: true })
+    toolResult('wj-1', 'Async agent launched successfully. agentId: wj-7')
+    return finish(m, 'Started the watched job.', 'claude')
+  }
+  if (t.startsWith('meanwhile, a quick command')) {
+    const watched = topics.at(-1)!
+    tool('qc-1', 'Bash', { command: 'true', description: 'Quick check', run_in_background: true })
+    toolResult('qc-1', 'Command running in background with ID: bqc1. Output is being written to: /tmp/bqc1.output.', false, undefined, { backgroundTaskId: 'bqc1' })
+    out({ type: 'system', subtype: 'task_notification', task_id: 'bqc1', tool_use_id: 'qc-1', status: 'completed', summary: 'Background command "Quick check" completed (exit code 0)' })
+    finish(m, 'Ran the quick check.')
+    if (!(await release('wj-end', 20_000))) return
+    out({ type: 'system', subtype: 'task_notification', task_id: 'wj-7', tool_use_id: 'wj-1', status: 'completed', summary: 'Watched job finished' })
+    say(`The watched job is done.\n\n<<reply ${m.topic}>>\nThe quick check passed too.\n${tag([{ id: watched, status: 'done' }])}`)
+    return result()
+  }
   // A background shell command, as Claude Code runs one: the Bash call, its task_started, the result
   // naming its id and output file; output appended on release-bsh-more; on release-bsh-end its last
   // line, task_updated and task_notification, and Claude's follow-up in a turn of its own.

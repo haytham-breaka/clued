@@ -7,8 +7,9 @@ import { notStarted, panelLines, waited } from '../../app/panel.ts'
 import type { Agent, PanelCtx } from '../../app/panel.ts'
 import type { Step, Turn } from '../../app/session.ts'
 import {
-  agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, currentTask, cutLabel, endRun, firstTask, isQuiet, messageText, nudgeText, pulseOf, QUIET_MS, resume, sendFailed, sendTask, taskArrived, taskTitle, todosOf, touch, workingFor,
+  agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, currentTask, cutLabel, endRun, firstTask, isQuiet, messageText, notifiedFor, nudgeText, pulseOf, QUIET_MS, resume, sendFailed, sendTask, taskArrived, taskTitle, todosOf, touch, workedFor, workingFor,
 } from '../../app/tasks.ts'
+import { newShells, onShellCall } from '../../app/shells.ts'
 import { C } from '../../app/text.ts'
 import type { Line } from '../../app/text.ts'
 import type { Pulse } from '../../app/tasks.ts'
@@ -51,6 +52,36 @@ describe('tasks: titles, ids and lookups', () => {
     for (const to of ['ag-1', 'a1', 'fixer', 'Fix the build']) assert.equal(agentFor([a], to), a)
     assert.equal(agentFor([a], 'nobody'), undefined)
     assert.equal(agentFor([a], ''), undefined)
+  })
+  test('workedFor: an agent\'s latest task\'s messages, a command\'s own, one an agent ran its agent\'s', () => {
+    const a = agent()
+    sendTask(a, { to: 'ag-1', message: 'And the docs.' }, NOW + 1, ['k2'], 'sm-1')
+    const sh = newShells()
+    onShellCall(sh, { id: 'b1', name: 'Bash', input: { command: 'npm test', run_in_background: true } }, NOW, { for: ['k3'] })
+    onShellCall(sh, { id: 'b2', name: 'Bash', input: { command: 'make', run_in_background: true } }, NOW, { by: 'a1', for: ['k1'] })
+    onShellCall(sh, { id: 'b3', name: 'Bash', input: { command: 'ls', run_in_background: true } }, NOW, { for: [] })
+    sh.list[0]!.taskId = 'bsh-1'
+    // By its task id or its call's id.
+    for (const id of ['ag-1', 'a1']) assert.deepEqual(workedFor([a], sh.list, id), ['k2'])
+    for (const id of ['bsh-1', 'b1']) assert.deepEqual(workedFor([a], sh.list, id), ['k3'])
+    assert.deepEqual(workedFor([a], sh.list, 'b2'), ['k2'])
+    // Its agent gone from the list: the command's own.
+    assert.deepEqual(workedFor([], sh.list, 'b2'), ['k1'])
+    // No message, unknown, no id.
+    assert.equal(workedFor([a], sh.list, 'b3'), undefined)
+    assert.equal(workedFor([a], sh.list, 'nobody'), undefined)
+    assert.equal(workedFor([a], sh.list, ''), undefined)
+    assert.deepEqual(workedFor([agent({ tasks: [] })], [], 'a1'), ['k1'])
+  })
+  test('notifiedFor: the messages all the ended ones worked for; none when they differ or one is unknown', () => {
+    const a = agent()
+    const b = agent({ id: 'a2', taskId: 'ag-2', for: ['k1', 'k2'], tasks: [firstTask({}, NOW, ['k1', 'k2'])] })
+    const c = agent({ id: 'a3', taskId: 'ag-3', for: ['k2', 'k1'], tasks: [firstTask({}, NOW, ['k2', 'k1'])] })
+    assert.deepEqual(notifiedFor([a, b, c], [], ['ag-1']), ['k1'])
+    assert.deepEqual(notifiedFor([a, b, c], [], ['ag-2', 'ag-3']), ['k1', 'k2'])
+    assert.equal(notifiedFor([a, b, c], [], ['ag-1', 'ag-2']), undefined)
+    assert.equal(notifiedFor([a, b, c], [], ['ag-1', 'nobody']), undefined)
+    assert.equal(notifiedFor([a, b, c], [], []), undefined)
   })
 })
 

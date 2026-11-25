@@ -241,3 +241,48 @@ describe('background commands', () => {
     })
   })
 })
+
+/** The quote on top of the reply bubble that starts with `text` (its last row with it: the panel lists replies too): what it answers. */
+const quoteOf = (screen: string, text: string) => {
+  const ls = screen.split('\n')
+  return ls[ls.findLastIndex(l => l.includes(text)) - 1]?.match(/↩ (.*?) *─*╮/)?.[1] ?? ''
+}
+
+describe('Claude\'s own turn after an agent or command ended', () => {
+  test('words with no <<reply>> line are about what the ended one worked for; a part with a line follows it', () =>
+    withApp({ width: 120, height: 50 }, async app => {
+      await app.send('start a watched job')
+      await app.waitIdle('Started the watched job.')
+      // Your latest message, with a command of its own that ended a moment ago.
+      await app.send('meanwhile, a quick command')
+      await app.waitIdle('Ran the quick check.')
+      app.release('wj-end')
+      const s = await app.waitIdle('The quick check passed too.')
+      assert.equal(quoteOf(s, 'The watched job is done.'), '“start a watched job”')
+      assert.equal(quoteOf(s, 'The quick check passed too.'), '“meanwhile, a quick command”')
+      assert.match(s, /✓ start a watched job/)
+    }))
+
+  test('on resume too: a command\'s end is about its message, not your latest one', () => {
+    const t0 = Date.now() - 3 * 60_000
+    const iso = (ms: number) => new Date(t0 + ms).toISOString()
+    const ask = (text: string, topic: string, at: number) => ({ type: 'user', timestamp: iso(at), message: { role: 'user', content: [{ type: 'text', text }, { type: 'text', text: `[clued] This message is topic ${topic}.` }] } })
+    const said = (text: string, at: number) => ({ type: 'assistant', timestamp: iso(at), message: { stop_reason: 'end_turn', content: [{ type: 'text', text }] } })
+    const setup = (a: { home: string; work: string }) =>
+      writeSession(a.home, a.work, 'old-n', [
+        ask('run the suite for me', 'T1', 0),
+        { type: 'assistant', timestamp: iso(1000), message: { content: [{ type: 'tool_use', id: 'tu-n1', name: 'Bash', input: { command: 'npm test', description: 'Run the suite', run_in_background: true } }] } },
+        { type: 'user', timestamp: iso(1100), message: { content: [{ type: 'tool_result', tool_use_id: 'tu-n1', content: 'Command running in background with ID: rn1. Output is being written to: /tmp/rn1.output.' }] }, toolUseResult: { backgroundTaskId: 'rn1' } },
+        said('Started the suite.', 2000),
+        ask('what is the port', 'T2', 30_000),
+        said('It is 8137.', 31_000),
+        { type: 'user', timestamp: iso(60_000), message: { role: 'user', content: '<task-notification>\n<task-id>rn1</task-id>\n<tool-use-id>tu-n1</tool-use-id>\n<status>completed</status>\n<summary>Background command "Run the suite" completed (exit code 0)</summary>\n</task-notification>' } },
+        said('The suite passed.\n\n<<reply T2>>\nAnd the port is still 8137.', 61_000),
+      ])
+    return withApp({ setup, args: ['--resume', 'old-n'], ready: 'And the port is still 8137.', width: 120, height: 50 }, async app => {
+      const s = app.screen()
+      assert.equal(quoteOf(s, 'The suite passed.'), '“run the suite for me”')
+      assert.equal(quoteOf(s, 'And the port is still 8137.'), '“what is the port”')
+    })
+  })
+})
