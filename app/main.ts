@@ -2538,6 +2538,11 @@ function mouse(b: number, x: number, y: number, isPress: boolean) {
       S.isOnPanel = onPanel
       draw()
     }
+    // Off the panel, its rows go back to their start: a sideways scroll is for reading one long row.
+    if (!onPanel && S.hscroll) {
+      S.hscroll = 0
+      draw()
+    }
     const owner = x > S.chatLeft && y > S.chatTop && y <= S.chatTop + S.chatRows ? (S.owners[y - 1 - S.chatTop + S.chatOrigin] ?? '') : ''
     if (owner !== S.hover) {
       S.hover = owner
@@ -2574,12 +2579,11 @@ function mouse(b: number, x: number, y: number, isPress: boolean) {
     else S.chatScroll = Math.max(0, S.chatScroll + d)
     return draw()
   }
-  if (b === 66 || b === 68) {
-    S.hscroll = Math.max(0, S.hscroll - 4)
-    return draw()
-  }
-  if (b === 67 || b === 69) {
-    S.hscroll += 4
+  // Sideways wheel (or Shift+wheel) slides the panel's rows, only with the pointer on the panel: a
+  // trackpad's sideways drift over the chat left them shifted, their starts cut off.
+  if (b === 66 || b === 67 || b === 68 || b === 69) {
+    if (!panelShown() || x > pw) return
+    S.hscroll = b === 66 || b === 68 ? Math.max(0, S.hscroll - 4) : S.hscroll + 4
     return draw()
   }
   // In the chat or the input box a press may start a selection, so its click happens on release.

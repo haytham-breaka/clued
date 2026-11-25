@@ -376,7 +376,7 @@ describe('panel', () => {
       assert.match(s, /^● +1│/m)
       await app.waitFor(() => app.read('home/.clued/panel.json').includes('"folded":true'))
       await app.click('☰')
-      s = await app.waitFor('☰ Inbox')
+      s = await app.waitFor('☰ Overview')
       assert.equal(app.divider(), 35)
       // Drag the divider to make the panel wider.
       await app.drag({ row: 10, col: 35 }, { row: 10, col: 46 })
@@ -390,6 +390,14 @@ describe('panel', () => {
       app.raw('\x1b[<67;5;10M')
       await app.waitFor(/‹\w/)
       app.raw('\x1b[<66;5;10M')
+      // Sideways over the chat does nothing; leaving the panel puts its rows back at their start.
+      app.raw('\x1b[<67;5;10M')
+      await app.waitFor(/‹\w/)
+      app.raw('\x1b[<35;80;10M')
+      await app.waitGone(/‹\w/)
+      app.raw('\x1b[<67;80;10M\x1b[<35;80;11M')
+      await new Promise(r => setTimeout(r, 300))
+      assert.doesNotMatch(app.screen(), /‹\w/)
       // The wheel over the panel's empty part.
       app.wheel(30, 5, true)
       app.wheel(30, 5, false)
@@ -399,7 +407,7 @@ describe('panel', () => {
     withApp({ width: 50, height: 20 }, async app => {
       await app.send('hi')
       const s = await app.waitFor('Echo: hi')
-      assert.ok(!s.includes('Inbox'))
+      assert.ok(!s.includes('Overview'))
       assert.equal(app.divider() === 0 || !s.split('\n')[0]!.includes('│'), true)
     }))
 

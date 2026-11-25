@@ -250,7 +250,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
   }
 
   const L: Line[] = []
-  L.push(row(width, [{ text: '☰ Inbox', style: { bold: true, fg: C.cyan }, action: () => p.fold(true) }], [
+  L.push(row(width, [{ text: '☰ Overview', style: { bold: true, fg: C.cyan }, action: () => p.fold(true) }], [
     p.isWorking ? { text: '● working', style: { fg: C.cyan } } : { text: '○ idle', style: { fg: C.faint } },
   ]))
   L.push(row(width, [
