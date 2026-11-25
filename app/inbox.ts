@@ -136,6 +136,8 @@ export type MessageRef = {
   topicId?: string
   state: MessageState
   replyId?: string
+  /** The text of that reply (the panel shows its gist under the message). */
+  replyText?: string
   active?: boolean
   stale?: boolean
   queued?: boolean
@@ -170,6 +172,44 @@ export function preview(text: string, max = 80): string {
   return p
 }
 const previews = new Map<string, string>()
+
+/** Words that only link a restated question to its answer ("… is 8137"). */
+const LINKS = new Set(['is', 'are', 'was', 'were', 'uses', 'use', 'has', 'have', 'set', 'to', 'at', 'of', 'the', 'a', 'an', 'in', 'on', 'as'])
+
+/**
+ * The gist of a reply, in one line of `max` cells: its first sentence, without the words at its start
+ * that only restate your message ("The port in server.toml is 8137" to "8137"), cut to fit. For a
+ * request, the thing it changed stays as a label: "workers in server.toml is now 6" to "workers: now 6".
+ */
+export function answerGist(message: string, reply: string, max: number): string {
+  // "Done:" says nothing the ✓ doesn't.
+  const first = (preview(reply, 2000).replace(/^done[:.]\s+/i, '').split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}"“(])/u)[0] ?? '')
+  const asked = new Set(preview(message, 2000).toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])
+  const pieces = (t: string) => t.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []
+  const restated = (t: string) => pieces(t).length > 0 && pieces(t).every(w => asked.has(w))
+  const linking = (t: string) => pieces(t).length === 1 && LINKS.has(pieces(t)[0]!)
+  const toks = first.split(' ')
+  // Restated words and the linking words between them ("The port in server.toml is"), if any were
+  // restated; the first restated words in a row are the thing it is about.
+  let i = 0
+  let any = false
+  const thing: string[] = []
+  while (i < toks.length - 1 && (restated(toks[i]!) || linking(toks[i]!))) {
+    const tok = toks[i++]!
+    any = restated(tok) || any
+    if (!linking(tok) && thing.length === i - 1 - leading(toks, linking)) thing.push(tok.replace(/[,:;]+$/, ''))
+  }
+  if (!any) i = 0
+  const rest = toks.slice(i).join(' ')
+  const gist = i && thing.length && !/\?\s*$/.test(message) ? `${thing.join(' ')}: ${rest}` : rest
+  return gist.length > max ? `${gist.slice(0, max - 1).trimEnd()}…` : gist
+}
+/** How many linking words a sentence starts with ("The …"). */
+const leading = (toks: string[], linking: (t: string) => boolean) => {
+  let n = 0
+  while (n < toks.length && linking(toks[n]!)) n++
+  return n
+}
 
 /** The last question in a part, if it ends on one (what "waiting on you" shows). */
 export function questionOf(text: string): string | undefined {
@@ -248,7 +288,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)
     // The tag that came with a reply stamps its topic a moment later: that is still the reply.
     const event = updatedAt === turn.at ? 'sent' : repliedAt && updatedAt - repliedAt < 10_000 ? 'replied' : 'status'
-    messages.push({ turn, topicId, state, replyId, updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}) })
+    messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}) })
   })
   // What is being worked on first, then what waits in queue (oldest first: Claude takes them in
   // order), then the rest by newest activity; the same moment keeps the later message on top.

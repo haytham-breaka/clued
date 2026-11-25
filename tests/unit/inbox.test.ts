@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyBoard, keyOf } from '../../hooks/model.ts'
-import { assignParts, hasMarks, inbox, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
+import { answerGist, assignParts, hasMarks, inbox, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
 import type { Turn } from '../../app/session.ts'
 import type { Board, Topic } from '../../types/index.d.ts'
 
@@ -32,6 +32,20 @@ describe('reply marks', () => {
   test('a numbered question names its message and remembers which', () => {
     assert.deepEqual(splitAnswer('<<reply T90.2>>\nThe second one.', []), [{ to: ['T90'], text: 'The second one.', subs: ['T90.2'] }])
     assert.deepEqual(splitAnswer('', ['T1']), [])
+  })
+})
+
+describe('the gist of an answer', () => {
+  test('its first sentence, without the words that restate your message, cut to fit', () => {
+    assert.equal(answerGist('What port does server.toml use?', 'The port in server.toml is 8137. It is set on line 3.', 30), '8137.')
+    assert.equal(answerGist('Who is the maintainer?', 'Done: the maintainer named in the README is **Dana Reyes**.', 40), 'named in the README is Dana Reyes.')
+    // Nothing restated: the sentence as it is; too long: cut.
+    assert.equal(answerGist('Set nails to 100.', 'I set nails to 100 in stock.csv, up from 120.', 20), 'I set nails to 100…')
+    // A request: the thing it changed stays, as a label.
+    assert.equal(answerGist('Set workers in server.toml to 8.', 'Done: workers in server.toml is now 6, per your correction.', 32), 'workers: now 6, per your correc…')
+    assert.equal(answerGist('Set the tax rate in pricing.py to 0.2.', 'The tax rate in pricing.py is now 0.2.', 40), 'tax rate: now 0.2.')
+    // Everything restated: the last word stays.
+    assert.equal(answerGist('workers is 8?', 'workers is 8.', 20), '8.')
   })
 })
 

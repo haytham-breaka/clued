@@ -1,7 +1,7 @@
 // The panel on the left: replies you haven't read, questions waiting on you, who is working on
 // what, where your messages stand. Narrower than MIN_FULL (or folded) it is an icon view.
 
-import { matches, preview } from './inbox.ts'
+import { answerGist, matches, preview } from './inbox.ts'
 import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
@@ -277,7 +277,8 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
   // Every section scrolls on its own, inside a box no taller than it needs; the heights are fitted to
   // the panel so the panel itself never has to scroll. The wheel over a section moves that section.
   const iw = width - 1 // a section row: one column for its scrollbar, then this
-  type Section = { id: string; header: Line[]; rows: Line[]; footer?: Line[]; cap: number }
+  /** `extra`: a second row for some rows (by index), shown only when the panel has room for them. */
+  type Section = { id: string; header: Line[]; rows: Line[]; footer?: Line[]; cap: number; extra?: (Line | undefined)[] }
   const sections: Section[] = []
   const now = Date.now()
   const { unread, waiting, messages } = p.box
@@ -473,6 +474,12 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
           { text: slide(preview(m.turn.text, 200), p.hscroll), style: { dim: m.state === 'done' && !isOn && !isPicked, bold: isOn || isPicked, fg: isOn ? C.blue : isPicked ? C.yellow : undefined }, action: open },
         ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? 'in progress' : m.queued ? 'in queue' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active || m.queued ? C.cyan : C.faint }, action: open }])
       }),
+      // Under the newest answered messages, the answer's gist (→ 8137); a click opens the reply.
+      extra: found.map((m, i) => {
+        if (!m.replyId || !m.replyText || m.state === 'lost') return undefined
+        const go = () => p.openPart(m.replyId!)
+        return row(iw, [{ text: '   → ', style: { fg: C.faint }, action: go }, { text: answerGist(m.turn.text, m.replyText, iw - 6), style: { fg: C.gray }, action: go }])
+      }),
     })
 
   // Fit: each section gets the rows it has, up to its cap; while that is more than the panel holds,
@@ -488,6 +495,26 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
     if (k < 0) break
     size[k]!--
   }
+
+  // Room left over: the answers under your messages, newest first, while the whole list still shows.
+  let spare = room - size.reduce((a, b) => a + b, 0)
+  sections.forEach((sec, si) => {
+    if (!sec.extra || spare <= 0 || size[si]! < sec.rows.length) return
+    // Never so many that the box would have to scroll your oldest messages away.
+    let fits = Math.min(spare, sec.cap - sec.rows.length)
+    const rows: Line[] = []
+    sec.rows.forEach((r, i) => {
+      rows.push(r)
+      const x = sec.extra![i]
+      if (x && fits > 0) {
+        rows.push(x)
+        fits--
+        spare--
+      }
+    })
+    sec.rows = rows
+    size[si] = Math.min(rows.length, sec.cap)
+  })
 
   const lists: Record<string, { start: number; end: number; total: number; max: number }> = {}
   sections.forEach((sec, si) => {

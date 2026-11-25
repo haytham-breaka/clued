@@ -48,6 +48,32 @@ describe('your recent messages', () => {
     assert.ok(!lines.some(l => l.includes('no update') || l.includes('⚠')))
   })
 
+  test('under the newest answered messages, the gist of the answer, room allowing', () => {
+    let opened = ''
+    const ms = Array.from({ length: 10 }, (_, i) => ref(`What is value ${i}?`, { state: 'done', replyId: `r${i}`, replyText: `Value ${i} is ${100 + i}. More words follow here.` }))
+    const p = ctx(ms, { openPart: id => (opened = id) })
+    const lines = text(p)
+    // The restated question goes: just the answer, under its message.
+    const at = lines.findIndex(l => l.includes('What is value 0?'))
+    assert.match(lines[at + 1]!, /→ 100\.\s*$/)
+    // One under each of them; a click opens the reply.
+    assert.equal(lines.filter(l => l.includes('→ ')).length, 10)
+    panelLines(p, 40).lines.find(l => l.map(s => s.text).join('').includes('→ 100.'))!.find(s => s.action)!.action!()
+    assert.equal(opened, 'r0')
+    // A lost reply, or no reply, has none.
+    assert.ok(!text(ctx([ref('gone', { state: 'lost', replyId: 'x', replyText: 'Lost words.' }), ref('fresh', { state: 'claude' })])).some(l => l.includes('→')))
+    // A short panel: your messages first, the answers only in the rows left over (none here).
+    const short = text(ctx(ms, { height: 16 }))
+    assert.ok(!short.some(l => l.includes('→')))
+    // More messages than the box has rows for the answers too: the newest get theirs.
+    const many = text(ctx(Array.from({ length: 15 }, (_, i) => ref(`What is value ${i}?`, { state: 'done', replyId: `r${i}`, replyText: `Value ${i} is ${100 + i}.` })), { height: 60 }))
+    assert.equal(many.filter(l => l.includes('→ ')).length, 5)
+    assert.match(many[many.findIndex(l => l.includes('What is value 0?')) + 1]!, /→ 100\./)
+    // Some room left: some answers, and never so many that a message scrolls out of its box.
+    const mid = text(ctx(ms.slice(0, 4), { height: 12 }))
+    assert.ok(mid.some(l => l.includes('→')) && ['0', '1', '2', '3'].every(i => mid.some(l => l.includes(`What is value ${i}?`))))
+  })
+
   test('a lost reply still says so', () => {
     assert.match(text(ctx([ref('gone', { state: 'lost' })])).find(l => l.includes('gone'))!, /⚠ gone +reply lost/)
   })

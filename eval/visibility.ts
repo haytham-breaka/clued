@@ -141,7 +141,7 @@ const GLANCE_SYSTEM = [
 ].join(' ')
 
 const LEGEND = {
-  A: 'The screen is the clued app. Left, its panel: "Unread" lists new replies, "Waiting on you" lists questions for you, and "Your recent messages" lists your messages newest first with a mark: ⏳ Claude is on it, no reply yet; ▶ replied, still owes work; ⠋ in progress: being worked on; ✋ waiting on you; ✓ done; ✕ failed; ○ not answered; ⚠ reply lost. Right, the end of the chat: your messages, and Claude\'s replies, each headed with ↩ and the message it answers (short replies without a box, the answer on the line under the ↩).',
+  A: 'The screen is the clued app. Left, its panel: "Unread" lists new replies, "Waiting on you" lists questions for you, and "Your recent messages" lists your messages newest first with a mark: ⏳ Claude is on it, no reply yet; ▶ replied, still owes work; ⠋ in progress: being worked on; ✋ waiting on you; ✓ done; ✕ failed; ○ not answered; ⚠ reply lost; a "→" row under a message is the start of its answer. Right, the end of the chat: your messages, and Claude\'s replies, each headed with ↩ and the message it answers (short replies without a box, the answer on the line under the ↩).',
   B: 'The screen is Claude Code in a terminal: lines starting with ">" are your messages; lines starting with "⏺" are Claude\'s text and its tool calls (⎿ the tool\'s result).',
 }
 
