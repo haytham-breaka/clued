@@ -29,6 +29,8 @@ import {
   stripTag,
 } from '../hooks/model.ts'
 import { agentLines, chatLines, requestLines, stepLabel } from './chat.ts'
+import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.ts'
+import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
 import { assignParts, hasMarks, inbox, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
@@ -111,6 +113,8 @@ const S = {
   replyTo: null as ReplyTo | null,
   isWorking: false,
   permissions: [] as Permission[],
+  /** Claude's multiple-choice questions (AskUserQuestion) waiting for an answer, first one on the card. */
+  asks: [] as Ask[],
   picker: null as { sessions: SessionInfo[]; at: number } | null,
   menuAt: 0,
   toast: '' as string,
@@ -219,7 +223,7 @@ const notified = new Set<string>()
  */
 let tabMark = ''
 function markTab() {
-  const n = S.box.waiting.length + S.permissions.length
+  const n = S.box.waiting.length + S.permissions.length + S.asks.length
   const where = cwd.split('/').pop() || cwd
   const title = `${n ? `✋ ${n} · ` : ''}clued · ${where}`
   if (title === tabMark) return
@@ -604,6 +608,7 @@ function start(resume?: string) {
   S.claude?.close()
   S.isWorking = false
   S.permissions = []
+  S.asks = []
   if (resume) {
     S.sessionId = resume
     S.turns = loadHistory(cwd, resume)
@@ -814,6 +819,8 @@ function onEvent(e: ClaudeEvent) {
     }
     case 'result':
       finishTurn(e.text, e.isError, e.durationMs)
+      // A question still on the card when the turn ends (interrupted) can no longer be answered.
+      S.asks = []
       S.costUsd = e.costUsd || S.costUsd
       if (e.contextWindow) {
         S.contextWindow = e.contextWindow
@@ -835,6 +842,15 @@ function onEvent(e: ClaudeEvent) {
       seenModes.add(e.mode)
       statusSoon()
       break
+    case 'ask': {
+      const a = newAsk(e.requestId, e.input)
+      // No question in it: ask about the tool like any other.
+      if (!a) return onEvent({ kind: 'permission', requestId: e.requestId, tool: 'AskUserQuestion', input: e.input })
+      S.asks.push(a)
+      if (notifyMode === 'always' || (notifyMode === 'on' && !S.isFocused))
+        notify(`Claude asks you · ${cwd.split('/').pop() || cwd}`, preview(a.questions.map(q => q.question).join(' · '), 200))
+      break
+    }
     case 'status':
       if (e.text === 'compacting') toast('Compacting the conversation…')
       break
@@ -848,6 +864,7 @@ function onEvent(e: ClaudeEvent) {
         }
         S.isWorking = false
         S.claude = undefined
+        S.asks = []
         for (const a of S.agents.values()) if (a.state === 'running') { a.state = 'stopped'; a.endedAt = Date.now() }
       }
       break
@@ -1569,6 +1586,9 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
       { text: ' Deny (n) ', style: { bg: C.red, fg: 16, bold: true }, action: () => answerPermission(false) },
     ])
   }
+  // Claude's question
+  const ask = perm ? undefined : S.asks[0]
+  if (ask) L.push(...askLines(ask, w, { pick: n => pickAsk(n), send: () => sendAsk(), dismiss: () => dismissAsk() }))
   // Slash menu
   const items = menuItems()
   if (items.length && !perm) {
@@ -1606,7 +1626,7 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : ''
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search ? C.yellow : req ? C.blue : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
-  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = S.sel?.area === 'input' ? rowSpans(inner) : []
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
@@ -1921,6 +1941,37 @@ function answerPermission(allow: boolean) {
   draw()
 }
 
+function pickAsk(n: number) {
+  const a = S.asks[0]
+  if (a) pick(a, n)
+  draw()
+}
+
+/** Enter on Claude's question: what's typed in the box is the answer, else the options picked on the card. */
+function sendAsk() {
+  const a = S.asks[0]
+  if (!a) return
+  const typed = S.text.trim()
+  const r = answer(a, typed)
+  if (r === 'empty') return toast('Pick an option, or type your own answer.')
+  if (typed) {
+    S.text = ''
+    S.cursor = 0
+  }
+  if (r === 'done') {
+    S.asks.shift()
+    logSend('ask', { answers: a.answers })
+    S.claude?.answerAsk(a.requestId, answeredInput(a))
+  }
+  draw()
+}
+
+function dismissAsk() {
+  const a = S.asks.shift()
+  if (a) S.claude?.answerAsk(a.requestId, a.input, DISMISSED)
+  draw()
+}
+
 function insert(s: string) {
   cutSelection()
   S.text = S.text.slice(0, S.cursor) + s + S.text.slice(S.cursor)
@@ -2061,11 +2112,16 @@ function key(k: string) {
     return draw()
   }
   if (S.permissions.length && (k === 'y' || k === 'Y' || k === 'n' || k === 'N')) return answerPermission(k.toLowerCase() === 'y')
+  // Claude's question: a number picks an option, unless you are typing your own answer.
+  const asking = !S.permissions.length && S.asks.length > 0 && !S.search
+  if (asking && !S.text && /^[1-9]$/.test(k)) return pickAsk(Number(k) - 1)
 
   const items = menuItems()
   switch (k) {
     case '\r':
-      logSend('enter', { text: S.text, ...(S.search ? { mode: 'search' } : S.permissions.length ? { mode: 'permission' } : {}) })
+      logSend('enter', { text: S.text, ...(S.search ? { mode: 'search' } : S.permissions.length ? { mode: 'permission' } : asking ? { mode: 'ask' } : {}) })
+      // A slash command still runs while Claude asks; anything else answers it.
+      if (asking && !items.length) return sendAsk()
       if (S.search) {
         const list = recentList()
         const m = list.find(x => x.turn.key === S.picked) ?? list[0]
@@ -2243,7 +2299,8 @@ function key(k: string) {
         S.cursor = 0
         // The next menu starts at its first item, not where this one was left.
         S.menuAt = 0
-      } else if (S.replyTo) S.replyTo = null
+      } else if (asking) dismissAsk()
+      else if (S.replyTo) S.replyTo = null
       else if (S.picked) S.picked = ''
       else if (S.agentView || S.requestView) closeAgent()
       else if (S.isWorking) {

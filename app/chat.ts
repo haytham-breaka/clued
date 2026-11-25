@@ -99,6 +99,10 @@ export function stepLabel(s: Step, cwd: string): { icon: string; text: string } 
       return { icon: '☐', text: 'Updated the plan' }
     case 'Demo':
       return { icon: '·', text: String(i.step ?? '') }
+    case 'AskUserQuestion': {
+      const qs: any[] = Array.isArray(i.questions) ? i.questions : []
+      return { icon: '?', text: `Asked you: ${qs.map(q => String(q?.question ?? '')).join(' · ')}` }
+    }
     case 'Skill':
       return { icon: '✦', text: `Skill ${String(i.skill ?? '')}` }
     default: {

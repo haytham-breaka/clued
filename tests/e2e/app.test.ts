@@ -76,6 +76,57 @@ describe('app', () => {
       assert.deepEqual(app.claudeLog().filter(e => e.type === 'control_response')[1].response.response, { behavior: 'deny', message: 'The user denied this.' })
     }))
 
+  test('AskUserQuestion: a card of questions; a number, a click or your own words answer it, Esc dismisses it', () =>
+    withApp({ height: 44 }, async app => {
+      await app.send('offer choices please')
+      let s = await app.waitFor('❓ Claude asks')
+      assert.match(s, /question 1 of 2 · waiting for your answer/)
+      assert.match(s, / Database  Which database should we use\?/)
+      assert.match(s, /1  ○ Postgres  Relational, the usual pick/)
+      assert.match(s, /2  ○ SQLite  One file, no server/)
+      assert.match(s, /Next \(Enter\)/)
+      assert.match(s, /Pick an answer above, or type your own here/)
+      // The tab title counts the question as waiting on you.
+      await app.waitFor(() => app.title().startsWith('✋ 1 · clued · work'))
+      // A number picks an option; Enter goes on to the next question.
+      app.type('2')
+      await app.waitFor('2  ● SQLite')
+      app.keys('Enter')
+      s = await app.waitFor('question 2 of 2')
+      assert.match(s, /✓ Database: SQLite/)
+      assert.match(s, /☐ Backups/)
+      // Several can be ticked: a click on each, and a second click takes one back out.
+      await app.click('Backups', { area: 'chat' })
+      await app.click('Logs', { area: 'chat' })
+      await app.waitFor('☑ Logs')
+      await app.click('Metrics', { area: 'chat' })
+      await app.waitFor('☑ Metrics')
+      await app.click('Metrics', { area: 'chat' })
+      await app.waitFor('☐ Metrics')
+      await app.click('Send (Enter)', { area: 'chat' })
+      s = await app.waitFor('You chose: SQLite / Backups, Logs')
+      assert.ok(!s.includes('❓ Claude asks'))
+      const r = app.claudeLog().filter(e => e.type === 'control_response').at(-1)
+      assert.equal(r.response.response.behavior, 'allow')
+      assert.deepEqual(r.response.response.updatedInput.answers, { 'Which database should we use?': 'SQLite', 'Which extras do you want?': 'Backups, Logs' })
+      assert.equal(r.response.response.updatedInput.questions.length, 2)
+      // Your own words, typed in the box, are the answer.
+      await app.send('offer choices again')
+      await app.waitFor('question 1 of 2')
+      await app.send('MySQL, please')
+      await app.waitFor('question 2 of 2')
+      await app.waitFor('✓ Database: MySQL, please')
+      // Enter with nothing picked or typed says what to do.
+      app.keys('Enter')
+      await app.waitFor('Pick an option, or type your own answer.')
+      // Esc dismisses the question: Claude Code is told the tool was refused.
+      app.keys('Escape')
+      s = await app.waitFor('No answer: The user dismissed the question without answering it.')
+      assert.ok(!s.includes('❓ Claude asks'))
+      const d = app.claudeLog().filter(e => e.type === 'control_response').at(-1)
+      assert.deepEqual(d.response.response, { behavior: 'deny', message: 'The user dismissed the question without answering it.' })
+    }))
+
   test('a long command in a permission prompt is cut, with a way to copy it whole', () =>
     withApp({}, async app => {
       await app.send('need long permission')
@@ -193,8 +244,9 @@ describe('app', () => {
       assert.match(s, item('demo'))
       assert.match(s, item('cost'))
       app.type('wo')
-      s = await app.waitFor(item('work'))
-      assert.doesNotMatch(s, item('exit'))
+      // The menu for "/" lists /work too: wait for the one that matches "/wo", without /exit.
+      s = await app.waitFor(s => item('work').test(s) && !item('exit').test(s))
+      assert.match(s, /│ \/wo /)
       app.keys('Tab')
       await app.waitFor('│ /work ')
       app.keys('C-u')
@@ -213,6 +265,8 @@ describe('app', () => {
       await app.waitGone('Resume a session')
       // A click on a menu item fills it in.
       app.type('/dem')
+      // Only once the menu is on screen is there an item to click.
+      await app.waitFor(item('demo'))
       await app.click('/demo', { area: 'chat' })
       await app.waitFor('│ /demo ')
       app.keys('C-u')

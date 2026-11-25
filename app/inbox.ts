@@ -27,6 +27,7 @@ export const REPLY_GUIDE = [
   'then that part\'s answer. The app shows each part as its own bubble quoting the messages it answers.',
   'Leave the line out when the reply answers only the latest message. Ask anything you need from the user at the end of',
   'the part it belongs to, as a question, so the app can list it under "waiting on you".',
+  'When offering the user choices, ask with the AskUserQuestion tool, so the app shows them as options they can click.',
   'When one message asks several things, the note numbers them (T90.1, T90.2): a part answering only some of them names',
   'those (<<reply T90.2>>); a part naming the message (T90) quotes all of them.',
   'When a message refers to an earlier one of theirs without quoting it (a follow-up, a fix, "the second thing I asked",',

@@ -21,6 +21,8 @@ export type ClaudeEvent =
   | { kind: 'usage'; usage: Usage }
   | { kind: 'output-tokens'; tokens: number }
   | { kind: 'permission'; requestId: string; tool: string; input: Record<string, unknown> }
+  /** Claude asks the user multiple-choice questions (its AskUserQuestion tool): answered with answerAsk. */
+  | { kind: 'ask'; requestId: string; input: Record<string, unknown> }
   | { kind: 'exit'; code: number | null; stderr: string }
   /** A subagent's own step: the Agent call it runs under, and the tool it used. */
   | { kind: 'agent-step'; parent: string; tool: ToolUse }
@@ -91,14 +93,19 @@ export class Claude {
   }
 
   answerPermission(requestId: string, allow: boolean, input: Record<string, unknown>) {
-    this.write({
-      type: 'control_response',
-      response: {
-        subtype: 'success',
-        request_id: requestId,
-        response: allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'The user denied this.' },
-      },
-    })
+    this.respond(requestId, allow ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'The user denied this.' })
+  }
+
+  /**
+   * Answers AskUserQuestion: the tool runs with `input` (the questions plus their `answers`), or, with
+   * `dismissed`, it is refused with that message for Claude.
+   */
+  answerAsk(requestId: string, input: Record<string, unknown>, dismissed?: string) {
+    this.respond(requestId, dismissed ? { behavior: 'deny', message: dismissed } : { behavior: 'allow', updatedInput: input })
+  }
+
+  private respond(requestId: string, response: Record<string, unknown>) {
+    this.write({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response } })
   }
 
   close() {
@@ -207,9 +214,11 @@ export class Claude {
         emit({ kind: 'rate', info: e.rate_limit_info ?? {} })
         return
       case 'control_request':
-        if (e.request?.subtype === 'can_use_tool')
+        if (e.request?.subtype === 'can_use_tool' && e.request.tool_name === 'AskUserQuestion')
+          emit({ kind: 'ask', requestId: e.request_id, input: e.request.input ?? {} })
+        else if (e.request?.subtype === 'can_use_tool')
           emit({ kind: 'permission', requestId: e.request_id, tool: e.request.tool_name, input: e.request.input ?? {} })
-        else this.write({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response: {} } })
+        else this.respond(e.request_id, {})
         return
     }
   }

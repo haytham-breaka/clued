@@ -33,6 +33,7 @@ bin/clued          launcher: starts the app and restarts it on /reload
 app/
   main.ts          state, input, keys, the turn loop and the guide given to Claude
   claude.ts        the headless Claude Code process: stream-json in and out, permission prompts
+  ask.ts           Claude's multiple-choice questions (AskUserQuestion): the card and the answer
   chat.ts          drawing the chat: bubbles, quotes, steps, live views
   panel.ts         drawing the panel: unread, waiting on you, working, agents, recent messages
   inbox.ts         which reply answers which message, message states, questions in a message

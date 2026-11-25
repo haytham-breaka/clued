@@ -20,6 +20,8 @@ log({ args, cwd: process.cwd() })
 type Msg = { text: string; topic: string; images: number }
 let interrupted = false
 const permissions = new Map<string, (allow: boolean) => void>()
+/** AskUserQuestion requests waiting for the app's answer: the whole response. */
+const asks = new Map<string, (response: any) => void>()
 
 /** Waits for release-<name> (or an interrupt); false on timeout or interrupt. */
 async function release(name: string, ms = 30_000): Promise<boolean> {
@@ -114,6 +116,29 @@ async function scenario(m: Msg) {
     return finish(m, allow ? 'Permission was allowed.' : 'Permission was denied.')
   }
   if (t.includes('ask me')) return finish(m, 'I can do it two ways. Which one do you want?', 'me')
+  // AskUserQuestion: Claude Code asks the app for permission to run it, and the answers come back
+  // in the tool's input.
+  if (t.includes('offer choices')) {
+    const id = `ask-${Date.now()}`
+    const questions = [
+      { question: 'Which database should we use?', header: 'Database', multiSelect: false, options: [
+        { label: 'Postgres', description: 'Relational, the usual pick' }, { label: 'SQLite', description: 'One file, no server' },
+      ] },
+      { question: 'Which extras do you want?', header: 'Extras', multiSelect: true, options: [
+        { label: 'Backups', description: '' }, { label: 'Metrics', description: 'Dashboards' }, { label: 'Logs', description: '' },
+      ] },
+    ]
+    tool('askq-1', 'AskUserQuestion', { questions })
+    out({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions } } })
+    const r = await new Promise<any>(res => asks.set(id, res))
+    if (r?.behavior !== 'allow') {
+      toolResult('askq-1', r?.message ?? 'denied', true)
+      return finish(m, `No answer: ${r?.message}`)
+    }
+    const answers: Record<string, string> = r.updatedInput?.answers ?? {}
+    toolResult('askq-1', Object.entries(answers).map(([q, a]) => `"${q}"="${a}"`).join(', '))
+    return finish(m, `You chose: ${Object.values(answers).join(' / ')}`)
+  }
   if (t.includes('start agents')) {
     tool('agent-1', 'Agent', { description: 'Explore the code', subagent_type: 'Explore', prompt: 'Look around the code.' })
     out({ type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'agent-1', description: 'Explore the code' })
@@ -221,6 +246,8 @@ createInterface({ input: process.stdin }).on('line', line => {
     const id = e.response?.request_id
     permissions.get(id)?.(e.response?.response?.behavior === 'allow')
     permissions.delete(id)
+    asks.get(id)?.(e.response?.response)
+    asks.delete(id)
     return
   }
   if (e.type === 'control_request') {

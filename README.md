@@ -73,7 +73,7 @@ Drag the divider to resize the panel, and click `☰` to fold it to icons. Your 
 | Key | Does |
 |---|---|
 | Enter / Alt+Enter | send / new line |
-| Esc | cancel a reply, or interrupt Claude |
+| Esc | cancel a reply, dismiss Claude's question, or interrupt Claude |
 | Ctrl+C | clear the input or interrupt; twice to quit |
 | Alt+↑ / Alt+↓ | go through your recent messages; the chat scrolls to each |
 | Alt+→ / Alt+← | from a message to its reply, and back |
@@ -125,6 +125,10 @@ Ctrl+V adds the image on the clipboard. This works with the Windows clipboard fr
 ### Permissions
 
 When Claude Code needs permission for a tool, clued asks you in the app, the way `claude` would: with Claude's description of the command and the whole command, wrapped (a very long one has `⧉ copy all`). Your allow and deny rules apply as usual.
+
+### Questions with options
+
+When Claude asks you something with options (its AskUserQuestion tool), the question shows as a `❓ Claude asks` card above the input box: each question with its header and numbered options, with their descriptions. Click an option or press its number, then Enter. When several options are allowed, each click or number ticks one on or off. To answer in your own words, type in the input box and press Enter. When Claude asks several questions at once, they come one after another on the same card. Esc, or the card's ✕, dismisses the question, and Claude is told you didn't answer it.
 
 ### Notifications
 
