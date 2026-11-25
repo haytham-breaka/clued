@@ -39,8 +39,11 @@ const tag = (topics: { id: string; status: string; title?: string; about?: strin
 const say = (text: string) => out({ type: 'assistant', message: { content: [{ type: 'text', text }], usage } })
 const tool = (id: string, name: string, input: Record<string, unknown>, parent?: string) =>
   out({ type: 'assistant', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_use', id, name, input }], ...(parent ? {} : { usage }) } })
-const toolResult = (id: string, content: unknown, isError = false, parent?: string) =>
-  out({ type: 'user', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } })
+/** `data`: the structured result Claude Code sends beside the text (tool_use_result). */
+const toolResult = (id: string, content: unknown, isError = false, parent?: string, data?: unknown) =>
+  out({ type: 'user', ...(parent ? { parent_tool_use_id: parent } : {}), message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] }, ...(data ? { tool_use_result: data } : {}) })
+const init = () => out({ type: 'system', subtype: 'init', session_id: sessionId, model: MODEL, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default' })
+const hhmm = (at: number) => new Date(at).toTimeString().slice(0, 5)
 const result = (extra: Record<string, unknown> = {}) =>
   out({ type: 'result', subtype: 'success', is_error: false, result: '', usage, total_cost_usd: 0.0123, duration_ms: 1500, session_id: sessionId, modelUsage: { [MODEL]: { contextWindow: 200_000 } }, ...extra })
 
@@ -139,6 +142,42 @@ async function scenario(m: Msg) {
     toolResult('askq-1', Object.entries(answers).map(([q, a]) => `"${q}"="${a}"`).join(', '))
     return finish(m, `You chose: ${Object.values(answers).join(' / ')}`)
   }
+  // Scheduled jobs, in the shapes Claude Code 2.1 streams: a recurring cron, a /loop wakeup, and a
+  // one-off reminder an agent sets up. On release-fire the cron fires: a command_lifecycle event,
+  // then a turn of Claude's own with no user message.
+  if (t.includes('schedule jobs')) {
+    const now = Date.now()
+    const next = Math.floor(now / 300_000) * 300_000 + 300_000 + 13_000
+    tool('cron-1', 'CronCreate', { cron: '*/5 * * * *', recurring: true, prompt: 'Check the deploy and tell me if it is green.' })
+    toolResult('cron-1', `Scheduled recurring job a1b2c3d4 (Every 5 minutes). Next run: ${hhmm(next)}. Session-only (not written to disk, dies when Claude exits). Auto-expires after 30 days. Use CronDelete to cancel sooner.`, false, undefined,
+      { id: 'a1b2c3d4', humanSchedule: 'Every 5 minutes', recurring: true, durable: false, nextFireAt: next, maxAgeMs: 2_592_000_000 })
+    const wake = now + 600_000
+    tool('wake-1', 'ScheduleWakeup', { delaySeconds: 600, prompt: 'Look at the build again.', reason: 'waiting for CI to finish', noop: false })
+    toolResult('wake-1', `Next wakeup scheduled for ${hhmm(wake)}:00 (in 600s). If you owe the user a status update this tick, write it now as ordinary response text; then end the turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.`, false, undefined,
+      { scheduledFor: wake, clampedDelaySeconds: 600, wasClamped: false })
+    tool('agent-s', 'Agent', { description: 'Plan the release', subagent_type: 'Plan', prompt: 'Plan the release.' })
+    const at = new Date(now + 3 * 3_600_000)
+    tool('cron-2', 'CronCreate', { cron: `${at.getMinutes()} ${at.getHours()} ${at.getDate()} ${at.getMonth() + 1} *`, recurring: false, prompt: 'Remind the user to tag the release.' }, 'agent-s')
+    toolResult('cron-2', `Scheduled one-shot job e5f6a7b8. Next run: ${hhmm(at.getTime())}. Session-only (not written to disk, dies when Claude exits).`, false, 'agent-s',
+      { id: 'e5f6a7b8', humanSchedule: 'Once', recurring: false, durable: false, nextFireAt: at.getTime() })
+    toolResult('agent-s', 'Planned the release.')
+    finish(m, 'Scheduled them.')
+    if (await release('fire', 60_000)) {
+      out({ type: 'command_lifecycle', command_uuid: 'cmd-1', state: 'started', wakeup_source: 'schedule_wakeup' })
+      init()
+      say('The deploy is green.')
+      result()
+      out({ type: 'command_lifecycle', command_uuid: 'cmd-1', state: 'completed' })
+    }
+    return
+  }
+  // Asked to cancel one (the job view's ✕ cancel): CronDelete, as Claude would.
+  const cancel = t.match(/cancel the scheduled job ([0-9a-z]+)/)
+  if (cancel) {
+    tool('del-1', 'CronDelete', { id: cancel[1] })
+    toolResult('del-1', `Cancelled job ${cancel[1]}.`, false, undefined, { id: cancel[1] })
+    return finish(m, `Deleted job ${cancel[1]}.`)
+  }
   if (t.includes('start agents')) {
     tool('agent-1', 'Agent', { description: 'Explore the code', subagent_type: 'Explore', prompt: 'Look around the code.' })
     out({ type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'agent-1', description: 'Explore the code' })
@@ -232,7 +271,7 @@ async function run() {
 // The tag in "about earlier" names the previous topic, so the app links the two.
 const aboutTag = (m: Msg) => (m.text.toLowerCase().includes('about earlier') && previous ? previous : undefined)
 
-out({ type: 'system', subtype: 'init', session_id: sessionId, model: MODEL, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default' })
+init()
 
 createInterface({ input: process.stdin }).on('line', line => {
   let e: any

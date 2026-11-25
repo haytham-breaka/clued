@@ -73,6 +73,27 @@ describe('session files', () => {
     assert.deepEqual(S.loadHistory(CWD, 'missing'), [])
     assert.equal(S.lastUsage(CWD, 'missing'), undefined)
   })
+  test('loadHistory: a scheduled job firing is a turn of its own, and a structured tool result is kept', () => {
+    write('sched', [
+      user('ping me every minute', { timestamp: '2026-11-25T10:45:23.000Z' }),
+      assistant([{ type: 'tool_use', id: 'c1', name: 'CronCreate', input: { cron: '* * * * *', prompt: 'PING' } }]),
+      user([{ type: 'tool_result', tool_use_id: 'c1', content: 'Scheduled recurring job 72deb24a (Every minute).' }], { toolUseResult: { id: '72deb24a', nextFireAt: 5 } }),
+      assistant([{ type: 'text', text: 'Scheduled.' }]),
+      user('PING', { isMeta: true, turnOrigin: 'scheduled', wakeupSource: 'schedule_wakeup', timestamp: '2026-11-25T10:46:13.000Z' }),
+      assistant([{ type: 'text', text: 'PONG' }]),
+      user([{ type: 'text', text: 'PING' }], { isMeta: true, turnOrigin: 'scheduled', timestamp: '2026-11-25T10:47:13.000Z' }),
+      // Other hidden messages are still skipped.
+      user('hidden', { isMeta: true }),
+    ])
+    const turns = S.loadHistory(CWD, 'sched')
+    assert.equal(turns.length, 3)
+    assert.deepEqual(turns[0]!.steps[0]!.data, { id: '72deb24a', nextFireAt: 5 })
+    assert.equal(turns[1]!.key, `fired-${Date.parse('2026-11-25T10:46:13.000Z').toString(36)}`)
+    assert.deepEqual(turns[1]!.fired, { prompt: 'PING', source: 'schedule_wakeup' })
+    assert.deepEqual(turns[1]!.followUp, [turns[0]!.key])
+    assert.equal(turns[1]!.answer, 'PONG')
+    assert.deepEqual(turns[2]!.fired, { prompt: 'PING' })
+  })
   test('loadHistory rebuilds turns: steps, results, queued messages, early replies and reactions', () => {
     write('full', [
       'garbage line',

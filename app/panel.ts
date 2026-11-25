@@ -3,6 +3,8 @@
 
 import { matches, preview } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
+import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
+import type { Job } from './scheduled.ts'
 import type { Step, Turn, Work } from './session.ts'
 import { C, cells, clip } from './text.ts'
 import type { Line, Span } from './text.ts'
@@ -119,6 +121,10 @@ export type PanelCtx = {
   /** Opens one of your messages as a request: its whole chain. */
   openRequest: (turn: Turn) => void
   requestView: string
+  /** Scheduled jobs to list (with the agent's name when one set it up), opening one, and which one is open. */
+  jobs: { job: Job; by?: string }[]
+  openJob: (toolId: string) => void
+  jobView: string
   /** Where each section's box is scrolled to (by section id), and the rows the panel has. */
   scroll: Record<string, number>
   height: number
@@ -210,7 +216,9 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
     }
     const running = p.agents.filter(a => a.state === 'running').length
     if (running) L.push(row(width, [{ text: '◐', style: { fg: C.cyan } }], [{ text: String(running), style: { fg: C.cyan, bold: true } }]))
-    if (p.box.unread.length || p.box.waiting.length || running) L.push(rule(width))
+    const live = p.jobs.filter(x => x.job.state === 'scheduled').length
+    if (live) L.push(row(width, [{ text: '⏰', style: { fg: C.yellow }, action: () => p.openJob(p.jobs.find(x => x.job.state === 'scheduled')!.job.toolId) }], [{ text: String(live), style: { fg: C.yellow, bold: true } }]))
+    if (p.box.unread.length || p.box.waiting.length || running || live) L.push(rule(width))
     return { lines: L, head: 2 }
   }
 
@@ -334,6 +342,30 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       id: 'agents',
       cap: 12,
       header: [row(width, [{ text: 'Agents', style: { bold: true, fg: C.magenta } }], [{ text: running ? `${running} working` : 'all done', style: { fg: running ? C.cyan : C.faint } }])],
+      rows,
+    })
+  }
+
+  // ---- Scheduled jobs (crons, /loop wakeups): what each is, when it runs next, how it stands.
+  if (p.jobs.length) {
+    const rows: Line[] = []
+    let live = 0
+    for (const { job: j, by } of p.jobs) {
+      const isLive = j.state === 'scheduled' || j.state === 'setting up' || j.state === 'unknown'
+      if (isLive) live++
+      const open = () => p.openJob(j.toolId)
+      const isOn = p.jobView === j.toolId
+      rows.push(row(iw, [
+        { text: isOn ? '▸' : ' ', style: { fg: C.yellow }, action: open },
+        { text: `${jobMark(j)} `, style: { fg: isLive ? C.yellow : C.faint }, action: open },
+        { text: slide(jobName(j, 80), p.hscroll), style: { bold: isOn, dim: !isLive && !isOn, fg: isOn ? C.yellow : undefined }, action: open },
+      ], [{ text: stateLabel(j), style: { fg: j.state === 'scheduled' ? C.cyan : j.state === 'failed' ? C.red : C.faint }, action: open }]))
+      rows.push(row(iw, [{ text: '   ' }, { text: slide(`${scheduleLine(j, now)}${by ? ` · by ${by}` : ''}`, p.hscroll), style: { fg: C.gray, dim: !isLive }, action: open }]))
+    }
+    sections.push({
+      id: 'scheduled',
+      cap: 8,
+      header: [row(width, [{ text: 'Scheduled', style: { bold: true, fg: C.yellow } }], [{ text: live ? `${live} active` : 'none active', style: { fg: live ? C.cyan : C.faint } }])],
       rows,
     })
   }

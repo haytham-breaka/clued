@@ -9,6 +9,8 @@ import type { Lang, Row } from './code.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
 import { roleOf } from './panel.ts'
 import type { Agent } from './panel.ts'
+import { clock, cronWords, jobMark, scheduleLine, stateLabel } from './scheduled.ts'
+import type { Job } from './scheduled.ts'
 import type { Part } from './inbox.ts'
 import { C, cells, clip, lineCells, pad, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
@@ -61,6 +63,8 @@ export type ChatCtx = {
   setRead: (ids: string[], isRead: boolean) => void
   dismiss: (ids: string[]) => void
   showPart?: (p: Part) => boolean
+  /** A turn a scheduled job started: what to say above it, and opening that job's view. */
+  firedBy?: (t: Turn) => { label: string; open?: () => void } | undefined
 }
 
 export const QUICK = ['👍', '👎', '❓', '👀']
@@ -304,7 +308,13 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
 
     // ---- Yours, on the right
     if (turn.followUp || (ctx.showMessage && !ctx.showMessage(turn))) {
-      // Claude went on by itself (an agent came back): no message of yours to draw.
+      // Claude went on by itself (an agent came back, a scheduled job fired): no message of yours to draw.
+      if (turn.fired && !(ctx.showMessage && !ctx.showMessage(turn))) {
+        const f = ctx.firedBy?.(turn)
+        out.push([])
+        anchors[`fired:${turn.key}`] = out.length
+        out.push([pad(2), { text: clip(f?.label ?? '⏰ a scheduled job ran', width - 4), style: { fg: C.yellow, ...(f?.open ? { underline: true } : {}) }, ...(f?.open ? { action: f.open } : {}) }])
+      }
     } else if (turn.reaction) {
       // On which reply: a click goes there.
       const on = ctx.kept.links[turn.key]
@@ -711,6 +721,106 @@ export function requestLines(req: Turn, info: RequestInfo, ctx: ChatCtx & { askS
     out.push([pad(4), { text: `${icon} ◇ ${a.person ? `${a.person} (${roleOf(a.type)}) · ` : ''}${a.name}`, style: { fg: C.magenta }, action: () => ctx.openAgent(a.id) }, { text: `  ${a.state}`, style: { fg: C.faint } }])
   }
   const rest = chatLines({ ...ctx, turns: info.turns, showMessage: t => info.keys.has(t.key), showPart: p => p.to.some(id => info.ids.includes(id)) }, width)
+  const base = out.length
+  const anchors: Record<string, number> = {}
+  for (const [k, v] of Object.entries(rest.anchors)) anchors[k] = v + base
+  const owners: string[] = []
+  rest.owners.forEach((o, i) => (owners[i + base] = o))
+  out.push(...rest.lines)
+  return { lines: out, anchors, owners }
+}
+
+// ---- Inside a scheduled job ------------------------------------------------------------
+
+export type JobInfo = {
+  /** Who set it up: Claude itself, or the agent whose steps made the call. */
+  by: { name: string; agent?: Agent }
+  /** Your messages it was made for. */
+  for: Turn[]
+  /** Each run so far, and the turn it started when that is known. */
+  runs: { at: number; open?: () => void }[]
+  openMessage: (t: Turn) => void
+  openAgent: (id: string) => void
+  /** Asks Claude to delete it. */
+  cancel: () => void
+  copy: (text: string) => void
+  now: number
+}
+
+/**
+ * A scheduled job: what it is for (its prompt, and the reason a wakeup gave), its schedule in words
+ * and as cron, who set it up and who runs it when it fires, the message of yours it was made for, and
+ * each run so far. Below that, your messages about it and Claude's replies, as in the main chat.
+ */
+export function jobLines(j: Job, info: JobInfo, ctx: ChatCtx, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
+  const out: Line[] = [[]]
+  const IN = 4
+  const max = Math.max(20, Math.min(100, width - 6 - IN))
+  const isLive = j.state === 'scheduled' || j.state === 'setting up' || j.state === 'unknown'
+  const kind = j.kind === 'wakeup' ? 'Wakeup (/loop)' : j.kind === 'remote' ? 'Cloud routine' : j.recurring ? 'Recurring job' : 'One-off job'
+  const head: Span[] = [pad(2), { text: `${jobMark(j)} ${kind}`, style: { bold: true, fg: C.yellow } }, { text: j.id !== j.toolId ? `  ${j.id}` : '', style: { fg: C.gray } }, { text: `  ·  ${stateLabel(j)}`, style: { bold: true, fg: j.state === 'scheduled' ? C.cyan : j.state === 'failed' ? C.red : C.gray } }]
+  if (isLive) head.push({ text: '   ' }, { text: ' ✕ cancel ', style: { inverse: true, fg: C.red, bold: true }, action: info.cancel })
+  out.push(head)
+  const section = (title: string) => out.push([], [pad(2), { text: title, style: { bold: true } }])
+  // A label, and its value wrapped under itself.
+  const field = (label: string, value: Span[]) => {
+    const rows = wrap(value, Math.max(10, width - IN - 13), [pad(IN + 12)])
+    rows.forEach((l, i) => out.push(i ? l : [pad(IN), { text: label.padEnd(12), style: { fg: C.gray } }, ...l]))
+  }
+
+  // What it is for: the prompt it sends, and the reason.
+  section('What it is for')
+  const body = markdown(j.prompt || '(no prompt)', max, ctx.copy)
+  const tag: Span = { text: j.kind === 'remote' ? '☁ the routine runs' : '✻ sent to Claude when it fires', style: { fg: C.claudeName, bold: true } }
+  out.push(...bubble(body, Math.max(snug(body, max), cells(tag.text) + 2), IN, { fg: C.yellow }, undefined, undefined, tag, { text: '⧉ copy', style: { fg: C.gray }, action: () => info.copy(j.prompt) }))
+  if (j.reason) field('reason', [{ text: j.reason }])
+
+  // When: in words, the raw cron, how long it lasts.
+  section('Schedule')
+  field('when', [{ text: scheduleLine(j, info.now), style: { fg: C.cyan } }])
+  if (j.cron) field('cron', [{ text: j.cron, style: { fg: C.white } }, { text: `  (${j.kind === 'wakeup' ? 'one-shot' : cronWords(j.cron, j.recurring)}${j.human ? `; Claude Code says “${j.human}”` : ''})`, style: { fg: C.faint } }])
+  else if (j.delaySeconds != null) field('delay', [{ text: `${j.delaySeconds} s asked`, style: { fg: C.white } }])
+  if (j.nextAt != null && isLive && !(j.kind === 'cron' && j.recurring)) field('next run', [{ text: `${clock(j.nextAt, info.now)}`, style: { fg: C.white } }, { text: j.state === 'unknown' ? '  (as the session file last showed it)' : '', style: { fg: C.faint } }])
+  const lasts = j.kind === 'remote' ? 'in the cloud, apart from this session'
+    : j.durable === true ? 'kept on disk: it can outlive this session'
+    : j.durable === false ? 'session-only: it ends when this Claude Code session exits'
+    : 'while this Claude Code session runs'
+  field('lasts', [{ text: lasts }, { text: j.expiresAt ? ` · auto-expires ${clock(j.expiresAt, info.now)}` : '', style: { fg: C.gray } }])
+
+  // Who: set it up, runs it, for which message of yours.
+  section('Who')
+  const agent = info.by.agent
+  field('set up by', agent
+    ? [{ text: `◇ ${info.by.name}`, style: { fg: C.magenta, bold: true, underline: true }, action: () => info.openAgent(agent.id) }, { text: ` · ${agent.name}`, style: { fg: C.gray } }]
+    : [{ text: j.isOutside ? 'not in this session: CronList showed it' : '✻ Claude (lead)', style: { fg: j.isOutside ? C.gray : C.claudeName, bold: !j.isOutside } }])
+  field('runs it', j.kind === 'remote'
+    ? [{ text: 'a cloud routine on claude.ai, not this session' }]
+    : [{ text: '✻ Claude (lead)', style: { fg: C.claudeName, bold: true } }, { text: ', the main session: when it fires, its prompt comes to Claude as a turn of its own', style: { fg: C.gray } }])
+  if (info.for.length)
+    for (const [i, t] of info.for.entries())
+      field(i ? '' : 'made for', [{ text: `↳ “${preview(t.text, Math.max(20, width - 24))}”`, style: { fg: C.gray, underline: true }, action: () => info.openMessage(t) }])
+  else field('made for', [{ text: 'no message of yours in this chat', style: { fg: C.faint } }])
+
+  // Each run, linked to the turn it started.
+  section(`Runs${j.runs.length ? ` (${j.runs.length})` : ''}`)
+  if (!j.runs.length) out.push([pad(IN), { text: isLive ? 'Not run yet.' : 'It never ran.', style: { fg: C.faint, italic: true } }])
+  for (const r of info.runs.slice(-20).reverse())
+    out.push([pad(IN), { text: '· ', style: { fg: C.faint } }, { text: clock(r.at, info.now), style: { fg: C.white, ...(r.open ? { underline: true } : {}) }, ...(r.open ? { action: r.open } : {}) }, { text: r.open ? '  ↗ its turn' : '', style: { fg: C.cyan }, ...(r.open ? { action: r.open } : {}) }])
+  if (info.runs.length > 20) out.push([pad(IN), { text: `… and ${info.runs.length - 20} earlier`, style: { fg: C.faint } }])
+
+  // How it ended, or what can't be known.
+  const note = j.state === 'unknown' ? 'From the session file: it was still scheduled when the transcript ends. It may still run, or may have been deleted outside it.'
+    : j.note ? `${j.state === 'expired' ? 'Expired' : j.state === 'failed' ? 'Failed' : 'Ended'}: ${j.note}.`
+    : isLive ? '✕ cancel asks Claude to delete it; the app never stops a job itself.' : ''
+  if (note) out.push([])
+  if (note) for (const l of wrap([{ text: note, style: { fg: C.gray, italic: true } }], width - 4)) out.push([pad(2), ...l])
+
+  // Your messages about it, with Claude's replies.
+  const about = ctx.turns
+  const rest = chatLines(ctx, width)
+  out.push([])
+  if (about.length) out.push([pad(2), { text: `── your messages about this job ${'─'.repeat(Math.max(0, width - 36))}`, style: { fg: C.faint } }])
+  else out.push(...wrap([{ text: 'Write below to ask Claude about this job, or to change it. Esc goes back to the chat.', style: { fg: C.faint } }], width - 4).map(l => [pad(2), ...l]))
   const base = out.length
   const anchors: Record<string, number> = {}
   for (const [k, v] of Object.entries(rest.anchors)) anchors[k] = v + base

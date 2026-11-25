@@ -18,6 +18,8 @@ export type Step = {
   isOpen?: boolean
   /** Details shown whole, not cut at DETAIL_ROWS. */
   isFull?: boolean
+  /** The result's structured form, when Claude Code gave one (CronCreate's id and next run). */
+  data?: unknown
 }
 
 /** How much of Claude's work a chat shows: one folded line, the file edits as diffs, or every step with its output. */
@@ -38,6 +40,8 @@ export type Turn = {
   aboutRequest?: string
   /** Sent from inside an agent's view: that agent's id. */
   aboutAgent?: string
+  /** Sent from inside a scheduled job's view: that job's tool call id. */
+  aboutJob?: string
   /** A reaction sent as a message: drawn as one small line. */
   reaction?: string
   steps: Step[]
@@ -49,6 +53,8 @@ export type Turn = {
   parts?: Part[]
   /** A turn Claude started on its own (an agent came back): the messages (turn keys) it follows up on. */
   followUp?: string[]
+  /** A turn a scheduled job started: its prompt and kind (when known), and the job (its call id, once matched). */
+  fired?: { prompt?: string; source?: string; job?: string }
   /** The latest of several follow-ups on the same messages: whether the earlier ones are shown. */
   showUpdates?: boolean
   /** Streaming text not yet known to be narration or the answer. */
@@ -217,15 +223,30 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       turns.push(cur)
       continue
     }
+    // A scheduled job firing: Claude Code wrote its prompt as a hidden message, and Claude answers it.
+    if (e.type === 'user' && e.isMeta && (e.turnOrigin === 'scheduled' || e.wakeupSource)) {
+      const c = e.message?.content
+      const prompt = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n') : ''
+      finish()
+      cur = newTurn('', at)
+      cur.key = `fired-${at.toString(36)}`
+      cur.fired = { prompt, ...(e.wakeupSource ? { source: String(e.wakeupSource) } : {}) }
+      const ask = turns.findLast(t => !t.reaction && !t.followUp)
+      cur.followUp = ask ? [ask.key] : []
+      turns.push(cur)
+      continue
+    }
     if (e.type === 'user' && !e.isMeta) {
       const c = e.message?.content
       if (Array.isArray(c) && c.some((b: any) => b.type === 'tool_result')) {
+        const one = c.filter((b: any) => b.type === 'tool_result').length === 1
         for (const b of c) {
           if (b.type !== 'tool_result') continue
           const hit = byId.get(b.tool_use_id)
           if (!hit) continue
           hit.step.result = typeof b.content === 'string' ? b.content : (b.content ?? []).filter((x: any) => x.type === 'text').map((x: any) => x.text).join('\n')
           hit.step.isError = !!b.is_error
+          if (one && e.toolUseResult != null && typeof e.toolUseResult === 'object') hit.step.data = e.toolUseResult
         }
         continue
       }

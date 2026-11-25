@@ -6,6 +6,7 @@ import { panelLines } from '../../app/panel.ts'
 import type { PanelCtx } from '../../app/panel.ts'
 import type { Turn } from '../../app/session.ts'
 import { C } from '../../app/text.ts'
+import type { Job } from '../../app/scheduled.ts'
 
 const NOW = 1_700_000_000_000
 const noop = () => {}
@@ -20,7 +21,7 @@ function ctx(messages: MessageRef[], extra: Partial<PanelCtx> = {}): PanelCtx {
     box: { unread: [], waiting: [], messages }, openPart: noop, dismiss: noop, openMessage: noop, openWork: noop,
     picked: '', query: null, search: noop, isLegend: false, legend: noop, next: noop, readParts: noop, unreadParts: noop,
     readList: [], isReadTab: false, readTab: noop, work: 'folded', setWork: noop, agents: [], turnOf: () => undefined,
-    openAgent: noop, agentView: '', jumpTo: noop, openRequest: noop, requestView: '', scroll: {}, height: 60, ...extra,
+    openAgent: noop, agentView: '', jumpTo: noop, openRequest: noop, requestView: '', jobs: [], openJob: noop, jobView: '', scroll: {}, height: 60, ...extra,
   }
 }
 
@@ -54,5 +55,47 @@ describe('your recent messages', () => {
     assert.ok(lines.some(l => l.includes('in progress: being worked on')))
     assert.ok(lines.some(l => /⚠ reply lost\s*$/.test(l)))
     assert.ok(!lines.some(l => l.includes('no update')))
+  })
+})
+
+describe('scheduled jobs', () => {
+  const job = (over: Partial<Job>): Job => ({ id: 'a1b2c3d4', toolId: 'tu-1', kind: 'cron', cron: '*/5 * * * *', recurring: true, prompt: 'Check the deploy', createdAt: NOW, nextAt: Date.now() + 3 * 60_000 + 5_000, for: [], state: 'scheduled', runs: [], ...over })
+
+  test('no section until there is a job', () => {
+    assert.ok(!text(ctx([])).some(l => l.startsWith('Scheduled')))
+  })
+
+  // The panel words times against the clock.
+  test('each job: its mark, name, state, and when it runs; a click opens it', () => {
+    const opened: string[] = []
+    const p = ctx([], {
+      openJob: id => opened.push(id),
+      jobView: 'tu-2',
+      jobs: [
+        { job: job({ runs: [{ at: NOW }] }) },
+        { job: job({ toolId: 'tu-2', kind: 'wakeup', recurring: false, cron: undefined, reason: 'waiting for CI' }), by: 'James (planner)' },
+        { job: job({ toolId: 'tu-3', state: 'deleted', endedAt: NOW }) },
+      ],
+    })
+    const lines = text(p, 56)
+    assert.match(lines.find(l => l.startsWith('Scheduled'))!, /Scheduled +2 active/)
+    assert.match(lines.find(l => l.includes('⏰ Check the deploy') && l.includes('ran once'))!, /│? ⏰ Check the deploy +ran once/)
+    assert.ok(lines.some(l => /every 5 min · next \d\d:\d\d/.test(l)))
+    assert.match(lines.find(l => l.includes('waiting for CI'))!, /▸⏲ waiting for CI +scheduled/)
+    assert.ok(lines.some(l => /in 3 min · by James \(planner\)/.test(l)))
+    assert.ok(lines.some(l => /⏰ Check the deploy +deleted/.test(l)))
+    panelLines(p, 56).lines.find(l => l.some(s => s.text.includes('waiting for CI')))!.find(s => s.action)!.action!()
+    assert.deepEqual(opened, ['tu-2'])
+    // All finished: none active.
+    assert.match(text(ctx([], { jobs: [{ job: job({ state: 'expired', endedAt: NOW }) }] })).find(l => l.startsWith('Scheduled'))!, /none active/)
+  })
+
+  test('folded, the panel counts the live jobs; a click opens the first', () => {
+    const opened: string[] = []
+    const p = ctx([], { isFolded: true, openJob: id => opened.push(id), jobs: [{ job: job({ state: 'deleted' }) }, { job: job({ toolId: 'tu-2' }) }] })
+    const row = panelLines(p, 7).lines.find(l => l.some(s => s.text === '⏰'))!
+    assert.equal(row.map(s => s.text).join('').trim().replace(/\s+/, ' '), '⏰ 1')
+    row.find(s => s.text === '⏰')!.action!()
+    assert.deepEqual(opened, ['tu-2'])
   })
 })

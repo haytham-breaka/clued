@@ -13,7 +13,8 @@ export type ClaudeEvent =
   | { kind: 'text-delta'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'tool'; tool: ToolUse }
-  | { kind: 'tool-result'; id: string; text: string; isError: boolean }
+  /** `data`: the result's structured form, when Claude Code sends one (tool_use_result: CronCreate's id and next run). */
+  | { kind: 'tool-result'; id: string; text: string; isError: boolean; data?: unknown }
   | { kind: 'status'; text: string }
   | { kind: 'mode'; mode: string }
   | { kind: 'result'; text: string; isError: boolean; usage: Usage; costUsd: number; durationMs: number; sessionId: string; contextWindow?: number }
@@ -28,7 +29,9 @@ export type ClaudeEvent =
   | { kind: 'agent-step'; parent: string; tool: ToolUse }
   /** A subagent's words, and its tools' results. */
   | { kind: 'agent-text'; parent: string; text: string }
-  | { kind: 'agent-tool-result'; parent: string; id: string; text: string; isError: boolean }
+  | { kind: 'agent-tool-result'; parent: string; id: string; text: string; isError: boolean; data?: unknown }
+  /** A scheduled job fired (CronCreate, ScheduleWakeup): Claude Code starts a turn of its own, with no message of yours. */
+  | { kind: 'fired'; source: string }
   /** Background task news from Claude Code: started, progress, or finished (status). */
   | { kind: 'task'; phase: 'started' | 'progress' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; lastTool?: string }
 
@@ -189,8 +192,10 @@ export class Claude {
         for (const b of content) {
           if (b.type !== 'tool_result') continue
           const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') : ''
-          if (e.parent_tool_use_id) emit({ kind: 'agent-tool-result', parent: String(e.parent_tool_use_id), id: b.tool_use_id, text, isError: !!b.is_error })
-          else emit({ kind: 'tool-result', id: b.tool_use_id, text, isError: !!b.is_error })
+          // The structured result covers the event's one tool result (Claude Code sends one per event).
+          const data = content.length === 1 && e.tool_use_result != null ? { data: e.tool_use_result } : {}
+          if (e.parent_tool_use_id) emit({ kind: 'agent-tool-result', parent: String(e.parent_tool_use_id), id: b.tool_use_id, text, isError: !!b.is_error, ...data })
+          else emit({ kind: 'tool-result', id: b.tool_use_id, text, isError: !!b.is_error, ...data })
         }
         return
       }
@@ -209,6 +214,10 @@ export class Claude {
             return sizes.length ? { contextWindow: Math.max(...sizes) } : {}
           })(),
         })
+        return
+      case 'command_lifecycle':
+        // A turn Claude Code starts by itself: a scheduled job's prompt (it names no job, and the prompt isn't streamed).
+        if (e.state === 'started' && e.wakeup_source) emit({ kind: 'fired', source: String(e.wakeup_source) })
         return
       case 'rate_limit_event':
         emit({ kind: 'rate', info: e.rate_limit_info ?? {} })

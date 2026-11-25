@@ -30,6 +30,12 @@ const events = [
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'out' }, { type: 'tool_result', tool_use_id: 'u2', content: [{ type: 'text', text: 'a' }, { type: 'image' }, { type: 'text', text: 'b' }], is_error: true }, { type: 'tool_result', tool_use_id: 'u3' }, { type: 'text', text: 'not a result' }] } },
   { type: 'user', parent_tool_use_id: 'a1', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'hit' }] } },
   { type: 'user', message: { content: 'plain' } },
+  // A scheduling call's result, with its structured form; a job firing (only "started" with a source counts).
+  { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'Scheduled recurring job 72deb24a (Every minute).' }] }, tool_use_result: { id: '72deb24a', nextFireAt: 5 } },
+  { type: 'user', parent_tool_use_id: 'a1', message: { content: [{ type: 'tool_result', tool_use_id: 'c2', content: 'Cancelled job 72deb24a.' }] }, tool_use_result: { id: '72deb24a' } },
+  { type: 'command_lifecycle', command_uuid: 'k1', state: 'started', wakeup_source: 'schedule_wakeup' },
+  { type: 'command_lifecycle', command_uuid: 'k1', state: 'completed' },
+  { type: 'command_lifecycle', command_uuid: 'k2', state: 'started' },
   { type: 'rate_limit_event', rate_limit_info: { unifiedWindows: {} } },
   { type: 'rate_limit_event' },
   { type: 'control_request', request_id: 'p1', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'rm x' } } },
@@ -86,7 +92,7 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   assert.deepEqual(kinds, [
     'init', 'init', 'status', 'status', 'task', 'task', 'task', 'task', 'text-delta', 'output-tokens',
     'usage', 'text', 'tool', 'tool', 'agent-step', 'agent-text', 'tool-result', 'tool-result', 'tool-result',
-    'agent-tool-result', 'rate', 'rate', 'permission', 'permission', 'result', 'result', 'exit',
+    'agent-tool-result', 'tool-result', 'agent-tool-result', 'fired', 'rate', 'rate', 'permission', 'permission', 'result', 'result', 'exit',
   ])
   const by = <K extends ClaudeEvent['kind']>(k: K, n = 0) => got.filter(e => e.kind === k)[n] as Extract<ClaudeEvent, { kind: K }>
   assert.deepEqual(by('init'), { kind: 'init', sessionId: 's9', model: 'm', cwd: '/tmp/w', commands: ['compact', '7'], permissionMode: 'plan' })
@@ -103,6 +109,9 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   assert.deepEqual(by('tool-result', 1), { kind: 'tool-result', id: 'u2', text: 'a\nb', isError: true })
   assert.deepEqual(by('tool-result', 2), { kind: 'tool-result', id: 'u3', text: '', isError: false })
   assert.deepEqual(by('agent-tool-result'), { kind: 'agent-tool-result', parent: 'a1', id: 's1', text: 'hit', isError: false })
+  assert.deepEqual(by('tool-result', 3), { kind: 'tool-result', id: 'c1', text: 'Scheduled recurring job 72deb24a (Every minute).', isError: false, data: { id: '72deb24a', nextFireAt: 5 } })
+  assert.deepEqual(by('agent-tool-result', 1), { kind: 'agent-tool-result', parent: 'a1', id: 'c2', text: 'Cancelled job 72deb24a.', isError: false, data: { id: '72deb24a' } })
+  assert.deepEqual(by('fired'), { kind: 'fired', source: 'schedule_wakeup' })
   assert.deepEqual(by('rate', 1), { kind: 'rate', info: {} })
   assert.deepEqual(by('permission', 1), { kind: 'permission', requestId: 'p2', tool: 'Read', input: {} })
   assert.deepEqual(by('result'), { kind: 'result', text: 'done', isError: false, usage: { input_tokens: 1 }, costUsd: 0.5, durationMs: 9, sessionId: 's9', contextWindow: 1000000 })

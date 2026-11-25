@@ -28,10 +28,12 @@ import {
   settleTurn,
   stripTag,
 } from '../hooks/model.ts'
-import { agentLines, chatLines, requestLines, stepLabel } from './chat.ts'
+import { agentLines, chatLines, jobLines, requestLines, stepLabel } from './chat.ts'
 import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.ts'
 import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
+import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
+import type { Job } from './scheduled.ts'
 import { assignParts, hasMarks, inbox, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
@@ -202,6 +204,9 @@ const S = {
   mainKey: '',
   /** The request whose chain is open (its turn key; '' = none). */
   requestView: '',
+  /** Scheduled jobs Claude set up (CronCreate, ScheduleWakeup…), and the one whose view is open ('' = none). */
+  jobs: newJobs(),
+  jobView: '',
   mainScroll: 0,
 }
 
@@ -324,8 +329,9 @@ function markRead(ids: string[]) {
 
 function openAgent(id: string) {
   if (!S.agents.has(id)) return toast('That agent is no longer here.')
-  if (!S.agentView && !S.requestView) S.mainScroll = S.chatScroll
+  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.requestView = ''
+  S.jobView = ''
   S.agentView = id
   S.chatScroll = 0
   S.replyTo = null
@@ -342,9 +348,10 @@ function resumeAgent(a: Agent) {
 
 /** Back to the main chat from an agent's or a request's view. */
 function closeAgent() {
-  if (!S.agentView && !S.requestView) return
+  if (!S.agentView && !S.requestView && !S.jobView) return
   S.agentView = ''
   S.requestView = ''
+  S.jobView = ''
   S.chatScroll = S.mainScroll
   draw()
 }
@@ -352,8 +359,9 @@ function closeAgent() {
 // ---- Inside a request: its chain -----------------------------------------------------------
 
 function openRequest(turn: Turn) {
-  if (!S.agentView && !S.requestView) S.mainScroll = S.chatScroll
+  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.agentView = ''
+  S.jobView = ''
   S.requestView = turn.key
   S.chatScroll = 0
   S.replyTo = null
@@ -405,6 +413,51 @@ function requestInfo(req: Turn): RequestInfo {
   return { state, mark, isStale: !!ref?.stale, ids: [...ids], agents, turns, keys }
 }
 
+// ---- Inside a scheduled job ------------------------------------------------------------
+
+function openJob(id: string) {
+  if (!S.jobs.list.some(j => j.toolId === id)) return toast('That job is no longer here.')
+  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
+  S.agentView = ''
+  S.requestView = ''
+  S.jobView = id
+  S.chatScroll = 0
+  S.replyTo = null
+  draw()
+}
+
+/** Who set a job up: Claude itself, or the agent whose own steps made the call. */
+function jobBy(j: Job): { name: string; agent?: Agent } {
+  const a = j.by ? S.agents.get(j.by) : undefined
+  return a ? { name: who(a, S.agents.values()), agent: a } : { name: j.isOutside ? 'not in this session' : 'Claude (lead)' }
+}
+
+/** Asks Claude to delete a job (the app never stops one itself: Claude Code owns it). */
+function cancelJob(j: Job) {
+  submit(cancelText(j))
+  toast('Asked Claude to cancel it.')
+}
+
+/** A turn a scheduled job started: Claude goes on by itself, following up on the message the job was made for. */
+function firedTurn(now: number, source: string): Turn {
+  const turn = newTurn('', now)
+  turn.key = `fired-${now.toString(36)}`
+  const job = onFire(S.jobs, now, { turn: turn.key, source })
+  turn.fired = job ? { prompt: job.prompt, source, job: job.toolId } : { source }
+  turn.followUp = job?.for.length ? job.for : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
+  S.turns.push(turn)
+  S.isWorking = true
+  return turn
+}
+
+/** The turn (and its anchor) a job's run started, for a click on that run. */
+function openFired(key: string) {
+  closeAgent()
+  S.isResultsOnly = false
+  S.pendingJump = `fired:${key}`
+  draw()
+}
+
 /** How many messages and replies a message's chain holds besides it (0: none yet). Worked out once a paint. */
 let chainCache = new Map<Turn, number>()
 function chainSize(turn: Turn): number {
@@ -446,8 +499,9 @@ const MAIN = 'main'
 function openWork() {
   const t = S.turns.findLast(x => !x.isDone) ?? S.turns.findLast(x => x.steps.length)
   if (!t) return toast('Claude has not worked yet.')
-  if (!S.agentView && !S.requestView) S.mainScroll = S.chatScroll
+  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.requestView = ''
+  S.jobView = ''
   S.agentView = MAIN
   S.mainKey = t.key
   S.chatScroll = 0
@@ -624,7 +678,10 @@ function start(resume?: string) {
       if (missing.length) t.early = [...(t.early ?? []), ...missing]
     }
     assignParts(S.turns, S.kept.board)
+    // The jobs the session file shows (the Claude Code that ran them has stopped).
+    S.jobs = jobsFromTurns(S.turns, Date.now())
   } else {
+    S.jobs = newJobs()
     S.sessionId = ''
     S.turns = []
     S.kept = { board: emptyBoard(), reactions: {}, links: {} }
@@ -685,7 +742,14 @@ function onEvent(e: ClaudeEvent) {
         for (const x of S.turns) if (!x.isDone) x.live = ''
       }
       break
+    case 'fired':
+      // Crons fire only while Claude Code is idle; if a turn is somehow open, the run counts under it.
+      if (t) onFire(S.jobs, Date.now(), { turn: t.key, source: e.source })
+      else firedTurn(Date.now(), e.source)
+      break
     case 'tool':
+      // A scheduling call: the job it makes shows under Scheduled once its result says so.
+      onCall(S.jobs, e.tool, Date.now(), { for: t?.followUp ?? (S.turns.filter(x => !x.isDone && !x.reaction).length ? S.turns.filter(x => !x.isDone && !x.reaction) : S.turns.filter(x => !x.reaction).slice(-1)).map(x => x.key) })
       // A message to an agent that finished continues it: back under Agents, running.
       if (e.tool.name === 'SendMessage') {
         const to = String(e.tool.input.to ?? '')
@@ -746,6 +810,7 @@ function onEvent(e: ClaudeEvent) {
       }
       break
     case 'tool-result': {
+      onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
       const a = S.agents.get(e.id)
       if (a) {
         if (a.isBackground && !e.isError) a.taskId = e.text.match(/agent ?id:?\s*([\w-]+)/i)?.[1] ?? a.taskId
@@ -773,6 +838,7 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'agent-step': {
       const a = S.agents.get(e.parent)
+      onCall(S.jobs, e.tool, Date.now(), { by: e.parent, for: a?.for ?? [] })
       if (a) {
         a.steps++
         a.last = stepLabel({ tool: e.tool }, cwd).text
@@ -786,6 +852,7 @@ function onEvent(e: ClaudeEvent) {
       break
     }
     case 'agent-tool-result': {
+      onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
       const a = S.agents.get(e.parent)
       const hit = a?.log.find(x => 'step' in x && x.step.tool.id === e.id)
       if (hit && 'step' in hit) {
@@ -866,6 +933,8 @@ function onEvent(e: ClaudeEvent) {
         S.claude = undefined
         S.asks = []
         for (const a of S.agents.values()) if (a.state === 'running') { a.state = 'stopped'; a.endedAt = Date.now() }
+        // Jobs Claude Code kept only in memory went with it.
+        onExit(S.jobs, Date.now())
       }
       break
   }
@@ -976,6 +1045,9 @@ function submit(text: string, opts: { reaction?: string } = {}) {
       if (!reply?.quotes.length) S.kept.links[turn.key] = { key: req.key, who: 'me', text: preview(req.text, 60) }
       hidden = `${hidden}\nThe user wrote this from inside the view of their request ${req.topicId ?? ''} ("${preview(req.text, 80)}"): it is part of that request (use same_as ${req.topicId ?? 'its topic'} unless it is a new subject). Reply to its id.`
     }
+    const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
+    if (job) turn.aboutJob = job.toolId
+    if (job) hidden = `${hidden}\nThe user wrote this from inside the view of your scheduled job ${job.id} (${job.kind === 'wakeup' ? 'ScheduleWakeup' : job.kind === 'remote' ? 'RemoteTrigger' : `CronCreate "${job.cron ?? ''}"`}, ${stateLabel(job)}; prompt "${preview(job.prompt, 120)}"): it is about that job.`
     const inside = S.agentView ? S.agents.get(S.agentView) : undefined
     if (inside) {
       turn.aboutAgent = inside.id
@@ -1624,11 +1696,12 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   // Inside an agent the box is magenta and says so in its border, so you always know where you are writing.
   const inside = S.agentView ? S.agents.get(S.agentView) : undefined
   const req = S.requestView ? S.turns.findLast(t => t.key === S.requestView) : undefined
-  const border = { fg: S.search ? C.yellow : req ? C.blue : inside ? C.magenta : S.isWorking ? C.faint : C.cyan }
-  const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : ''
-  L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search ? C.yellow : req ? C.blue : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
+  const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
+  const border = { fg: S.search ? C.yellow : req ? C.blue : inside ? C.magenta : job ? C.yellow : S.isWorking ? C.faint : C.cyan }
+  const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : job ? ` ${jobMark(job)} about the scheduled job: ${clip(jobName(job), Math.max(6, w - 40))} ` : ''
+  L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
-  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = S.sel?.area === 'input' ? rowSpans(inner) : []
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
@@ -1733,6 +1806,9 @@ function paint() {
         agentView: S.agentView,
         openRequest,
         requestView: S.requestView,
+        jobs: shownJobs(S.jobs, Date.now()).map(j => ({ job: j, by: j.by ? jobBy(j).name : undefined })),
+        openJob,
+        jobView: S.jobView,
         scroll: S.listAt,
         height: H,
         side: d => { S.hscroll = Math.max(0, S.hscroll + d); draw() },
@@ -1772,7 +1848,18 @@ function paint() {
   const req = S.requestView ? S.turns.findLast(t => t.key === S.requestView) : undefined
   if (S.requestView && !req) S.requestView = ''
   const reqInfo = req ? requestInfo(req) : undefined
-  const banner: Line | undefined = req && reqInfo
+  const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
+  if (S.jobView && !job) S.jobView = ''
+  const jobFor = job ? job.for.map(k => S.turns.findLast(t => t.key === k)).filter((t): t is Turn => !!t) : []
+  const banner: Line | undefined = job
+    ? [
+        { text: ` ${jobMark(job)} Scheduled · ${clip(jobName(job, 40), 40)} `, style: { bg: C.yellow, fg: 16, bold: true } },
+        { text: `  ${stateLabel(job)}`, style: { fg: C.cyan, bold: true } },
+        ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, { text: `“${preview(jobFor[0].text, 40)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(jobFor[0]!) }] : []),
+        { text: '  · ', style: { fg: C.faint } },
+        { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
+      ]
+    : req && reqInfo
     ? [
         { text: ` ▣ Request ${req.topicId ?? ''} `, style: { bg: C.blue, fg: 16, bold: true } },
         { text: ` ${reqInfo.mark} ${reqInfo.state}  `, style: { fg: reqInfo.isStale ? C.gray : C.cyan, bold: true } },
@@ -1832,8 +1919,23 @@ function paint() {
       openAgent,
       setRead,
       dismiss,
+      firedBy: t => {
+        const j = t.fired?.job ? S.jobs.list.find(x => x.toolId === t.fired!.job) : undefined
+        return j ? { label: `${jobMark(j)} scheduled job ran: “${jobName(j, 50)}”`, open: () => openJob(j.toolId) } : t.fired ? { label: `⏰ a scheduled job ran${t.fired.prompt ? `: “${preview(t.fired.prompt, 50)}”` : ''}` } : undefined
+      },
   }
-  const { lines: chat, anchors, owners } = req && reqInfo
+  const { lines: chat, anchors, owners } = job
+    ? jobLines(job, {
+        by: jobBy(job),
+        for: jobFor,
+        runs: job.runs.map(r => ({ at: r.at, ...(r.turn && S.turns.some(t => t.key === r.turn) ? { open: () => openFired(r.turn!) } : {}) })),
+        openMessage,
+        openAgent,
+        cancel: () => cancelJob(job),
+        copy: text => copyText(text),
+        now: Date.now(),
+      }, { ...ctx, turns: S.turns.filter(t => t.aboutJob === job.toolId) }, cw - 2)
+    : req && reqInfo
     ? requestLines(req, reqInfo, { ...ctx, askStatus: () => submit('What is the status of this request?') }, cw - 2)
     : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2)
   S.anchors = anchors
@@ -2304,7 +2406,7 @@ function key(k: string) {
       } else if (asking) dismissAsk()
       else if (S.replyTo) S.replyTo = null
       else if (S.picked) S.picked = ''
-      else if (S.agentView || S.requestView) closeAgent()
+      else if (S.agentView || S.requestView || S.jobView) closeAgent()
       else if (S.isWorking) {
         S.claude?.interrupt()
         toast('Interrupted.')
@@ -2573,6 +2675,12 @@ setInterval(() => {
 setInterval(() => {
   if (!S.isWorking && [...S.agents.values()].some(a => a.state === 'running')) draw()
 }, 1000)
+// Scheduled jobs: "in 3 min" counts down, and finished ones leave the panel after a while.
+setInterval(() => {
+  if (!S.jobs.list.length) return
+  tick(S.jobs, Date.now())
+  if (!S.isWorking) draw()
+}, 15_000)
 
 if (wantPicker) {
   const sessions = listSessions(cwd)
