@@ -38,8 +38,12 @@ export type ClaudeEvent =
   | { kind: 'agent-tool-result'; parent: string; id: string; text: string; isError: boolean; data?: unknown }
   /** A scheduled job fired (CronCreate, ScheduleWakeup): Claude Code starts a turn of its own, with no message of yours. */
   | { kind: 'fired'; source: string }
-  /** Background task news from Claude Code: started, progress, or finished (status). */
-  | { kind: 'task'; phase: 'started' | 'progress' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; lastTool?: string }
+  /**
+   * Background task news from Claude Code: started, progress, a change (updated: its status, or that it
+   * went to the background), or finished (status). `type`: local_agent, local_bash (a background shell
+   * command)…; `outputFile`: where a shell command's output goes.
+   */
+  | { kind: 'task'; phase: 'started' | 'progress' | 'updated' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; lastTool?: string; type?: string; isBackgrounded?: boolean; outputFile?: string }
 
 export type McpServer = { name: string; status: string }
 export type CommandInfo = { name: string; description?: string; argumentHint?: string }
@@ -242,6 +246,17 @@ export class Claude {
             ...(e.status ? { status: String(e.status) } : {}),
             ...(e.summary || e.description ? { text: String(e.summary ?? e.description) } : {}),
             ...(e.last_tool_name ? { lastTool: String(e.last_tool_name) } : {}),
+            ...(e.task_type ? { type: String(e.task_type) } : {}),
+            ...(typeof e.is_backgrounded === 'boolean' ? { isBackgrounded: e.is_backgrounded } : {}),
+            ...(e.output_file ? { outputFile: String(e.output_file) } : {}),
+          })
+        else if (e.subtype === 'task_updated' && e.patch && typeof e.patch === 'object')
+          emit({
+            kind: 'task',
+            phase: 'updated',
+            taskId: String(e.task_id ?? ''),
+            ...(e.patch.status ? { status: String(e.patch.status) } : {}),
+            ...(typeof e.patch.is_backgrounded === 'boolean' ? { isBackgrounded: e.patch.is_backgrounded } : {}),
           })
         return
       case 'stream_event': {

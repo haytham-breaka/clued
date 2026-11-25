@@ -31,11 +31,12 @@ import {
   settleTurn,
   stripTag,
 } from '../hooks/model.ts'
-import { agentLines, chatLines, heldLines, jobLines, requestLines, stepLabel } from './chat.ts'
+import { agentLines, chatLines, heldLines, jobLines, requestLines, shellLines, stepLabel } from './chat.ts'
 import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.ts'
 import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
 import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
+import { newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, shellName, shellsFromTurns, shellState, shownShells, stopText } from './shells.ts'
 import type { Job } from './scheduled.ts'
 import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
@@ -228,6 +229,8 @@ const S = {
   requestView: '',
   /** Scheduled jobs Claude set up (CronCreate, ScheduleWakeup…), and the one whose view is open ('' = none). */
   jobs: newJobs(),
+  /** Background shell commands (Bash run_in_background): their view opens in jobView's place, by the call's id. */
+  shells: newShells(),
   jobView: '',
   mainScroll: 0,
 }
@@ -538,7 +541,7 @@ function requestInfo(req: Turn): RequestInfo {
 // ---- Inside a scheduled job ------------------------------------------------------------
 
 function openJob(id: string) {
-  if (!S.jobs.list.some(j => j.toolId === id)) return toast('That job is no longer here.')
+  if (!S.jobs.list.some(j => j.toolId === id) && !S.shells.list.some(x => x.id === id)) return toast('That job is no longer here.')
   if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.agentView = ''
   S.requestView = ''
@@ -546,6 +549,18 @@ function openJob(id: string) {
   S.chatScroll = 0
   S.replyTo = null
   draw()
+}
+
+/** A background command's view: its command and its output so far (it takes the job view's place). */
+function openShell(id: string) {
+  if (!S.shells.list.some(x => x.id === id)) return toast('That command is no longer here.')
+  openJob(id)
+}
+const shellView = () => (S.jobView ? S.shells.list.find(x => x.id === S.jobView) : undefined)
+/** Who ran a background command: Claude itself, or the agent whose step started it. */
+function shellBy(x: { by?: string }): { name: string; agent?: Agent } {
+  const a = x.by ? S.agents.get(x.by) : undefined
+  return a ? { name: who(a, S.agents.values()), agent: a } : { name: '✻ Claude (lead)' }
 }
 
 /** Who set a job up: Claude itself, or the agent whose own steps made the call. */
@@ -827,6 +842,7 @@ function start(resume?: string) {
     assignParts(S.turns, S.kept.board)
     // The jobs the session file shows (the Claude Code that ran them has stopped).
     S.jobs = jobsFromTurns(S.turns, Date.now())
+    S.shells = shellsFromTurns(S.turns)
     // Its agents and their tasks; the same session again (a new model) keeps the agents it has live.
     const was = S.agents
     S.agents = new Map(agentsFromTurns(S.turns).map(a => [a.id, resume === wasSession && was.get(a.id) ? was.get(a.id)! : a]))
@@ -834,6 +850,7 @@ function start(resume?: string) {
     for (const a of S.agents.values()) if (a.cut) a.cut = S.kept.stopped?.[a.id] ?? 'exit'
   } else {
     S.jobs = newJobs()
+    S.shells = newShells()
     S.sessionId = ''
     S.turns = []
     S.kept = { board: emptyBoard(), reactions: {}, links: {} }
@@ -886,7 +903,7 @@ function followUpTurn(): Turn {
   const now = Date.now()
   const bg = [...S.agents.values()].filter(a => a.isBackground)
   const back = bg.filter(a => a.endedAt && now - a.endedAt < 2 * 60 * 1000)
-  const from = back.length ? back : bg.filter(a => a.state === 'running')
+  const from = [...(back.length ? back : bg.filter(a => a.state === 'running')), ...S.shells.list.filter(x => x.endedAt && now - x.endedAt < 2 * 60 * 1000)]
   const keys = from.length ? [...new Set(from.flatMap(a => a.for))] : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
   const turn = newTurn('', now)
   // Keyed by the agent whose end it answers, as the session file will show it on resume.
@@ -974,6 +991,7 @@ function onEvent(e: ClaudeEvent) {
     case 'tool':
       // A scheduling call: the job it makes shows under Scheduled once its result says so.
       onCall(S.jobs, e.tool, Date.now(), { for: t?.followUp ?? openFor() })
+      onShellCall(S.shells, e.tool, Date.now(), { for: t?.followUp ?? openFor() })
       // A message to an agent is a task of its own: it waits while the agent runs, and continues
       // one that finished (back under Agents, running).
       if (e.tool.name === 'SendMessage') {
@@ -1024,6 +1042,7 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'tool-result': {
       onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
+      onShellResult(S.shells, e.id, e.text, e.isError, e.data, Date.now())
       const a = S.agents.get(e.id)
       if (a) {
         // Its agent id, which SendMessage and its transcript go by (a finished one's result can name it).
@@ -1054,6 +1073,7 @@ function onEvent(e: ClaudeEvent) {
     case 'agent-step': {
       const a = agentOf(e.parent)
       onCall(S.jobs, e.tool, Date.now(), { by: e.parent, for: a?.for ?? [] })
+      onShellCall(S.shells, e.tool, Date.now(), { by: e.parent, for: a?.for ?? [] })
       if (a) {
         a.steps++
         a.last = stepLabel({ tool: e.tool }, cwd).text
@@ -1072,6 +1092,7 @@ function onEvent(e: ClaudeEvent) {
     }
     case 'agent-tool-result': {
       onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
+      onShellResult(S.shells, e.id, e.text, e.isError, e.data, Date.now())
       const a = agentOf(e.parent)
       if (a) touch(a, Date.now())
       const hit = a?.log.find(x => 'step' in x && x.step.tool.id === e.id)
@@ -1082,6 +1103,12 @@ function onEvent(e: ClaudeEvent) {
       break
     }
     case 'task': {
+      // A background shell command's: Claude follows up on its end as it does on an agent's.
+      if (onShellTask(S.shells, e, Date.now(), { for: openFor() })) {
+        if (e.phase === 'done' && !t) endedIdle ??= e.taskId || e.toolUseId
+        break
+      }
+      if (e.phase === 'updated') break
       const a = (e.toolUseId && S.agents.get(e.toolUseId)) || [...S.agents.values()].find(x => x.taskId && x.taskId === e.taskId)
       if (!a) break
       if (e.taskId) a.taskId = e.taskId
@@ -1162,8 +1189,9 @@ function onEvent(e: ClaudeEvent) {
             endRun(a, 'stopped', Date.now())
             a.cut = 'exit'
           }
-        // Jobs Claude Code kept only in memory went with it.
+        // Jobs Claude Code kept only in memory went with it, and so did its background commands.
         onExit(S.jobs, Date.now())
+        onShellsExit(S.shells, Date.now())
       }
       break
   }
@@ -1402,6 +1430,9 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     }
     const job = at.job ? S.jobs.list.find(j => j.toolId === at.job) : undefined
     if (job) turn.aboutJob = job.toolId
+    const sh = at.job ? S.shells.list.find(x => x.id === at.job) : undefined
+    if (sh) turn.aboutJob = sh.id
+    if (sh) hidden = `${hidden}\nThe user wrote this from inside the view of your background command "${shellName(sh, 80)}" (${sh.taskId ? `task ${sh.taskId}, ` : ''}${shellState(sh)}; command ${JSON.stringify(preview(sh.command, 120))}${sh.outputFile ? `; output in ${sh.outputFile}` : ''}): it is about that command.`
     if (job) hidden = `${hidden}\nThe user wrote this from inside the view of your scheduled job ${job.id} (${job.kind === 'wakeup' ? 'ScheduleWakeup' : job.kind === 'remote' ? 'RemoteTrigger' : `CronCreate "${job.cron ?? ''}"`}, ${stateLabel(job)}; prompt "${preview(job.prompt, 120)}"): it is about that job.`
     const inside = opts.agent ? S.agents.get(opts.agent) : at.agent ? S.agents.get(at.agent) : undefined
     if (inside) {
@@ -2252,11 +2283,12 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const inside = S.agentView ? S.agents.get(S.agentView) : undefined
   const req = S.requestView ? S.turns.findLast(t => t.key === S.requestView) : undefined
   const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
-  const border = { fg: S.search ? C.yellow : req ? C.blue : inside ? C.magenta : job ? C.yellow : S.isWorking ? C.faint : C.cyan }
-  const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : job ? ` ${jobMark(job)} about the scheduled job: ${clip(jobName(job), Math.max(6, w - 40))} ` : ''
-  L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
+  const shell = shellView()
+  const border = { fg: S.search ? C.yellow : req ? C.blue : inside ? C.magenta : job ? C.yellow : shell ? C.cyan : S.isWorking ? C.faint : C.cyan }
+  const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : job ? ` ${jobMark(job)} about the scheduled job: ${clip(jobName(job), Math.max(6, w - 40))} ` : shell ? ` $ about the background command: ${clip(shellName(shell), Math.max(6, w - 44))} ` : ''
+  L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : shell ? C.cyan : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
-  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = S.sel?.area === 'input' ? rowSpans(inner) : []
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
@@ -2381,6 +2413,8 @@ function paint() {
         jobs: shownJobs(S.jobs, Date.now()).map(j => ({ job: j, by: j.by ? jobBy(j).name : undefined })),
         openJob,
         jobView: S.jobView,
+        shells: shownShells(S.shells, Date.now()).map(x => ({ shell: x, by: x.by ? shellBy(x).name : undefined })),
+        openShell,
         scroll: S.listAt,
         height: H,
         side: d => { S.hscroll = Math.max(0, S.hscroll + d); draw() },
@@ -2424,9 +2458,18 @@ function paint() {
   if (S.requestView && !req) S.requestView = ''
   const reqInfo = req ? requestInfo(req) : undefined
   const job = S.jobView ? S.jobs.list.find(j => j.toolId === S.jobView) : undefined
-  if (S.jobView && !job) S.jobView = ''
-  const jobFor = job ? job.for.map(k => S.turns.findLast(t => t.key === k)).filter((t): t is Turn => !!t) : []
-  const banner: Line | undefined = job
+  const shell = shellView()
+  if (S.jobView && !job && !shell) S.jobView = ''
+  const jobFor = (job ?? shell)?.for.map(k => S.turns.findLast(t => t.key === k)).filter((t): t is Turn => !!t) ?? []
+  const banner: Line | undefined = shell
+    ? [
+        { text: ` $ Background · ${clip(shellName(shell, 40), 40)} `, style: { bg: C.cyan, fg: 16, bold: true } },
+        { text: `  ${shellState(shell)}`, style: { fg: shell.state === 'failed' ? C.red : C.cyan, bold: true } },
+        ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, { text: `“${preview(jobFor[0].text, 40)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(jobFor[0]!) }] : []),
+        { text: '  · ', style: { fg: C.faint } },
+        { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
+      ]
+    : job
     ? [
         { text: ` ${jobMark(job)} Scheduled · ${clip(jobName(job, 40), 40)} `, style: { bg: C.yellow, fg: 16, bold: true } },
         { text: `  ${stateLabel(job)}`, style: { fg: C.cyan, bold: true } },
@@ -2505,14 +2548,25 @@ function paint() {
         return j ? { label: `${jobMark(j)} scheduled job ran: “${jobName(j, 50)}”`, open: () => openJob(j.toolId) } : t.fired ? { label: `⏰ a scheduled job ran${t.fired.prompt ? `: “${preview(t.fired.prompt, 50)}”` : ''}` } : undefined
       },
   }
-  const viewKey = `${cw}|${req?.key ?? ''}|${inside?.id ?? ''}|${S.agentView}|${job?.toolId ?? ''}`
+  const viewKey = `${cw}|${req?.key ?? ''}|${inside?.id ?? ''}|${S.agentView}|${job?.toolId ?? ''}|${shell?.id ?? ''}`
   const reuse = spinOnly && chatCache?.key === viewKey && Date.now() - chatCache.at < 1000
   spinOnly = false
   if (!reuse)
     chatCache = {
       key: viewKey,
       at: Date.now(),
-      out: job
+      out: shell
+        ? shellLines(shell, {
+            by: shellBy(shell),
+            for: jobFor,
+            ...(shell.outputFile ? { output: readOutput(shell.outputFile) } : {}),
+            openMessage,
+            openAgent,
+            stop: () => { submit(stopText(shell)); toast('Asked Claude to stop it.') },
+            copy: text => copyText(text),
+            now: Date.now(),
+          }, { ...ctx, turns: S.turns.filter(t => t.aboutJob === shell.id) }, cw - 2)
+        : job
         ? jobLines(job, {
             by: jobBy(job),
             for: jobFor,
@@ -2528,7 +2582,7 @@ function paint() {
         : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
     }
   // Side answers (/btw) sit in the chat itself, after the message that was last when asked.
-  const base = job || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
+  const base = job || shell || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
   // Held messages last, in every view: they are the newest, and drawn fresh for their countdown.
   const held = S.held.length
     ? heldLines(S.held.map(h => {
@@ -3395,9 +3449,9 @@ setInterval(() => {
 setInterval(() => {
   if (S.held.length) draw()
 }, 500)
-// Running agents' clocks.
+// Running agents' and background commands' clocks, and a command's output as it comes.
 setInterval(() => {
-  if (!S.isWorking && [...S.agents.values()].some(a => a.state === 'running')) draw()
+  if (!S.isWorking && ([...S.agents.values()].some(a => a.state === 'running') || S.shells.list.some(x => x.state === 'running'))) draw()
 }, 1000)
 // Scheduled jobs: "in 3 min" counts down, and finished ones leave the panel after a while.
 setInterval(() => {

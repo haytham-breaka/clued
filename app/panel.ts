@@ -5,6 +5,8 @@ import { answerGist, matches, preview } from './inbox.ts'
 import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
+import { shellName, shellState } from './shells.ts'
+import type { Shell } from './shells.ts'
 import type { Saved, Step, Turn, Work } from './session.ts'
 import { canContinue, currentTask, cutLabel, pulseOf, workingFor } from './tasks.ts'
 import type { AgentTask, Pulse } from './tasks.ts'
@@ -180,6 +182,9 @@ export type PanelCtx = {
   jobs: { job: Job; by?: string }[]
   openJob: (toolId: string) => void
   jobView: string
+  /** Background shell commands to list (with the agent's name when one ran it), and opening one (its view is jobView's). */
+  shells?: { shell: Shell; by?: string }[]
+  openShell?: (id: string) => void
   /** A topic's title (Not started shows it), and asking Claude to start on a request now. */
   topicTitle?: (id: string) => string | undefined
   startRequest?: (m: MessageRef) => void
@@ -305,7 +310,9 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
     if (running) L.push(row(width, [{ text: '◐', style: { fg: C.cyan } }], [{ text: String(running), style: { fg: C.cyan, bold: true } }]))
     const live = p.jobs.filter(x => x.job.state === 'scheduled').length
     if (live) L.push(row(width, [{ text: '⏰', style: { fg: C.yellow }, action: () => p.openJob(p.jobs.find(x => x.job.state === 'scheduled')!.job.toolId) }], [{ text: String(live), style: { fg: C.yellow, bold: true } }]))
-    if (p.box.unread.length || p.box.waiting.length || saved.length || running || live) L.push(rule(width))
+    const bg = (p.shells ?? []).filter(x => x.shell.state === 'running')
+    if (bg.length) L.push(row(width, [{ text: '$', style: { fg: C.cyan, bold: true }, action: () => p.openShell?.(bg[0]!.shell.id) }], [{ text: String(bg.length), style: { fg: C.cyan, bold: true } }]))
+    if (p.box.unread.length || p.box.waiting.length || saved.length || running || live || bg.length) L.push(rule(width))
     return { lines: L, head: 2 }
   }
 
@@ -477,6 +484,36 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       id: 'agents',
       cap: 12,
       header: [row(width, [{ text: 'Agents', style: { bold: true, fg: C.magenta } }], [{ text: running ? `${running} working` : stopped ? `${stopped} stopped` : 'all done', style: { fg: running ? C.cyan : stopped ? C.gray : C.faint } }])],
+      rows,
+    })
+  }
+
+  // ---- Background shell commands (Bash run_in_background): what each runs, how long, how it ended.
+  // A click opens its command and its output so far.
+  const shells = p.shells ?? []
+  if (shells.length) {
+    const rows: Line[] = []
+    for (const { shell: s, by } of shells) {
+      const open = () => p.openShell?.(s.id)
+      const isOn = p.jobView === s.id
+      const isRunning = s.state === 'running'
+      const icon = isRunning ? { t: '◐', fg: C.cyan } : s.state === 'done' ? { t: '✓', fg: C.green } : s.state === 'failed' ? { t: '✕', fg: C.red } : { t: '■', fg: C.gray }
+      const right = isRunning ? `running ${ago(now - s.startedAt)}` : `${shellState(s)} ${ago(now - (s.endedAt ?? now))} ago`
+      rows.push(row(iw, [
+        { text: isOn ? '▸' : ' ', style: { fg: C.cyan }, action: open },
+        { text: `${icon.t} `, style: { fg: icon.fg }, action: open },
+        { text: slide(shellName(s, 80), p.hscroll), style: { bold: isRunning || isOn, dim: !isRunning && !isOn, fg: isOn ? C.cyan : undefined }, action: open },
+      ], [{ text: right, style: { fg: isRunning ? C.cyan : s.state === 'failed' ? C.red : C.faint }, action: open }]))
+      // Under it: the command itself (when the row shows its description), and who ran it.
+      const cmd = s.description.trim() ? s.command.trim().split('\n')[0]! : ''
+      const sub = [cmd && `$ ${cmd}`, by && `by ${by}`, !isRunning && s.endedAt ? `ran ${ago(s.endedAt - s.startedAt)}` : ''].filter(Boolean).join(' · ')
+      if (sub) rows.push(row(iw, [{ text: '   ' }, { text: slide(sub, p.hscroll), style: { fg: C.faint }, action: open }]))
+    }
+    const live = shells.filter(x => x.shell.state === 'running').length
+    sections.push({
+      id: 'background',
+      cap: 8,
+      header: [row(width, [{ text: 'Background', style: { bold: true, fg: C.cyan } }], [{ text: live ? `${live} running` : 'all done', style: { fg: live ? C.cyan : C.faint } }])],
       rows,
     })
   }

@@ -13,6 +13,8 @@ import { canContinue, currentTask, cutLabel, isQuiet, pulseOf, todosOf } from '.
 import type { AgentTask, Todo } from './tasks.ts'
 import { clock, cronWords, jobMark, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
+import { shellName, shellState } from './shells.ts'
+import type { Output, Shell } from './shells.ts'
 import type { Part } from './inbox.ts'
 import { C, cells, clip, lineCells, pad, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
@@ -1037,6 +1039,89 @@ export function jobLines(j: Job, info: JobInfo, ctx: ChatCtx, width: number): { 
   out.push([])
   if (about.length) out.push([pad(2), { text: `── your messages about this job ${'─'.repeat(Math.max(0, width - 36))}`, style: { fg: C.faint } }])
   else out.push(...wrap([{ text: 'Write below to ask Claude about this job, or to change it. Esc goes back to the chat.', style: { fg: C.faint } }], width - 4).map(l => [pad(2), ...l]))
+  const base = out.length
+  const anchors: Record<string, number> = {}
+  for (const [k, v] of Object.entries(rest.anchors)) anchors[k] = v + base
+  const owners: string[] = []
+  rest.owners.forEach((o, i) => (owners[i + base] = o))
+  out.push(...rest.lines)
+  return { lines: out, anchors, owners }
+}
+
+// ---- Inside a background command -----------------------------------------------------------
+
+export type ShellInfo = {
+  /** Who ran it: Claude itself, or the agent whose step started it. */
+  by: { name: string; agent?: Agent }
+  /** Your messages it was started for. */
+  for: Turn[]
+  /** Its output so far (none while its file isn't known yet). */
+  output?: Output
+  openMessage: (t: Turn) => void
+  openAgent: (id: string) => void
+  /** Asks Claude to stop it. */
+  stop: () => void
+  copy: (text: string) => void
+  now: number
+}
+
+/** The output rows a view shows at most: the newest ones. */
+const OUTPUT_ROWS = 400
+
+/**
+ * A background shell command: what it is, how it stands (its exit code, Claude Code's summary of its
+ * end), who ran it and for which message, then the command and its output so far, read from its
+ * file while it runs. Below that, your messages about it and Claude's replies, as in the main chat.
+ */
+export function shellLines(s: Shell, info: ShellInfo, ctx: ChatCtx, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
+  const out: Line[] = [[]]
+  const IN = 4
+  const isRunning = s.state === 'running'
+  const stateFg = isRunning ? C.cyan : s.state === 'failed' ? C.red : s.state === 'done' ? C.green : C.gray
+  const head: Span[] = [pad(2), { text: '$ Background command', style: { bold: true, fg: C.cyan } }, { text: s.taskId ? `  ${s.taskId}` : '', style: { fg: C.gray } }, { text: `  ·  ${shellState(s)}`, style: { bold: true, fg: stateFg } }]
+  if (isRunning) head.push({ text: '   ' }, { text: ' ✕ stop ', style: { inverse: true, fg: C.red, bold: true }, action: info.stop })
+  out.push(head)
+  const section = (title: string) => out.push([], [pad(2), { text: title, style: { bold: true } }])
+  const field = (label: string, value: Span[]) => {
+    const rows = wrap(value, Math.max(10, width - IN - 13), [pad(IN + 12)])
+    rows.forEach((l, i) => out.push(i ? l : [pad(IN), { text: label.padEnd(12), style: { fg: C.gray } }, ...l]))
+  }
+
+  section('What it is')
+  field('what', [{ text: shellName(s, 200) }])
+  field('started', [{ text: clock(s.startedAt, info.now), style: { fg: C.white } }])
+  field(isRunning ? 'running for' : 'ran for', [{ text: secs((s.endedAt ?? info.now) - s.startedAt), style: { fg: isRunning ? C.cyan : C.white } }])
+  if (s.exitCode != null) field('exit code', [{ text: String(s.exitCode), style: { fg: s.exitCode ? C.red : C.green, bold: true } }])
+  if (s.note) field(isRunning ? 'note' : 'ended', [{ text: s.note, style: { fg: C.gray } }])
+  if (s.outputFile) field('output', [{ text: s.outputFile, style: { fg: C.gray } }, { text: '  ⧉ copy', style: { fg: C.cyan }, action: () => info.copy(s.outputFile!) }])
+  const agent = info.by.agent
+  field('run by', agent
+    ? [{ text: `◇ ${info.by.name}`, style: { fg: C.magenta, bold: true, underline: true }, action: () => info.openAgent(agent.id) }, { text: ` · ${agent.name}`, style: { fg: C.gray } }]
+    : [{ text: info.by.name, style: { fg: C.claudeName, bold: true } }])
+  for (const [i, t] of info.for.entries())
+    field(i ? '' : 'for', [{ text: `↳ “${preview(t.text, Math.max(20, width - 24))}”`, style: { fg: C.gray, underline: true }, action: () => info.openMessage(t) }])
+
+  // The command and its output, as a terminal shows them: the newest rows when there are many.
+  section(isRunning ? 'Output so far' : 'Output')
+  const o = info.output
+  const text = o && !('missing' in o) ? o.text.replace(/\s+$/, '') : ''
+  const lines = text ? text.split('\n') : []
+  const shown = lines.slice(-OUTPUT_ROWS)
+  const cut = lines.length - shown.length
+  if (cut > 0 || (o && 'isTail' in o && o.isTail)) out.push([pad(IN), { text: `… earlier output not shown${s.outputFile ? `: the whole of it is in ${s.outputFile}` : ''}`, style: { fg: C.faint, italic: true } }])
+  const term = block(shellRows(s.command || shellName(s, 200), shown.join('\n'), s.state === 'failed'), width - IN, { left: [{ text: ' bash', style: { fg: C.gray, italic: true } }], right: [{ text: '⧉ copy ', style: { fg: C.cyan }, action: () => info.copy(s.command) }] })
+  for (const l of term) out.push([pad(IN), ...l])
+  const empty = !o ? (s.taskId ? 'Claude Code named no output file for it.' : 'Waiting for Claude Code to start it…')
+    : 'missing' in o ? 'Its output file is gone: Claude Code keeps it in a temporary folder.'
+    : !text ? (isRunning ? 'No output yet.' : 'It printed nothing.') : ''
+  if (empty) out.push([pad(IN), { text: empty, style: { fg: C.faint, italic: true } }])
+  if (isRunning) out.push([pad(IN), { text: `${ctx.spin} still running: the output follows as it comes`, style: { fg: C.cyan } }])
+
+  // Your messages about it, with Claude's replies.
+  const rest = chatLines(ctx, width)
+  out.push([])
+  if (ctx.turns.length) out.push([pad(2), { text: `── your messages about this command ${'─'.repeat(Math.max(0, width - 40))}`, style: { fg: C.faint } }])
+  else out.push(...wrap([{ text: 'Write below to ask Claude about this command. Esc goes back to the chat.', style: { fg: C.faint } }], width - 4).map(l => [pad(2), ...l]))
   const base = out.length
   const anchors: Record<string, number> = {}
   for (const [k, v] of Object.entries(rest.anchors)) anchors[k] = v + base

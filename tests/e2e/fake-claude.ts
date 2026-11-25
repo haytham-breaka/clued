@@ -361,6 +361,48 @@ async function scenario(m: Msg) {
     say('Sent helper one more to do.')
     return result()
   }
+  // A background shell command, as Claude Code runs one: the Bash call, its task_started, the result
+  // naming its id and output file; output appended on release-bsh-more; on release-bsh-end its last
+  // line, task_updated and task_notification, and Claude's follow-up in a turn of its own.
+  if (t.includes('start a background command')) {
+    const file = `${dir}/tasks/bsh42.output`
+    mkdirSync(dirname(file), { recursive: true })
+    tool('bc-1', 'Bash', { command: 'npm test -- --slow', description: 'Run the slow tests', run_in_background: true })
+    out({ type: 'system', subtype: 'task_started', task_id: 'bsh42', tool_use_id: 'bc-1', description: 'Run the slow tests', task_type: 'local_bash', is_backgrounded: true })
+    writeFileSync(file, 'test 1 ok\n')
+    toolResult('bc-1', `Command running in background with ID: bsh42. Output is being written to: ${file}. You will be notified when it completes. To check interim output, use Read on that file path.`, false, undefined, { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: 'bsh42' })
+    finish(m, 'Started the slow tests in the background.', 'claude')
+    if (!(await release('bsh-more', 20_000))) return
+    appendFileSync(file, 'test 2 ok\nprogress 10%\rprogress 100%\n')
+    if (!(await release('bsh-end', 20_000))) return
+    appendFileSync(file, 'all 2 passed\n')
+    out({ type: 'system', subtype: 'task_updated', task_id: 'bsh42', patch: { status: 'completed', end_time: Date.now() } })
+    out({ type: 'system', subtype: 'task_notification', task_id: 'bsh42', tool_use_id: 'bc-1', description: 'Run the slow tests', status: 'completed', output_file: file, summary: 'Background command "Run the slow tests" completed (exit code 0)' })
+    say(`<<reply ${m.topic}>>\nThe slow tests passed.\n${tag([{ id: m.topic, status: 'done' }])}`)
+    return result()
+  }
+  // Background commands that end otherwise: one fails (exit 2), one with no description is stopped
+  // (TaskStop), a foreground one runs past its timeout and is moved to the background, and one the
+  // user refused never runs.
+  if (t.includes('more commands')) {
+    const file = (id: string) => `${dir}/tasks/${id}.output`
+    mkdirSync(`${dir}/tasks`, { recursive: true })
+    const started = (id: string) => `Command running in background with ID: ${id}. Output is being written to: ${file(id)}. You will be notified when it completes.`
+    tool('bf-1', 'Bash', { command: 'make lint', description: 'Lint everything', run_in_background: true })
+    writeFileSync(file('bfail1'), 'lint: 3 errors\n')
+    toolResult('bf-1', started('bfail1'), false, undefined, { backgroundTaskId: 'bfail1' })
+    tool('bs-1', 'Bash', { command: 'npm run dev', run_in_background: true })
+    writeFileSync(file('bstop2'), 'listening on 3000\n')
+    toolResult('bs-1', started('bstop2'))
+    tool('bm-1', 'Bash', { command: 'sleep 999', description: 'Wait a long time' })
+    toolResult('bm-1', `Command did not complete within its 120s timeout and was moved to the background (ID: bmove3). Output is being written to: ${file('bmove3')}. You will be notified when it completes.`)
+    tool('be-1', 'Bash', { command: 'rm -rf build', description: 'Clean the build', run_in_background: true })
+    toolResult('be-1', 'The user refused this.', true)
+    out({ type: 'system', subtype: 'task_notification', task_id: 'bfail1', tool_use_id: 'bf-1', status: 'failed', output_file: file('bfail1'), summary: 'Background command "Lint everything" failed with exit code 2' })
+    tool('ts-1', 'TaskStop', { task_id: 'bstop2' })
+    toolResult('ts-1', JSON.stringify({ message: 'Successfully stopped task: bstop2 (npm run dev)', task_id: 'bstop2', task_type: 'local_bash' }))
+    return finish(m, 'The lint failed, and I stopped the dev server.')
+  }
   if (t.includes('background agent')) {
     tool('bg-1', 'Agent', { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true })
     toolResult('bg-1', 'Started in the background. agentId: bg-42')
