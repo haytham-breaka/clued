@@ -122,6 +122,27 @@ node --no-warnings eval/run.ts --rescore eval/results/hard [--judge]   # score s
 - A − B as the mean over scenarios of (mean A − mean B), with a two-sided stratified permutation p-value: arm labels shuffled within each scenario, 5,000 shuffles.
 - A per-scenario table and A's overhead. `failures` in `results.json` lists every message that missed a fact, an attribution, a check or the judge, with the reply text.
 
+## Visibility: can you see what was answered?
+
+`visibility.ts` re-scores saved runs for a different question: for each message, can you see whether it was answered, by which reply, and what is still open? It runs no sessions. The method and results are in RESULTS.md, under "Can you see what was answered?".
+
+```sh
+node --no-warnings eval/visibility.ts --dry                                  # replay and the rules only; no model calls
+node --no-warnings eval/visibility.ts --truth-judge --glance --full --budget 3
+node --no-warnings eval/visibility.ts --run interleaved-A-r1 --screens --dry  # one run: transcript, marks, screens
+```
+
+- **Arm A** replays the recorded stream through the app's own code (`app/claude.ts`, `app/inbox.ts`, `hooks/model.ts`, and `submit`/`onEvent`/`finishTurn` ported from `app/main.ts`). `panelLines()` and `chatLines()` then draw one 120 × 40 screen. **Arm B** draws the same stream as Claude Code's terminal.
+- **The deterministic half** (replay, screens, rules, scores) is in `visibility-core.ts`, and `tests/unit/visibility.test.ts` tests it. The model calls, the cache and the summary are in `visibility.ts`.
+- **Model calls** (`claude -p`, as the judge above makes them):
+  - `--truth-judge`: one Sonnet call per run, for the ground truth;
+  - `--glance`: one Haiku call per moment and arm;
+  - `--full`: one Haiku call per run, reading the whole chat at the end.
+
+  They run 2 at a time.
+- **Budget, ledger and cache.** Every call is logged in `results/visibility/raw/ledger.jsonl`. A call that could pass `--budget` (spent so far plus 1.5 × the dearest call of its kind) is not made. Answers are cached by prompt in `results/visibility/raw/cache/`, so re-scoring costs nothing.
+- **Inputs and outputs.** `--in` (default `results/hard`) and `--raw` say where the saved runs are; `--out` (default `results/visibility`) is where `results.json` and `summary.md` go. These hold ids, states and scores only, with no transcript text.
+
 ## Caveats
 
 - **The interactive CLI isn't scripted.** B is the same headless `claude -p` stream-json process, standing in for normal Claude Code. The TUI may queue mid-turn messages a little differently.

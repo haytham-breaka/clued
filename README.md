@@ -163,10 +163,13 @@ clued and plain Claude Code were given the same 13 scripted conversations, with 
 | Messages sent mid-task that were answered | 56 of 56 | 56 of 58 |
 | Project checks passed | 100% | 99% |
 | Judge: correct, and answers given to the wrong message | 100%, none | 100%, none |
+| From one screen, messages you can tell are answered or not | 99.7% | 86% |
 
 - **What clued adds:** you can see, for each message, whether it was answered and where.
 - **What it doesn't add:** Claude's answers aren't better.
 - **What it costs:** about 1,100 tokens of instructions per session, plus a short tag on each reply.
+
+A follow-up on the same runs found that one glance at clued shows whether each message was answered, even after older ones scroll off, but finds neither the answer itself nor what is still open any better ([details](eval/RESULTS.md#can-you-see-what-was-answered-2026-11-25)).
 
 The full method and results are in [eval/RESULTS.md](eval/RESULTS.md), and the runner is in [eval/](eval/). In the eval files, clued appears under its earlier name, threadline.
 
