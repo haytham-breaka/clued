@@ -73,6 +73,8 @@ export const FOLDED = 7
 export type PanelCtx = {
   isResultsOnly: boolean
   isWorking: boolean
+  /** The spinner's frame, for messages something is working on now. */
+  spin?: string
   isFolded: boolean
   hscroll: number
   results: () => void
@@ -146,11 +148,12 @@ function legendLines(width: number, close: () => void): Line[] {
   return [
     item(mark.claude, markFg.claude, 'Claude is on it, no reply yet'),
     item(mark.progress, markFg.progress, 'replied, still owes work'),
+    item('⠋', C.cyan, 'in progress: being worked on'),
     item(mark.me, markFg.me, 'waiting on you'),
     item(mark.done, C.gray, 'done'),
     item(mark.failed, markFg.failed, 'failed'),
     item(mark.none, C.gray, 'not answered'),
-    item('⚠', C.yellow, 'reply lost, or no update'),
+    item('⚠', C.red, 'reply lost'),
     row(width, [{ text: '  ↩ ', style: { fg: C.faint }, action: close }, { text: 'replied  ', style: { fg: C.gray }, action: close }, { text: '↻ ', style: { fg: C.faint }, action: close }, { text: 'status', style: { fg: C.gray }, action: close }]),
     row(width, [{ text: '  mark: open chain · text: jump', style: { fg: C.faint }, action: close }]),
   ]
@@ -358,10 +361,10 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         const isPicked = p.picked === m.turn.key
         return row(iw, [
           { text: isOn ? '▸' : isPicked ? '›' : ' ', style: { fg: isPicked ? C.yellow : C.blue, bold: true }, action: open },
-          { text: m.stale ? '⚠' : mark[m.state], style: { fg: m.stale ? C.yellow : markFg[m.state] }, action: chain },
+          { text: m.active ? (p.spin ?? mark[m.state]) : mark[m.state], style: { fg: markFg[m.state] }, action: chain },
           { text: ' ', action: open },
           { text: slide(preview(m.turn.text, 200), p.hscroll), style: { dim: m.state === 'done' && !isOn && !isPicked, bold: isOn || isPicked, fg: isOn ? C.blue : isPicked ? C.yellow : undefined }, action: open },
-        ], [{ text: m.state === 'lost' ? 'reply lost' : m.stale ? 'no update' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.stale ? C.yellow : C.faint }, action: open }])
+        ], [{ text: m.state === 'lost' ? 'reply lost' : m.active ? 'in progress' : m.stale ? 'waiting' : `${m.event === 'replied' ? '↩ ' : m.event === 'status' ? '↻ ' : ''}${stamp(m.updatedAt, now)}`, style: { fg: m.state === 'lost' ? C.red : m.active ? C.cyan : C.faint }, action: open }])
       }),
     })
 

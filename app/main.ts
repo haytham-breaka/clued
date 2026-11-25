@@ -396,8 +396,8 @@ function requestInfo(req: Turn): RequestInfo {
   const turns = S.turns.filter(t => keys.has(t.key) || t.followUp?.some(k => keys.has(k)) || t.parts?.some(p => p.to.some(id => ids.has(id))))
   const agents = [...S.agents.values()].filter(a => a.for.some(k => keys.has(k)))
   const ref = S.box.messages.find(m => m.turn === req)
-  const state = ref?.stale ? 'no update' : ({ claude: 'waiting', progress: 'in progress', me: 'needs you', done: 'done', failed: 'failed', none: 'not answered', lost: 'reply lost' } as const)[ref?.state ?? 'claude']
-  const mark = ref?.stale ? '⚠' : ({ claude: '⏳', progress: '▶', me: '✋', done: '✓', failed: '✕', none: '○', lost: '⚠' } as const)[ref?.state ?? 'claude']
+  const state = ref?.active ? 'in progress' : ref?.stale ? 'waiting for Claude' : ({ claude: 'waiting', progress: 'in progress', me: 'needs you', done: 'done', failed: 'failed', none: 'not answered', lost: 'reply lost' } as const)[ref?.state ?? 'claude']
+  const mark = ref?.active ? SPIN[S.spinAt % SPIN.length]! : ({ claude: '⏳', progress: '▶', me: '✋', done: '✓', failed: '✕', none: '○', lost: '⚠' } as const)[ref?.state ?? 'claude']
   return { state, mark, isStale: !!ref?.stale, ids: [...ids], agents, turns, keys }
 }
 
@@ -1657,6 +1657,7 @@ function paint() {
       {
         isResultsOnly: S.isResultsOnly,
         isWorking: S.isWorking,
+        spin: SPIN[S.spinAt % SPIN.length]!,
         isFolded: S.isFolded,
         hscroll: S.hscroll,
         results: () => { S.isResultsOnly = !S.isResultsOnly; draw() },
@@ -1717,7 +1718,7 @@ function paint() {
   const banner: Line | undefined = req && reqInfo
     ? [
         { text: ` ▣ Request ${req.topicId ?? ''} `, style: { bg: C.blue, fg: 16, bold: true } },
-        { text: ` ${reqInfo.mark} ${reqInfo.state}  `, style: { fg: reqInfo.isStale ? C.yellow : C.cyan, bold: true } },
+        { text: ` ${reqInfo.mark} ${reqInfo.state}  `, style: { fg: reqInfo.isStale ? C.gray : C.cyan, bold: true } },
         { text: `“${preview(req.text, 50)}”`, style: { fg: C.gray, underline: true }, action: () => openMessage(req) },
         { text: '  · ', style: { fg: C.faint } },
         { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
@@ -2444,7 +2445,7 @@ process.on('uncaughtException', err => {
 
 // The spinner, the turn timer and a slow status refresh.
 setInterval(() => {
-  if (S.isWorking) {
+  if (S.isWorking || S.box.messages.some(m => m.active)) {
     S.spinAt++
     draw()
   }

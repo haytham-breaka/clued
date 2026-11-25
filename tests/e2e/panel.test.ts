@@ -5,7 +5,11 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { rowOf, withApp } from './harness.ts'
+import { keyOf } from '../../hooks/model.ts'
+import { rowOf, withApp, writeSession } from './harness.ts'
+
+/** Any frame of the spinner a message something works on shows. */
+const SPIN = '[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]'
 
 /** A saved panel width (prefs), wide enough for agent rows in full. */
 const widePanel = ({ home }: { home: string }) => {
@@ -129,8 +133,8 @@ describe('panel', () => {
       assert.match(s, /✻ Claude \(lead\) +idle/)
       assert.match(s, /◐ James \(explorer\) · Explore…/)
       assert.match(s, /↳ “first message”/)
-      // An agent owes work: its message is in progress.
-      assert.match(s, /▶ first message/)
+      // An agent is on it: its message is in progress, with a spinner.
+      assert.match(s, new RegExp(`${SPIN} first message +in progress`))
       await app.click('James', { area: 'panel' })
       s = await app.waitFor('← back to chat')
       assert.match(s, /◇ James \(explorer\) · Explore the codebase {3}↳ “first message”/)
@@ -201,7 +205,8 @@ describe('panel', () => {
       await app.send('background agent please')
       let s = await app.waitFor('Started it in the background.')
       assert.match(s, /Long job bg/)
-      assert.match(s, /▶ background agent please/)
+      // The agent in the background is on it.
+      assert.match(s, new RegExp(`${SPIN} background agent please +in progress`))
       app.release('bg')
       s = await app.waitFor('The background job is done.')
       assert.match(s, /Claude · \d\d:\d\d · followed up/)
@@ -218,8 +223,9 @@ describe('panel', () => {
       app.type('draft text')
       await app.click('?', { area: 'panel' })
       let s = await app.waitFor('Claude is on it, no reply yet')
-      for (const l of ['replied, still owes work', 'waiting on you', 'not answered', 'reply lost, or no update', '↩ replied  ↻ status', 'mark: open chain · text: jump'])
+      for (const l of ['replied, still owes work', 'in progress: being worked on', 'waiting on you', 'not answered', '⚠ reply lost', '↩ replied  ↻ status', 'mark: open chain · text: jump'])
         assert.ok(s.includes(l), l)
+      assert.ok(!s.includes('no update'))
       await app.click('done', { area: 'panel' })
       await app.waitGone('Claude is on it, no reply yet')
       await app.click('⌕', { area: 'panel' })
@@ -320,11 +326,39 @@ describe('panel', () => {
       // A request still open has "ask for status".
       await app.send('hold on')
       await app.waitFor('Slow work')
-      await app.click('⏳ hold on', { area: 'panel' })
+      // Claude is on it: a spinner (its mark, just left of the text) and "in progress".
+      s = await app.waitFor(new RegExp(`${SPIN} hold on +in progress`))
+      await app.click(' hold on ', { area: 'panel', dx: -1 })
       s = await app.waitFor('ask for status')
-      assert.match(s, /⏳ waiting/)
+      assert.match(s, new RegExp(`${SPIN} in progress`))
       app.release('slow')
       await app.waitFor('✓ done')
+    }))
+
+  test('a message Claude still owes, with nothing running on it: "waiting", and "waiting for Claude" in its request', () =>
+    withApp({
+      args: ['--resume', 'owed-1'],
+      ready: 'I will look into it.',
+      setup: ({ home, work }) => {
+        const at = new Date(Date.now() - 5 * 60_000).toISOString()
+        writeSession(home, work, 'owed-1', [
+          { type: 'user', timestamp: at, message: { content: [{ type: 'text', text: 'look into the crash' }, { type: 'text', text: '[clued] This message is topic T1.' }] } },
+          { type: 'assistant', timestamp: at, message: { content: [{ type: 'text', text: 'I will look into it.\n<clued>{"topics":[{"id":"T1","status":"claude"}]}</clued>' }] } },
+        ])
+        // Still on Claude, and it last moved five minutes ago.
+        mkdirSync(join(home, '.clued', 'sessions'), { recursive: true })
+        writeFileSync(join(home, '.clued', 'sessions', 'owed-1.json'), JSON.stringify({
+          board: { topics: [{ id: 'T1', title: 'Crash', threadId: 0, status: 'claude', messageKeys: [keyOf('look into the crash')], updatedAt: Date.now() - 5 * 60_000 }], threads: [], answers: [], nextTopic: 2, turnTopics: [], replies: {} },
+        }))
+      },
+    }, async app => {
+      let s = await app.waitFor(/▶ look into the crash +waiting│/)
+      assert.ok(!s.includes('no update') && !s.includes('in progress'))
+      await app.click(' look into the crash ', { area: 'panel', dx: -1 })
+      s = await app.waitFor('▣ Request T1')
+      assert.match(s, /▶ waiting for Claude/)
+      assert.match(s, /Claude said it still owes work here, but nothing is running on it right now\./)
+      assert.ok(!s.includes('⚠'))
     }))
 
   test('/panel folds the panel to icons; the divider drags; the panel scrolls sideways', () =>

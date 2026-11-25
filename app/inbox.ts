@@ -38,7 +38,7 @@ export const REPLY_GUIDE = [
   'For a long job that other messages need not wait on, consider a background agent; when it comes back, start what',
   'you write about it with <<reply>> for the message it worked on.',
   'The note lists topics still "on Claude": whenever one of them is finished, or now waits on the user, list it in your',
-  'tag with its new status, even when this turn is about something else; otherwise the app shows it as having no update.',
+  'tag with its new status, even when this turn is about something else; otherwise the app keeps showing it as waiting for Claude.',
   'A request is done only when its work is finished: while you still owe work on it (also right after "I will do it"),',
   'mark it "claude"; when you finish it, even later or in the background, write a short closing reply to its id',
   '(<<reply T5>> then "Done: ..." in a line) and mark it "done". If you cannot finish it, say so in a reply to its id.',
@@ -117,7 +117,8 @@ export type PartRef = { id: string; turn: Turn; index: number; part: Part; previ
  * claude ⏳ not answered yet (Claude is on this turn); progress ▶ answered, but Claude said it still owes
  * work, or an agent is on it; me ✋ the answer asks you something; done ✓ finished; failed ✕ the turn
  * failed; none ○ never answered; lost ⚠ Claude's tag named it, but no reply to it arrived (it went
- * missing on the way: text written before a tool call can). `stale`: in progress with nothing working on it (no update coming).
+ * missing on the way: text written before a tool call can). `active`: Claude's turn or an agent is on it now.
+ * `stale`: in progress with nothing working on it (shown as waiting for Claude).
  */
 export type MessageState = 'claude' | 'progress' | 'me' | 'done' | 'failed' | 'none' | 'lost'
 export type MessageRef = {
@@ -125,6 +126,7 @@ export type MessageRef = {
   topicId?: string
   state: MessageState
   replyId?: string
+  active?: boolean
   stale?: boolean
   /** When it last moved, and how: you sent it, Claude replied to it, or its status changed. */
   updatedAt: number
@@ -134,7 +136,7 @@ export type MessageRef = {
 /** What is busy right now: Claude's turn, and the messages agents are working on (turn keys). */
 export type Live = { isWorking: boolean; busy: ReadonlySet<string>; now: number; reacted?: ReadonlySet<string> }
 
-/** In progress this long with nothing working on it: flagged ⚠ no update. */
+/** In progress this long with nothing working on it: shown as waiting for Claude. */
 export const STALE_MS = 60 * 1000
 
 /** A message, or a part, as one plain line. */
@@ -210,6 +212,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
       // A reaction can be the whole reply (✅ done); a topic Claude's tag settled had a reply that got lost.
       : live.reacted?.has(turn.key) ? 'done' : topic && !topic.isProvisional ? 'lost' : 'none'
     const stale = state === 'progress' && !live.isWorking && !isBusy && live.now - (topic?.updatedAt ?? turn.at) > STALE_MS
+    const active = (state === 'claude' && live.isWorking) || (state === 'progress' && isBusy)
     // The reply lands when its turn ends; the status moves when the topic does.
     const replyTurn = replyId ? parts.find(p => p.id === replyId)?.turn : undefined
     const repliedAt = replyTurn ? replyTurn.at + (replyTurn.durationMs ?? 0) : 0
@@ -217,7 +220,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)
     // The tag that came with a reply stamps its topic a moment later: that is still the reply.
     const event = updatedAt === turn.at ? 'sent' : repliedAt && updatedAt - repliedAt < 10_000 ? 'replied' : 'status'
-    messages.push({ turn, topicId, state, replyId, updatedAt, event, ...(stale ? { stale } : {}) })
+    messages.push({ turn, topicId, state, replyId, updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}) })
   })
   // Newest activity first; the same moment keeps the later message on top.
   const order = new Map(messages.map((m, i) => [m, i]))

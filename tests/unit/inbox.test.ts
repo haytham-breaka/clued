@@ -143,6 +143,36 @@ describe('inbox', () => {
     assert.equal(inbox([owes], board, new Set(), live({ now: NOW + STALE_MS + 1, isWorking: true })).messages[0]!.stale, undefined)
   })
 
+  test('active: Claude\'s turn is on it now, or an agent is; then it is never stale', () => {
+    const msg = (m: ReturnType<typeof inbox>) => m.messages[0]!
+    // Not answered yet, while Claude works: active; once nothing runs, not.
+    const working = turn('working', { topicId: 'T1', isDone: false })
+    const wBoard = boardOf(topic('T1', [working.key], 'claude', { isProvisional: true }))
+    assert.equal(msg(inbox([working], wBoard, new Set(), live({ isWorking: true }))).active, true)
+    assert.equal(msg(inbox([working], wBoard, new Set(), live())).active, undefined)
+    // Answered, still owed: active while an agent is on it, however long ago it last moved.
+    const owes = turn('owes', { topicId: 'T1', answer: 'On it.' })
+    const board = boardOf(topic('T1', [owes.key], 'claude'))
+    assignParts([owes], board)
+    const busy = msg(inbox([owes], board, new Set(), live({ busy: new Set([owes.key]), now: NOW + STALE_MS + 1 })))
+    assert.equal(busy.state, 'progress')
+    assert.equal(busy.active, true)
+    assert.equal(busy.stale, undefined)
+    // Claude working on something else is not working on it: neither active nor stale.
+    const other = msg(inbox([owes], board, new Set(), live({ isWorking: true, now: NOW + STALE_MS + 1 })))
+    assert.equal(other.active, undefined)
+    assert.equal(other.stale, undefined)
+    // Nothing on it, for a while: stale (waiting for Claude), not active.
+    const idle = msg(inbox([owes], board, new Set(), live({ now: NOW + STALE_MS + 1 })))
+    assert.equal(idle.active, undefined)
+    assert.equal(idle.stale, true)
+    // Done is never active, even while Claude works.
+    const done = turn('finished', { topicId: 'T2', answer: 'Done.' })
+    const dBoard = boardOf(topic('T2', [done.key], 'done'))
+    assignParts([done], dBoard)
+    assert.equal(msg(inbox([done], dBoard, new Set(), live({ isWorking: true }))).active, undefined)
+  })
+
   test('history from before the app: the next answer is the reply', () => {
     const a = turn('old question')
     const b = turn('old follow', { answer: 'Old answer.' })

@@ -656,12 +656,12 @@ export type RequestInfo = { state: string; mark: string; isStale: boolean; ids: 
  */
 export function requestLines(req: Turn, info: RequestInfo, ctx: ChatCtx & { askStatus: () => void }, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
   const out: Line[] = [[]]
-  const head: Span[] = [pad(2), { text: `${info.mark} ${info.state}`, style: { bold: true, fg: info.isStale ? C.yellow : info.state === 'done' ? C.green : C.cyan } }]
+  const head: Span[] = [pad(2), { text: `${info.mark} ${info.state}`, style: { bold: true, fg: info.isStale ? C.gray : info.state === 'done' ? C.green : C.cyan } }]
   const replies = info.turns.reduce((n, t) => n + (t.parts ?? []).filter(p => p.to.some(id => info.ids.includes(id))).length, 0)
   head.push({ text: `  ·  ${replies} repl${replies === 1 ? 'y' : 'ies'}${info.agents.length ? ` · ${info.agents.length} agent${info.agents.length === 1 ? '' : 's'}` : ''}`, style: { fg: C.gray } })
   if (info.state !== 'done') head.push({ text: '   ' }, { text: ' ask for status ', style: { inverse: true, fg: C.yellow }, action: ctx.askStatus })
   out.push(head)
-  if (info.isStale) out.push([pad(2), { text: '⚠ No update: nothing is working on it. Ask for its status, or add to it below.', style: { fg: C.yellow } }])
+  if (info.isStale) out.push([pad(2), { text: 'Claude said it still owes work here, but nothing is running on it right now. Ask for its status, or add to it below.', style: { fg: C.gray } }])
   for (const a of info.agents) {
     const icon = a.state === 'running' ? '◐' : a.state === 'done' ? '✓' : a.state === 'failed' ? '✕' : '■'
     out.push([pad(4), { text: `${icon} ◇ ${a.person ? `${a.person} (${roleOf(a.type)}) · ` : ''}${a.name}`, style: { fg: C.magenta }, action: () => ctx.openAgent(a.id) }, { text: `  ${a.state}`, style: { fg: C.faint } }])
