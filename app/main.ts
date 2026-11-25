@@ -35,7 +35,7 @@ import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
 import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
-import { assignParts, hasMarks, inbox, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
+import { assignParts, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
@@ -1091,6 +1091,27 @@ function finishTurn(resultText: string, isError: boolean, durationMs: number) {
   } catch {}
   if (m) autoLink(m[1]!)
   keep()
+  askForLost()
+}
+
+/** Messages already asked for again: once each, so a reply that never comes can't loop. */
+const askedAgain = new Set<string>()
+
+/**
+ * Replies Claude's tag settled but never wrote (it drafted them only in its thinking, say): asked for
+ * again at once, in one message, so the answers arrive without a click on each "↻ ask again".
+ */
+function askForLost() {
+  if (S.isWorking) return
+  const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
+  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running').flatMap(workingFor))
+  const box = inbox(S.turns, S.kept.board, S.read, { isWorking: false, busy, now: Date.now(), reacted })
+  // Not a message that itself asked again (↻ ask again): its reply names the message it asked about.
+  const lost = box.messages.filter(m => m.state === 'lost' && m.topicId && !askedAgain.has(m.turn.key) && !m.turn.text.includes('never reached the app'))
+  if (!lost.length) return
+  for (const m of lost) askedAgain.add(m.turn.key)
+  const ids = lost.sort((a, b) => S.turns.indexOf(a.turn) - S.turns.indexOf(b.turn)).map(m => m.topicId!)
+  submit(lostRepliesPrompt(ids), { reaction: '↻', retry: ids })
 }
 
 /**
@@ -1123,12 +1144,13 @@ function autoLink(json: string) {
 
 /** `about`: the request (turn key) it is part of, as when written inside that request's view. */
 /** `agent`: the agent (Agent tool use id) it is about, as when written inside that agent's view. */
-function submit(text: string, opts: { reaction?: string; about?: string; agent?: string } = {}) {
+function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; retry?: string[] } = {}) {
   if (!S.claude) start(S.sessionId || undefined)
   const now = Date.now()
   const turn = newTurn(text, now)
   endedIdle = undefined
   if (opts.reaction) turn.reaction = opts.reaction
+  if (opts.retry) turn.retry = opts.retry
   let hidden: string | undefined
   if (!opts.reaction && !text.startsWith('/')) {
     const reply = S.replyTo

@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyBoard, keyOf } from '../../hooks/model.ts'
-import { answerGist, assignParts, hasMarks, inbox, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
+import { answerGist, assignParts, lostRepliesAsked, hasMarks, inbox, lostRepliesPrompt, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
 import type { Turn } from '../../app/session.ts'
 import type { Board, Topic } from '../../types/index.d.ts'
 
@@ -32,6 +32,17 @@ describe('reply marks', () => {
   test('a numbered question names its message and remembers which', () => {
     assert.deepEqual(splitAnswer('<<reply T90.2>>\nThe second one.', []), [{ to: ['T90'], text: 'The second one.', subs: ['T90.2'] }])
     assert.deepEqual(splitAnswer('', ['T1']), [])
+  })
+})
+
+describe('asking again for replies that never arrived', () => {
+  test('one message names them all, and how to write each', () => {
+    assert.equal(lostRepliesPrompt(['T3']), 'Your reply to T3 never reached the app: it shows no answer to it. Write it again now as reply text, in a part starting with <<reply T3>>.')
+    assert.match(lostRepliesPrompt(['T2', 'T5']), /^Your replies to T2, T5 never reached the app: it shows no answer to them\. Write each of them again now as reply text, each in its own part/)
+    // Read back from the session file: the ids it asked for, and nothing for other text.
+    assert.deepEqual(lostRepliesAsked(lostRepliesPrompt(['T2', 'T5'])), ['T2', 'T5'])
+    assert.deepEqual(lostRepliesAsked(lostRepliesPrompt(['T3'])), ['T3'])
+    assert.equal(lostRepliesAsked('Your reply to this message (T3) never reached the app: it shows no answer.'), undefined)
   })
 })
 

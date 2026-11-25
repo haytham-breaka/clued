@@ -8,6 +8,7 @@ import { join } from 'node:path'
 const home = mkdtempSync(join(tmpdir(), 'clued-unit-'))
 process.env.HOME = home
 const S = await import('../../app/session.ts')
+const { lostRepliesPrompt } = await import('../../app/inbox.ts')
 const CWD = '/tmp/some project'
 
 const write = (id: string, lines: unknown[], mtime?: number) => {
@@ -110,10 +111,14 @@ describe('session files', () => {
       assistant([{ type: 'text', text: 'Sidechain' }], { isSidechain: true }),
       user('[clued reaction] 👍 on your message'),
       assistant([{ type: 'text', text: 'Thanks.' }], { message: { content: [{ type: 'text', text: 'Thanks.' }], usage: { input_tokens: 42 } } }),
+      user(lostRepliesPrompt(['T4', 'T5'])),
     ])
     const turns = S.loadHistory(CWD, 'full')
-    assert.deepEqual(turns.map(t => t.text), ['Fix the bug', 'And this too', 'array prompt', '[clued reaction] 👍 on your message'])
-    const [fix, also, arr, react] = turns as [any, any, any, any]
+    assert.deepEqual(turns.map(t => t.text), ['Fix the bug', 'And this too', 'array prompt', '[clued reaction] 👍 on your message', lostRepliesPrompt(['T4', 'T5'])])
+    const [fix, also, arr, react, again] = turns as [any, any, any, any, any]
+    // The app's own ask for lost replies is that again, not a message of yours.
+    assert.equal(again.reaction, '↻')
+    assert.deepEqual(again.retry, ['T4', 'T5'])
     assert.equal(fix.topicId, 'T4')
     assert.equal(fix.continued, true)
     assert.deepEqual(fix.steps.map((s: any) => [s.tool.name, s.said, s.result, s.isError]), [['Bash', 'Looking.', 'a.ts', true], ['Read', undefined, 'file text', false]])

@@ -70,6 +70,7 @@ const result = (extra: Record<string, unknown> = {}) => {
 let previous = ''
 /** Every message's topic so far, oldest first. */
 const topics: string[] = []
+const textOf = new Map<string, string>()
 /** Messages that arrived while a turn ran: Claude Code folds them into it, and the answer covers them. */
 let joined: Msg[] = []
 let busy = false
@@ -87,6 +88,22 @@ function finish(m: Msg, text: string, status = 'done', extra: Record<string, unk
 async function scenario(m: Msg) {
   const t = m.text.toLowerCase()
   const cwd = process.cwd()
+  // A reply drafted only in thinking: the tag settles the message, but no text for it arrives.
+  if (t.includes('think it only')) {
+    say(tag([{ id: m.topic, status: 'done' }]))
+    return result()
+  }
+  // The app asking again for replies that never arrived: each written now.
+  if (t.includes('never reached the app')) {
+    // "lose my reply" stays lost: its reply goes astray again.
+    const ids = (m.text.match(/T\d+/g) ?? []).filter(id => !textOf.get(id)?.includes('lose my reply'))
+    if (!ids.length) {
+      say(`<<reply T999>>\nThis names the wrong message again.\n${tag([])}`)
+      return result()
+    }
+    say(`${ids.map(id => `<<reply ${id}>>\nHere is the reply to ${id} again.`).join('\n\n')}\n${tag(ids.map(id => ({ id, status: 'done' })))}`)
+    return result()
+  }
   // A burst answered at once: a short part for every message so far, one long, and one that asks.
   if (t.includes('short answers')) {
     const parts = topics.map((id, i) => `<<reply ${id}>>\nShort answer ${i + 1}.`)
@@ -359,6 +376,7 @@ async function run() {
     await scenario(m)
     if (!m.text.toLowerCase().includes('please split')) previous = m.topic
     topics.push(m.topic)
+    textOf.set(m.topic, m.text)
   }
   busy = false
 }

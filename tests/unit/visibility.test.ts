@@ -74,6 +74,27 @@ describe('arm A: the recorded stream through the app', () => {
   })
 })
 
+describe('arm A: the app asks again for a reply that never arrived', () => {
+  // The first answer's tag settles both messages but writes only m1's part; the app asks for m2's.
+  const LOSE = '<<reply T1>>\nThe port is 8137.\n<clued>{"topics":[{"id":"T1","status":"done"},{"id":"T2","status":"done"}]}</clued>'
+  const AGAIN = '<<reply T2>>\nworkers is now 6.\n<clued>{"topics":[{"id":"T2","status":"done"}]}</clued>'
+  const evs: Ev[] = [
+    { t: 3000, e: { type: 'assistant', message: { content: [{ type: 'text', text: LOSE }] } } },
+    result(3010, LOSE),
+    { t: 4000, e: { type: 'assistant', message: { content: [{ type: 'text', text: AGAIN }] } } },
+    result(4010, AGAIN),
+  ]
+  const run = { ...runOf('A'), sent: runOf('A').sent.slice(0, 2), retries: [{ t: 3010, ids: ['T2'], text: 'Your reply to T2 never reached the app.' }] }
+  test('lost, then answered by the reply to the ask', () => {
+    const frames = replayA(run, evs)
+    assert.deepEqual(frames.at(-1)!.panel!.map(p => [p.id, p.state]), [['m1', 'done'], ['m2', 'done']])
+    assert.match(frames.at(-1)!.panel![1]!.replyText!, /workers is now 6/)
+    assert.match(frames.at(-1)!.screen, /↻ asked Claude again for a reply that never arrived/)
+    // Without the ask, m2 stays lost.
+    assert.equal(replayA({ ...run, retries: [] }, evs.slice(0, 2)).at(-1)!.panel![1]!.state, 'lost')
+  })
+})
+
 describe('arm B: the same stream as Claude Code shows it', () => {
   const frames = framesB(runOf('B'), events)
   test('prompts, tool lines with their result, and text; nothing from after the moment', () => {

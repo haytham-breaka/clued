@@ -341,7 +341,8 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     } else if (turn.reaction) {
       // On which reply: a click goes there.
       const on = ctx.kept.links[turn.key]
-      const t = on ? `you reacted ${turn.reaction} on “${clip(on.text, Math.max(10, meMax - 24))}”` : `you reacted ${turn.reaction}`
+      const n = turn.retry?.length ?? 0
+      const t = n ? `↻ asked Claude again for ${n > 1 ? `${n} replies` : 'a reply'} that never arrived` : on ? `you reacted ${turn.reaction} on “${clip(on.text, Math.max(10, meMax - 24))}”` : `you reacted ${turn.reaction}`
       const go = on?.anchor ? () => ctx.jump(on.anchor!) : undefined
       const way = delivered(turn)
       out.push([pad(width - cells(t) - 2 - cells(way.text)), { text: t, style: { fg: C.gray, italic: true, ...(go ? { underline: true } : {}) }, ...(go ? { action: go } : {}) }, pad(1), way])

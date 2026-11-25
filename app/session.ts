@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import { emptyBoard, keyOf, reactionText, stripTag } from '../hooks/model.ts'
 import type { Board } from '../types/index.d.ts'
 import type { ToolUse } from './claude.ts'
-import { hasMarks } from './inbox.ts'
+import { hasMarks, lostRepliesAsked } from './inbox.ts'
 import type { Part } from './inbox.ts'
 
 export type Step = {
@@ -53,6 +53,8 @@ export type Turn = {
   aboutJob?: string
   /** A reaction sent as a message: drawn as one small line. */
   reaction?: string
+  /** The app asking Claude again for replies that never arrived (their topic ids): drawn as one small line. */
+  retry?: string[]
   steps: Step[]
   /** Claude's final words, tag stripped. */
   answer?: string
@@ -338,6 +340,12 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       if (tid) cur.topicId = tid
       const reacted = reactionText(text)
       if (reacted !== undefined) cur.reaction = reacted.trim().split(/\s/)[0] ?? '👍'
+      // The app asking again for replies that never arrived: shown as that, not as a message of yours.
+      const retry = lostRepliesAsked(text)
+      if (retry) {
+        cur.reaction = '↻'
+        cur.retry = retry
+      }
       turns.push(cur)
       continue
     }

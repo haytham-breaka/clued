@@ -53,6 +53,18 @@ export const REPLY_GUIDE = [
   '(<<reply T5>> then "Done: ..." in a line) and mark it "done". If you cannot finish it, say so in a reply to its id.',
 ].join(' ')
 
+/** What the app sends when replies Claude's tag settled never arrived: write them again, one part each. */
+export function lostRepliesPrompt(ids: readonly string[]): string {
+  const many = ids.length > 1
+  return `Your ${many ? 'replies' : 'reply'} to ${ids.join(', ')} never reached the app: it shows no answer to ${many ? 'them' : 'it'}. Write ${many ? 'each of them' : 'it'} again now as reply text, ${many ? 'each in its own part starting with <<reply T…>> for its message' : `in a part starting with <<reply ${ids[0]}>>`}.`
+}
+
+/** The ids a lostRepliesPrompt() asks again for (the session file has only its text), or undefined. */
+export function lostRepliesAsked(text: string): string[] | undefined {
+  const m = text.match(/^Your repl(?:y|ies) to (T\d+(?:, T\d+)*) never reached the app: it shows no answer to (?:it|them)\./)
+  return m ? m[1]!.split(', ') : undefined
+}
+
 /** Whether text holds reply marks (a reply written mid-turn, not narration). */
 export const hasMarks = (text: string) => /^[ \t]*<<reply\s+[^>]*>>[ \t]*$/im.test(text)
 

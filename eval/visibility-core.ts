@@ -26,6 +26,8 @@ export type Sent = { id: string; t: number; text: string; shown: string; topicId
 export type SavedRun = {
   scenario: string; set: string; arm: 'A' | 'B'; rep: number; startedAt: string
   sent: Sent[]; texts: { t: number; text: string; sub: boolean }[]; results: { t: number; text: string }[]
+  /** The app asking again for replies that never arrived (arm A). */
+  retries?: { t: number; ids: string[]; text: string }[]
   score: { messages: { id: string; addressedFinal: boolean; addressedAny: boolean; reacted?: string; checksOk?: boolean }[] }
   judge?: { verdict?: { messages?: { id: string; answered: number; correct: boolean; clear: number }[] } }
 }
@@ -49,6 +51,30 @@ export function readRaw(dir: string, run: SavedRun): Ev[] {
 /** What the app holds at a moment: its turns, what it keeps, whether Claude is working. */
 export type AppState = { turns: Turn[]; kept: Kept; isWorking: boolean }
 
+/** app/main.ts askForLost()'s message: submit() with a reaction turn that names the lost replies. */
+export function submitRetry(S: AppState, text: string, now: number, ids: string[]) {
+  const turn = newTurn(text, now)
+  turn.reaction = '↻'
+  turn.retry = ids
+  queue(S, turn, now)
+  return turn
+}
+
+/** As submit() does: a message sent while Claude works joins the running turn. */
+function queue(S: AppState, turn: Turn, now: number) {
+  for (const t of S.turns.filter(x => !x.isDone)) {
+    turn.pending = t.pending
+    turn.queued = true
+    t.pending = ''
+    t.live = ''
+    t.isDone = true
+    t.continued = true
+    t.durationMs = now - t.at
+  }
+  S.turns.push(turn)
+  S.isWorking = true
+}
+
 /** app/main.ts submit(), for a message without request or agent view; `quote` is what the user replied to. */
 export function submit(S: AppState, text: string, now: number, quote?: { who: 'me' | 'claude'; text: string; key?: string; topics?: string[] }) {
   const turn = newTurn(text, now)
@@ -61,17 +87,7 @@ export function submit(S: AppState, text: string, now: number, quote?: { who: 'm
   turn.topicId = raised.topicId
   S.kept.board = raised.board
   if (quote?.key) S.kept.links[turn.key] = { key: quote.key, who: quote.who, text: preview(quote.text, 60) }
-  for (const t of S.turns.filter(x => !x.isDone)) {
-    turn.pending = t.pending
-    turn.queued = true
-    t.pending = ''
-    t.live = ''
-    t.isDone = true
-    t.continued = true
-    t.durationMs = now - t.at
-  }
-  S.turns.push(turn)
-  S.isWorking = true
+  queue(S, turn, now)
   return turn
 }
 
@@ -263,11 +279,20 @@ export function replayA(run: SavedRun, events: Ev[]): Frame[] {
     return { who: 'claude' as const, text: s.quoted }
   }
   let ei = 0
-  for (const s of sends) {
-    while (ei < events.length && events[ei]!.t < s.t) {
+  // Your messages and the app's own asks for lost replies, in the order they went out.
+  const outgoing = [...sends.map(s => ({ t: s.t, s })), ...(run.retries ?? []).map(r => ({ t: r.t, r }))].sort((a, b) => a.t - b.t)
+  for (const o of outgoing) {
+    // An ask goes out on the result that settled the lost replies: that result is fed first.
+    while (ei < events.length && (events[ei]!.t < o.t || ('r' in o && events[ei]!.t === o.t))) {
       now = base + events[ei]!.t
       feed(events[ei++]!.e)
     }
+    if ('r' in o) {
+      now = base + o.t
+      submitRetry(S, o.r!.text, now, o.r!.ids)
+      continue
+    }
+    const s = o.s!
     while (todo.length && todo[0]!.t <= s.t) snap(todo.shift()!)
     now = base + s.t
     const turn = submit(S, s.text, now, quoteOf(s))

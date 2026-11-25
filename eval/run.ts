@@ -18,7 +18,7 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // Frozen copies of hooks/model.ts and app/inbox.ts, and APP_GUIDE from app/main.ts (see frozen/SOURCES.txt).
 import { emptyBoard, flatBrief, FLAT_GUIDE, keyOf, parseTag, raiseTopic, settleTurn, stripTag } from './frozen/model.ts'
-import { hasMarks, preview, questionsOf, REPLY_GUIDE, splitAnswer, stripMarks } from './frozen/inbox.ts'
+import { hasMarks, lostRepliesPrompt, preview, questionsOf, REPLY_GUIDE, splitAnswer, stripMarks } from './frozen/inbox.ts'
 import { APP_GUIDE } from './frozen/guide.ts'
 import type { Board } from '../types/index.d.ts'
 
@@ -96,6 +96,8 @@ export type Run = {
   sent: Sent[]; texts: TextBlock[]; tools: { t: number; name: string; sub: boolean }[]; calls: Call[]; results: Result[]; perms: Perm[]
   checks: { name: string; msg?: string; ok: boolean; detail?: string }[]
   board?: Board; costUsd: number
+  /** Arm A: the app asking again for replies its tag settled but that never arrived (as app/main.ts askForLost()). */
+  retries?: { t: number; ids: string[]; text: string }[]
 }
 
 const NET = /\b(curl|wget|ssh|scp|rsync|nc|ncat|telnet|ftp|pip3?\s+install|npm\s+(i|install|publish)|npx|apt(-get)?|brew|git\s+(push|fetch|pull|clone))\b/
@@ -176,6 +178,10 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
   const callsById = new Map<string, Call>()
   let board: Board = emptyBoard()
   let toolSinceSend = false
+  // Arm A: the topics some reply part names so far, and the messages already asked for again.
+  const replied = new Set<string>()
+  const askedAgain = new Set<string>()
+  let sinceResult: string[] = []
 
   const write = (obj: unknown) => proc.stdin.writable && proc.stdin.write(JSON.stringify(obj) + '\n')
   const addCall = (id: string, t: number, sub: boolean, u: Usage) => {
@@ -206,7 +212,11 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
       }
       case 'assistant': {
         for (const b of e.message?.content ?? []) {
-          if (b.type === 'text' && b.text) run.texts.push({ t, text: b.text, sub })
+          if (b.type === 'text' && b.text) {
+            run.texts.push({ t, text: b.text, sub })
+            // A part written between tool calls counts once it has marks (else it is narration).
+            if (!sub && hasMarks(b.text)) for (const p of splitAnswer(b.text, [])) p.to.forEach(id => replied.add(id))
+          }
           else if (b.type === 'tool_use') {
             run.tools.push({ t, name: b.name, sub })
             if (!sub) toolSinceSend = true
@@ -226,7 +236,28 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
         }
         run.results.push(r)
         // As app/main.ts finishTurn(): the answer's tag settles the topics.
-        if (arm === 'A' && r.text) board = settleTurn(board, r.text, Date.now(), { flat: true }).board
+        if (arm === 'A' && r.text) {
+          board = settleTurn(board, r.text, Date.now(), { flat: true }).board
+          // Its unmarked text replies to every message since the last answer.
+          for (const p of splitAnswer(r.text, sinceResult)) p.to.forEach(id => replied.add(id))
+          sinceResult = []
+          // As askForLost(): messages the tag settled with no reply naming them (or the topic they joined)
+          // are asked for again, once, at once. A reaction-only reply to the latest message is its reply.
+          const reacted = /"react"\s*:/.test(r.text) ? run.sent.at(-1)?.id : undefined
+          const lost = run.sent.filter(s => {
+            if (!s.topicId || askedAgain.has(s.id) || s.id === reacted || replied.has(s.topicId)) return false
+            const topic = board.topics.find(x => x.id === s.topicId) ?? board.topics.find(x => x.messageKeys.includes(keyOf(s.text)))
+            return !!topic && !topic.isProvisional && !replied.has(topic.id)
+          })
+          if (lost.length) {
+            lost.forEach(s => askedAgain.add(s.id))
+            const ids = lost.map(s => s.topicId!)
+            const text = lostRepliesPrompt(ids)
+            write({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: '' })
+            ;(run.retries ??= []).push({ t, ids, text })
+            lastType = 'sent'
+          }
+        }
         return
       }
       case 'control_request': {
@@ -285,6 +316,7 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
     const content = arm === 'A' ? (note ? [{ type: 'text', text: m.text }, { type: 'text', text: note }] : m.text) : shown
     write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' })
     run.sent.push({ id: m.id, t: now - t0, text: m.text, shown, ...(note ? { note } : {}), ...(topicId ? { topicId } : {}), ...(q ? { quoted: q.text } : {}), midTurn })
+    if (topicId) sinceResult.push(topicId)
     lastType = 'sent'
     lastEventAt = Date.now()
     toolSinceSend = false

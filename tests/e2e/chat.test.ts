@@ -53,6 +53,19 @@ describe('chat', () => {
       await app.waitFor('Replying to Claude')
     }))
 
+  test('a reply the tag settled but that never arrived is asked for again, once, by the app', () =>
+    withApp({ unfocused: true }, async app => {
+      await app.send('think it only')
+      const s = await app.waitFor('Here is the reply to T1 again.')
+      assert.match(s, /↻ asked Claude again for a reply that never arrived/)
+      assert.match(s, /✓ think it only/)
+      assert.ok(!s.includes('⚠'), 'no longer shown as lost')
+      // What went to Claude: one message naming it.
+      const asks = app.sent().filter(x => x.text.includes('never reached the app'))
+      assert.equal(asks.length, 1)
+      assert.match(asks[0]!.text, /Your reply to T1 never reached the app.*<<reply T1>>/)
+    }))
+
   test('a reply in two parts with <<reply T1>>: one bubble each, quoting its own message', () =>
     withApp({ unfocused: true }, async app => {
       await app.send('first message')
@@ -271,8 +284,10 @@ describe('chat', () => {
   test('a reply that never arrived is flagged, and can be asked for again', () =>
     withApp({}, async app => {
       await app.send('lose my reply')
-      let s = await app.waitFor('⚠ no reply arrived · ↻ ask again')
+      // The app asked again by itself, once; that reply went astray too, so it is still flagged.
+      let s = await app.waitFor(x => x.includes('⚠ no reply arrived · ↻ ask again') && x.includes('wrong message again'))
       assert.match(s, /⚠ lose my reply +reply lost/)
+      assert.equal(app.sent().filter(x => x.text.includes('never reached the app')).length, 1)
       await app.click('↻ ask again', { area: 'chat' })
       s = await app.waitFor('never reached the app')
       const last = app.sent().at(-1)!
