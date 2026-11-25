@@ -8,6 +8,10 @@
 [![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-informational.svg)](.claude-plugin/plugin.json)
 [![Runs on Claude Code](https://img.shields.io/badge/runs%20on-Claude%20Code-d97757.svg)](https://claude.com/claude-code)
 
+![clued in a real session: a message sent while Claude works waits in queue, then gets its own answer; Claude asks with a card you click; the Overview lists unread replies and jumps to them; a request's chain; ☆ save a reply and come back to it from ★ Saved; a background agent's live steps](docs/demo.gif)
+
+**[▶ Watch with sound](docs/demo.mp4)** (82 s, narrated)
+
 clued makes no API calls of its own. Claude Code runs underneath, headless, with your own login: its tools, permissions, plugins, MCP servers, hooks, slash commands, status line and sessions are all still Claude Code's. clued draws the screen and keeps track of the conversation.
 
 ## Contents
@@ -25,7 +29,7 @@ clued makes no API calls of its own. Claude Code runs underneath, headless, with
 
 - **Nothing you ask gets lost.** In a plain terminal session, a question you typed while Claude was busy can be answered in the middle of a tool run, or not at all. clued gives every message a mark: ⏳ Claude is on it, ✋ waiting on you, ✓ done. A message whose reply never arrived says so, with a button to ask again.
 - **Every reply says what it answers.** A reply quotes the message, or each of the several messages, it answers. Click a quote to jump to it. From any message you can open its whole chain: the follow-ups, the corrections and every reply that touched it.
-- **You can type while Claude works.** A message you send while Claude is busy waits in clued (`⏳ in queue`) and goes as a turn of its own when Claude's turn ends, one per turn, so each gets its own answer. A reply to the work in progress (a part of the running turn, its request, or a running agent's view) goes at once, so you can still steer. `/queue off` sends everything at once instead, into the running turn the way Claude Code does it. Under each message, `✓ sent` means Claude Code has it, and `✓✓` means Claude has actually taken it in.
+- **You can type while Claude works.** A message you send while Claude is busy waits in clued (`⏳ in queue`) and goes as a turn of its own when Claude's turn ends, one per turn, so each gets its own answer. A reply to the work in progress (a part of the running turn, its request, or a running agent's view) goes at once, so you can still steer. `/queue off` sends everything at once instead, into the running turn the way Claude Code does it. Under each message, `✓ sent` means Claude Code has it, and `✓✓` means Claude has actually taken it in (a message sent into the running turn says `⏸ queued: Claude reads it at its next step` until then).
 - **A few seconds to take a message back.** For 3 seconds after Enter a message hasn't gone yet: `◌ sending in 3s · ✎ edit · ✕ delete` under it, and Ctrl+Z puts the last one back in the box. `/hold <seconds>` changes the time, `/hold 0` sends at once. A message that is `✓ sent` but not `✓✓` can still be deleted: Claude Code drops it from its queue when it can, and otherwise Claude is told to ignore it.
 - **It's still Claude Code.** No second client, no API key, no separate bill. Your `CLAUDE.md`, settings, permissions and plugins apply as they always do, and every session can also be opened in `claude` itself.
 - **The overhead is measured.** About 9% more cost per session, for the instructions and the small tag on each reply. The numbers are [below](#does-it-help-the-evaluation).
@@ -65,10 +69,10 @@ The panel on the left has these sections:
 - **Unread / Read:** replies you haven't seen yet, and the ones you have. A reply counts as read after 3 seconds on screen with the window focused.
 - **★ Saved:** the messages you saved to get back to later, newest first (shown once there is one). Click one to go to it; ✕ unsaves it.
 - **Waiting on you:** Claude's open questions to you. The ✕ on the left, or `✕ dismiss` under the question, drops one you don't want to answer: its message counts as done, and your next message tells Claude not to wait for an answer.
-- **Agents:** Claude first, then each agent it started, by name and role (`James (implementer)`, `Jake (explorer)`), running or just finished, with the message it is working on. Click one to open its live view. Claude is told the names too, so you can write "ask Jake to check the tests". When Claude sends an agent more work, each message is a new task: the agent's row says how many tasks it has and which one it is on, and its view lists them, with the agent's own to-do list below. On the right of a running agent: `last step 12s ago`, or `running Bash 6m` while a tool runs (a long test run is not stuck), or, after 5 minutes with no new step and nothing running, `quiet 6m` in yellow: its view says it may be stuck, with ▶ continue to have Claude check on it.
-- **Not started:** right under Agents, the requests Claude said it still owes work on that nothing is working on right now, with how long each has waited. Click one to open it, or ▶ start to ask Claude to start on it now.
+- **Agents:** Claude first, then each agent it started, by name and role (`James (implementer)`, `Jake (explorer)`), running or just finished, with the message it is working on. Claude's own row says how many of your messages its turn is on, and `waiting on you` in yellow while its question or a permission waits for you. Click one to open its live view. Claude is told the names too, so you can write "ask Jake to check the tests". When Claude sends an agent more work, each message is a new task: the agent's row says how many tasks it has and which one it is on, and its view lists them, with the agent's own to-do list below. On the right of a running agent: `last step 12s ago`, or `running Bash 6m` while a tool runs (a long test run is not stuck), or, after 5 minutes with no new step and nothing running, `quiet 6m` in yellow: its view says it may be stuck, with ▶ continue to have Claude check on it. A background agent that a `/reload` or Claude Code's exit cut off shows ■ stopped, with ▶ continue to have Claude resume it.
+- **Not started:** right under Agents, the requests Claude said it still owes work on that nothing is working on right now, one row per request, with how long each has waited. Click one to open it. ▶ start asks Claude to start on it now; while Claude is busy, `+ queue` sends the request to wait its turn instead.
 - **Scheduled:** the jobs Claude set to run later, with CronCreate or a `/loop` wakeup, shown while there is one. Each shows ⏰ for recurring or ⏲ for once, what it's for, when it runs next ("every 5 min · next 14:35", "in 3 min"), and whether it's scheduled, has run, or was deleted. Click one to see its whole prompt, its schedule, who set it up and which of your messages it's for, and each run. `✕ cancel` there asks Claude to delete it. Jobs that only live in memory end when Claude Code exits, so `/reload` ends them.
-- **Your recent messages:** each with its mark, latest activity first. Press `?` for what the marks mean and `⌕` to search.
+- **Your recent messages:** each with its mark. First the ones in progress, with who is on each (`Claude`, or `Maya · task 2`), then `in queue` (sent while Claude works, waiting for its turn), then `waiting` (Claude still owes work and nothing is on it), then the rest, newest first. Under an answered message, a dim `→` row gives the gist of its answer, room allowing. Press `?` for what the marks mean and `⌕` to search.
 
 Drag the divider to resize the panel, and click `≡` to fold it to icons. Your own status line command runs at the bottom, fed what Claude Code would feed it (the folder is the one Claude is working in now), with the permission mode under it, as in Claude Code.
 
@@ -116,7 +120,7 @@ Claude reacts too, only where it means something: 👀 seen (for a message sent 
 
 ### Chains
 
-The `⛓ chain` link under a message (as soon as it has a reply), or a click on its mark in the panel, opens everything connected to it: the replies, your follow-ups, the corrections, and the replies to those. Chains come from the session file and what clued keeps in `~/.clued/`, not from Claude's context, so they stay whole when Claude Code compacts the conversation.
+The `⛓ chain` link under a message (as soon as it has a reply), or a click on its mark in the panel, opens everything connected to it: the replies, your follow-ups, the corrections, and the replies to those. Chains come from the session file and what clued keeps in `~/.clued/`, not from Claude's context, so they stay whole when Claude Code compacts the conversation. When you reply to a message from before a compaction, or more than 30 messages back, its request's chain goes to Claude with it: the first message and the last few messages and replies, trimmed to about 2,000 characters, so Claude has the context it no longer holds word for word.
 
 ### Live views of Claude and its agents
 
@@ -124,7 +128,7 @@ Click Claude or any agent under **Agents** for its own view: each step as it hap
 
 ### Messages that never got an answer
 
-Sometimes a reply never arrives, for example when it was written between tool calls and Claude Code didn't keep it. Such a message is marked `⚠ reply lost` instead of looking answered, and `↻ ask again` sends it again.
+Sometimes a reply never arrives: Claude's tag settles a message, but no reply part for it came. When the turn ends, the app asks Claude at once, in one message, to write each missing reply again; the chat shows `↻ asked Claude again for 2 replies that never arrived`. A message whose reply is still missing after that is marked `⚠ reply lost` instead of looking answered, and `↻ ask again` sends it again.
 
 ### Images
 
@@ -151,7 +155,7 @@ When Claude asks you something, or needs a permission, you get a notification wi
 clued starts `claude -p --input-format stream-json --output-format stream-json` and talks to it over stdin and stdout:
 
 - **The guide:** a short instruction, appended to Claude Code's system prompt, asks Claude to end each reply with one hidden tag line. The tag says which of your messages the reply is about and what their status is now: on Claude, on you, or done.
-- **The note:** each message you send carries a one-line hidden note with its id (`T12`), the messages still open, and the questions it asks when there are several.
+- **The note:** each message you send carries a short hidden note with its id (`T12`), the messages still open, and the questions it asks when there are several. A message that goes into Claude's running turn says so, and asks for its own reply part; a reply to an old message brings its request's chain.
 - **Splitting:** when a reply answers several messages, Claude marks each part with `<<reply T12>>` lines. The app hides these and draws one bubble per part.
 - **History:** comes from Claude Code's own session file, so `--resume` and `-c` work the same way they do in `claude`.
 - **What clued keeps:** read marks, links, panel width, a send log and pasted images, in `~/.clued/`.
