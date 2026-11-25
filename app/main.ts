@@ -798,7 +798,27 @@ function start(resume?: string) {
 let endedIdle: string | undefined
 
 /** The turn Claude's events belong to: the newest one still open. */
-const openTurn = () => S.turns.findLast(t => !t.isDone)
+const openTurn = () => S.turns.findLast(t => !t.isDone && !waiting(t))
+
+/** Claude Code echoes each message it takes in (seen once this session): until then, a message isn't Claude's to work on. */
+let echoes = false
+/** Sent, not taken in yet: Claude Code gives it to Claude at its next step, or runs it after this turn. */
+const waiting = (t: Turn) => echoes && !!t.delivery && !t.reaction
+
+/**
+ * The earlier open turns stop here (their steps stay with them) and the rest of the work, with the
+ * words not yet shown, goes on under `turn`: Claude Code folded it into the running turn.
+ */
+function handOver(turn: Turn, now = Date.now()) {
+  for (const t of S.turns.filter(x => !x.isDone && x !== turn && !waiting(x))) {
+    turn.pending = [t.pending, turn.pending].filter(Boolean).join('\n\n')
+    t.pending = ''
+    t.live = ''
+    t.isDone = true
+    t.continued = true
+    t.durationMs = now - t.at
+  }
+}
 
 /**
  * Claude writing with no message of yours open: it went on by itself, as when a background agent
@@ -838,8 +858,15 @@ function onEvent(e: ClaudeEvent) {
   if (!t && !quitting && (e.kind === 'text-delta' || e.kind === 'text' || e.kind === 'tool')) t = followUpTurn()
   switch (e.kind) {
     case 'received': {
+      echoes = true
       const sent = S.turns.findLast(x => x.uuid === e.uuid)
-      if (sent) delete sent.delivery
+      if (!sent) break
+      delete sent.delivery
+      // Taken in now: mid-turn, the work goes on under it; after the turn, Claude starts on it.
+      if (!sent.isDone) {
+        handOver(sent)
+        S.isWorking = true
+      }
       break
     }
     case 'init':
@@ -1101,7 +1128,8 @@ function keepTail() {
 }
 
 function finishTurn(resultText: string, isError: boolean, durationMs: number) {
-  const open = S.turns.filter(t => !t.isDone)
+  // A message Claude Code hasn't taken in stays open: it runs next, as a turn of its own.
+  const open = S.turns.filter(t => !t.isDone && !waiting(t))
   const last = open.at(-1)
   // The turn ended on a part already shown: that part is the final answer (where it is, so it keeps its id).
   const tail = S.turns.findLast(x => x.tail != null)
@@ -1129,7 +1157,7 @@ function finishTurn(resultText: string, isError: boolean, durationMs: number) {
     if (isError) last.error = firstLine(raw, 200)
   }
   if (last) last.durationMs = durationMs || last.durationMs
-  S.isWorking = false
+  S.isWorking = S.turns.some(t => !t.isDone)
   if (!raw) return
   const settled = settleTurn(S.kept.board, raw, Date.now(), { flat: true })
   S.kept.board = settled.board
@@ -1272,15 +1300,10 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   }
   // Sent while Claude works: Claude Code folds it into the running turn, so the earlier open
   // turns stop here (their steps stay with them) and the rest of the work shows under this one.
-  for (const t of S.turns.filter(x => !x.isDone)) {
-    turn.pending = t.pending
-    turn.queued = true
-    t.pending = ''
-    t.live = ''
-    t.isDone = true
-    t.continued = true
-    t.durationMs = now - t.at
-  }
+  // With Claude Code's echoes, that happens when it takes the message in (see 'received'): a message
+  // sent as Claude writes its last words is run as a turn of its own instead.
+  if (S.turns.some(x => !x.isDone)) turn.queued = true
+  if (!echoes) handOver(turn, now)
   S.turns.push(turn)
   S.isWorking = true
   S.chatScroll = 0

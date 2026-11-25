@@ -74,6 +74,8 @@ const textOf = new Map<string, string>()
 /** Messages that arrived while a turn ran: Claude Code folds them into it, and the answer covers them. */
 let joined: Msg[] = []
 let busy = false
+/** Claude is writing its last words (no more tool rounds): a message now waits for a turn of its own. */
+let late = false
 const queue: Msg[] = []
 
 /** The answer's end: replies to any message that joined the turn, then the tag. */
@@ -124,6 +126,16 @@ async function scenario(m: Msg) {
     out({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 77 } } })
     await release('stream')
     return finish(m, 'Streaming the answer slowly, now finished.')
+  }
+  // The last tool round is over, Claude is writing its answer: a message sent now isn't folded into
+  // this turn. Claude Code runs it as a turn of its own after this one (echoed when it starts).
+  if (t.includes('wrap up late')) {
+    tool('wrap-1', 'Bash', { command: 'make', description: 'Build it' })
+    toolResult('wrap-1', 'ok')
+    late = true
+    await release('wrap')
+    late = false
+    return finish(m, 'Wrapped up the build.')
   }
   if (t.includes('run a tool')) {
     tool('tool-1', 'Bash', { command: 'echo hi\necho there', description: 'Say hi' })
@@ -457,7 +469,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     previous = m.topic
     return
   }
-  if (busy) {
+  if (busy && !late) {
     joined.push(m)
     unechoed.push(m)
   } else queue.push(m)

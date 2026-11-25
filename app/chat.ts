@@ -422,11 +422,13 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     // Queued and not reached yet: nothing of Claude's under it until it is. Words Claude finished
     // writing (a reply part, before its next step) count as reaching it.
     const notYet = !!turn.queued && working && !turn.steps.length && !turn.live && !turn.pending && !hasParts
+    // Still the running turn, with a later message sent and not taken in yet.
+    const queuedBelow = working && !turn.queued && ctx.turns.slice(idx + 1).some(t => t.queued && !t.isDone && !t.reaction)
     if (!notYet && (showSteps || working || text || hasParts || carried)) {
       owned = out.length
       const doneAt = new Date(turn.at + (turn.durationMs ?? 0))
       const time = `${String(doneAt.getHours()).padStart(2, '0')}:${String(doneAt.getMinutes()).padStart(2, '0')}`
-      const doing = carried ? (stillHere ? ' is working… your next message is queued ↓' : goesOn ? ' is still on it, with your next message ↓' : ' · went on with your next message ↓') : !working ? ` · ${time}${turn.followUp ? ' · followed up' : ''}` : turn.followUp ? ' is following up…' : turn.live || turn.pending ? ' is typing…' : turn.steps.length ? ' is working…' : ` is thinking… ${secs(ctx.now - turn.at)}`
+      const doing = carried ? (stillHere ? ' is working… your next message is queued ↓' : goesOn ? ' is still on it, with your next message ↓' : ' · went on with your next message ↓') : !working ? ` · ${time}${turn.followUp ? ' · followed up' : ''}` : turn.followUp ? ' is following up…' : queuedBelow ? ' is working… your next message is queued ↓' : turn.live || turn.pending ? ' is typing…' : turn.steps.length ? ' is working…' : ` is thinking… ${secs(ctx.now - turn.at)}`
       out.push([])
       anchors[`work:${turn.key}`] = out.length
       out.push([

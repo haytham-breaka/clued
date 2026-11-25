@@ -186,7 +186,9 @@ describe('not started', () => {
       s = await app.waitFor(/▷ Topic T1 +\+ queue \d+s│/)
       assert.ok(!rowOf(s, '▷ Topic T1').includes('▶ start'))
       await app.click('+ queue', { area: 'panel' })
-      s = await app.waitFor('↳ “Please start on T1 now.”')
+      // Claude is still on "hold on": the start request waits in queue until Claude Code takes it in.
+      s = await app.waitFor(/⏳ Please start on T1 now\. +in queue/)
+      assert.match(s, /↳ “hold on” \+1/)
       assert.equal(app.sent().at(-1)!.text, 'Please start on T1 now.')
       app.release('slow')
       app.release('later')

@@ -175,13 +175,15 @@ describe('chat', () => {
       app.release('part')
       const s = await app.waitFor('The part written before the pause.')
       assert.match(s, /↩ “part then pause”/)
-      assert.ok(!s.includes('queued: Claude reads it'), 'Claude has read the queued message')
+      // Claude Code hasn't taken the next message in yet: it still waits, honestly marked.
+      assert.match(s, /queued: Claude reads it at its next step/)
       // Its tag settled it: answered in the panel too, with the answer under it.
       assert.match(s, /✓ part then pause/)
       assert.match(rowOf(s, '✓ part then pause'), /↩/)
       app.release('pause')
       const end = await app.waitFor('Finished after the pause.')
       assert.equal(chatRowsWith(end, 'The part written before the pause.'), 1, 'shown once')
+      assert.ok(!end.includes('queued: Claude reads it'), 'taken in at the next step')
     }))
 
   test('a turn that ends on a part already shown: it is the answer, shown once', () =>
@@ -238,6 +240,29 @@ describe('chat', () => {
       await app.send('react to this')
       const s = await app.waitFor('✅ Claude')
       assert.match(rowOf(s, '✅ Claude'), /✅ Claude {2}↪? ?[●↪] answered/)
+    }))
+
+  test('a message sent as Claude writes its last words gets a turn of its own: its answer counts, no asking again', () =>
+    withApp({ unfocused: true }, async app => {
+      await app.send('wrap up late')
+      await app.waitFor('Build it')
+      await app.send('one more question')
+      await app.waitFor('⏸ queued')
+      app.release('wrap')
+      let s = await app.waitFor('Echo: one more question')
+      s = await app.waitFor(/✓ one more question/)
+      await new Promise(r => setTimeout(r, 800))
+      s = app.screen()
+      assert.ok(!s.includes('asked Claude again'), 'its answer counted: no asking again')
+      assert.ok(!app.sent().some(x => x.text.includes('never reached the app')))
+      // The chat side only (right of the panel's divider).
+      const div = app.divider()
+      const chat = s.split('\n').map(l => [...l].slice(div + 1).join(''))
+      assert.equal(chat.filter(l => l.includes('Echo: one more question')).length, 1, 'shown once')
+      // Each answer quotes only its own message; the second isn't a "follow-up".
+      assert.ok(chat.some(l => l.includes('↩ “wrap up late”')) && !chat.some(l => l.includes('↩ 2 messages')), 'the first answer is for the first message only')
+      assert.ok(chat.some(l => l.includes('↩ “one more question”')))
+      assert.ok(!s.includes('followed up'))
     }))
 
   test('a message sent while Claude works is queued, then answered with the work', () =>
