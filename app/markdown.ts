@@ -4,6 +4,7 @@
 import { C, cells, clipLine, lineCells, pad, remember, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
 import { clean, hardWrap, highlight, K, langOf } from './code.ts'
+import { bidiLine, bidiMode, isRtl } from './bidi.ts'
 
 /**
  * Whether a block is worth a copy button: a labelled code block always is; an unlabelled one or a
@@ -27,7 +28,8 @@ export function inline(text: string, base: Style = {}): Span[] {
     if (m[2] != null) {
       const code = m[2]
       const copy = copyNow
-      out.push({ text: code, style: { ...base, fg: C.yellow, bg: C.codeBg }, ...(copy ? { action: () => copy(code) } : {}) })
+      // Left to right even inside right-to-left words.
+      out.push({ text: code, style: { ...base, fg: C.yellow, bg: C.codeBg }, ltr: true, ...(copy ? { action: () => copy(code) } : {}) })
     }
     else if (m[3] != null || m[4] != null) out.push(...inline(m[3] ?? m[4]!, { ...base, bold: true }))
     else if (m[5] != null || m[6] != null) out.push(...inline(m[5] ?? m[6]!, { ...base, italic: true }))
@@ -57,8 +59,10 @@ function table(rows: string[], width: number): Line[] {
     const line: Line = []
     r.forEach((c, i) => {
       if (i > 0) line.push({ text: ' │ ', style: { fg: C.faint } })
-      const spans = clipLine(inline(c, ri === 0 ? { bold: true } : {}), widths[i]!)
-      line.push(...spans, pad(widths[i]! - lineCells(spans)))
+      // A cell in display order: one in a right-to-left language on the right of its column.
+      const spans = bidiLine(clipLine(inline(c, ri === 0 ? { bold: true } : {}), widths[i]!))
+      const room = pad(widths[i]! - lineCells(spans))
+      line.push(...(isRtl(spans) ? [room, ...spans] : [...spans, room]))
     })
     out.push(line)
     if (ri === 0) out.push([{ text: widths.map(w => '─'.repeat(w)).join('─┼─'), style: { fg: C.faint } }])
@@ -72,7 +76,7 @@ const rendered = new Map<string, Line[]>()
 export function markdown(src: string, width: number, copy?: (text: string) => void): Line[] {
   // The chat draws every reply on every frame: each text is rendered once per width. (A cached line's
   // copy action holds an earlier frame's copy function, which does the same.)
-  const key = `${width}${copy ? 'c' : ''}\0${src}`
+  const key = `${width}${copy ? 'c' : ''}${bidiMode()}\0${src}`
   // Callers add to the lines they get (the caret while a reply streams): each gets its own copy,
   // or the final reply, the same words, would keep the caret.
   const known = rendered.get(key)
@@ -126,7 +130,9 @@ function render(src: string, width: number, copy?: (text: string) => void): Line
       ])
       // Highlighted by its language; long lines wrap (never cut, so a command can be read and copied whole).
       highlight(shown, langOf(fence[2])).forEach(spans => {
-        for (const piece of hardWrap(spans, w - 1)) {
+        // Code reads left to right; a string in Arabic in it reads right to left inside that.
+        for (const raw of hardWrap(spans, w - 1)) {
+          const piece = bidiLine(raw, 'ltr')
           const pw = lineCells(piece)
           out.push([{ text: ' ', style: { bg: C.codeBg } }, ...piece.map(sp => ({ ...sp, style: { fg: C.white, ...sp.style, bg: C.codeBg } })), pad(w - 1 - pw, { bg: C.codeBg })])
         }

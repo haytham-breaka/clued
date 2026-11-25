@@ -186,6 +186,11 @@ export async function launch(opts: LaunchOpts = {}) {
     },
     /** What the app wrote to the terminal so far, escape sequences and all. */
     output: () => readIf(join(dir, 'output.log')),
+    /** Where the terminal's cursor is: 1-based row and column, in cells. */
+    cursor(): { row: number; col: number } {
+      const [x, y] = tmux('display-message', '-p', '#{cursor_x} #{cursor_y}').trim().split(' ').map(Number)
+      return { row: y! + 1, col: x! + 1 }
+    },
     /** The window title the app set (OSC 2). */
     title: () => tmux('display-message', '-p', '#{pane_title}').trim(),
     /** The text the app last copied (through OSC 52), '' when none. */

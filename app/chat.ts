@@ -18,6 +18,7 @@ import { canRerun, shellName, shellState } from './shells.ts'
 import type { Output, Shell } from './shells.ts'
 import type { Part } from './inbox.ts'
 import { C, cells, clip, lineCells, pad, wrap } from './text.ts'
+import { isRtl } from './bidi.ts'
 import type { Line, Span, Style } from './text.ts'
 
 export type ChatCtx = {
@@ -275,7 +276,8 @@ function bubble(body: Line[], inner: number, left: number, border: Style, header
   const tagW = tag ? cells(tag.text) + 2 : 0
   out.push(tag ? [pad(left), b('╭─ '), tag, b(' ' + '─'.repeat(Math.max(0, inner + 2 - tagW - 1)) + '╮')] : [pad(left), b('╭' + '─'.repeat(inner + 2) + '╮')])
   const rows = header ? [header.map(s => (headerAction ? { ...s, action: headerAction } : s)), ...body] : body
-  for (const l of rows) out.push([pad(left), b('│ '), ...l, pad(inner - lineCells(l)), b(' │')])
+  // A line of a paragraph that reads right to left goes on the right.
+  for (const l of rows) out.push([pad(left), b('│ '), ...(isRtl(l) ? [pad(inner - lineCells(l)), ...l] : [...l, pad(inner - lineCells(l))]), b(' │')])
   // An action can sit in the bottom border, so showing it moves nothing: ╰──── ↩ reply ─╯
   const footW = foot ? cells(foot.text) + 2 : 0
   out.push(foot && footW + 3 <= inner + 2 ? [pad(left), b('╰' + '─'.repeat(inner + 2 - footW - 1) + ' '), foot, b(' ─╯')] : [pad(left), b('╰' + '─'.repeat(inner + 2) + '╯')])
@@ -724,7 +726,8 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
         // A caret at the end of the part being written.
         if (i === liveParts.length - 1) {
           const last = body.at(-1)
-          if (last && lineCells(last) < claudeMax) last.push({ text: '▍', style: { fg: C.cyan } })
+          // Where the words end: on the left of a line that reads right to left.
+          if (last && lineCells(last) < claudeMax) last[isRtl(last) ? 'unshift' : 'push']({ text: '▍', style: { fg: C.cyan } })
           else body.push([{ text: '▍', style: { fg: C.cyan } }])
         }
         const m = part.to.map(id => ctx.messageOf(id, turn)).find((x): x is Turn => !!x)

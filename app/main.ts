@@ -57,6 +57,7 @@ import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
 import { C, cellText, cells, charCells, clip, clipLine, lineCells, markCells, pad, sgr, wrap } from './text.ts'
+import { bidiMode, bidiSpan, cursorCell, hasRtl, indexAt, inputRow, modeSequences, paragraphDir } from './bidi.ts'
 import type { Line, Span } from './text.ts'
 
 // ---- Options ---------------------------------------------------------------------
@@ -2086,6 +2087,8 @@ function inputPos(x: number, y: number, clamp = false): number | undefined {
   const span = rowSpans(g.inner)[g.first + Math.max(0, Math.min(g.count - 1, y - g.row))]
   if (!span) return undefined
   const col = x - g.col
+  const v = rowView(span, g.inner)
+  if (v) return span.start + indexAt(v.lay, col - v.off, v.text.length)
   let i = span.start
   let cw = 0
   for (const ch of span.chars) {
@@ -2236,8 +2239,34 @@ function inputRows(w: number): { rows: string[]; row: number; col: number } {
     rows.push(cur)
     idx += 1 // the newline
   }
+  // A row with right-to-left text: the cursor where its character is drawn.
+  const span = rowSpans(w)[row]
+  const v = span && rowView(span, w)
+  if (v) col = Math.max(0, Math.min(w, v.off + cursorCell(v.lay, S.cursor - span.start, v.text.length)))
   return { rows, row, col }
 }
+
+/**
+ * An input row in display order, when its line has right-to-left text (and the app reorders it):
+ * a line that reads right to left on the right (`off`: the cells before it). `sel`: in the text.
+ */
+function rowView(span: { start: number; chars: string[] }, inner: number, sel?: [number, number]) {
+  if (bidiMode() !== 'app') return undefined
+  const para = lineAt(span.start)
+  if (!hasRtl(para)) return undefined
+  const text = span.chars.join('')
+  const lay = inputRow(text, paragraphDir(para), sel && [sel[0] - span.start, sel[1] - span.start])
+  return { lay, text, off: lay.rtl ? Math.max(0, inner - lay.width) : 0 }
+}
+
+/** The line of the input text that `at` is in. */
+function lineAt(at: number): string {
+  const end = S.text.indexOf('\n', at)
+  return S.text.slice(S.text.lastIndexOf('\n', at - 1) + 1, end < 0 ? undefined : end)
+}
+
+/** Whether the cursor is in a line that reads right to left: there ← goes on through the text, as in any right-to-left field. */
+const cursorRtl = () => bidiMode() === 'app' && hasRtl(lineAt(S.cursor)) && paragraphDir(lineAt(S.cursor)) === 'rtl'
 
 /** The input box's rows as the box lays them out: where each starts in the text, and its characters. */
 function rowSpans(w: number): { start: number; chars: string[] }[] {
@@ -2270,6 +2299,11 @@ function moveRow(delta: number): boolean {
   const spans = rowSpans(w)
   const to = spans[row + delta]
   if (!to) return false
+  const v = rowView(to, w)
+  if (v) {
+    S.cursor = to.start + Math.min(indexAt(v.lay, col - v.off, v.text.length), v.text.length)
+    return true
+  }
   let i = to.start
   let cw = 0
   for (const ch of to.chars) {
@@ -2447,12 +2481,18 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : shell ? C.cyan : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
   const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
-  const spans = S.sel?.area === 'input' ? rowSpans(inner) : []
+  const spans = rowSpans(inner)
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
     let body: Line = [{ text, style: !S.text ? { fg: C.faint } : {} }]
     // The selected part of this row, in cells.
     const span = spans[first + i]
+    const v = S.text && span ? rowView(span, inner, S.sel?.area === 'input' ? [Math.min(S.sel.a, S.sel.b), Math.max(S.sel.a, S.sel.b)] : undefined) : undefined
+    if (v) {
+      const room = pad(inner - v.lay.width)
+      L.push([{ text: '│ ', style: border }, ...(v.lay.rtl ? [room, ...v.lay.spans] : [...v.lay.spans, room]), { text: ' │', style: border }])
+      return
+    }
     if (span && S.sel?.area === 'input') {
       const lo = Math.min(S.sel.a, S.sel.b)
       const hi = Math.max(S.sel.a, S.sel.b)
@@ -2498,7 +2538,8 @@ function draw() {
 function lineText(line: Line, w: number, row: number, x: number): string {
   let s = ''
   let used = 0
-  for (const sp of clipLine(line, w)) {
+  // A span drawn as it came (a preview, a title) with right-to-left words in it: reordered in its own cells.
+  for (const sp of clipLine(line, w).map(bidiSpan)) {
     const cw = cells(sp.text)
     if (sp.action && cw) regions.push({ row, x0: x + used + 1, x1: x + used + cw, action: sp.action })
     s += sgr(sp.style) + sp.text
@@ -3173,10 +3214,10 @@ function key(k: string) {
       S.text = S.text.slice(0, S.cursor) + S.text.slice(S.cursor + 1)
       break
     case '\x1b[D':
-      S.cursor = Math.max(0, S.cursor - prevChar(S.cursor))
-      break
     case '\x1b[C':
-      S.cursor = Math.min(S.text.length, S.cursor + ((S.text.codePointAt(S.cursor) ?? 0) > 0xffff ? 2 : 1))
+      // ← back and → on, or the other way round in a line that reads right to left.
+      if ((k === '\x1b[D') !== cursorRtl()) S.cursor = Math.max(0, S.cursor - prevChar(S.cursor))
+      else S.cursor = Math.min(S.text.length, S.cursor + ((S.text.codePointAt(S.cursor) ?? 0) > 0xffff ? 2 : 1))
       break
     case '\x1b[H':
     case '\x1b[1~': // Home in tmux and screen
@@ -3288,11 +3329,11 @@ function key(k: string) {
       S.chatScroll = Math.max(0, S.chatScroll - Math.max(3, S.chatRows - 3))
       break
     case '\x1b[1;5D':
-      // Ctrl+←/→: a word back or on (Windows Terminal and most Linux terminals send these).
-      wordBack()
-      break
     case '\x1b[1;5C':
-      wordOn()
+      // Ctrl+←/→: a word back or on (Windows Terminal and most Linux terminals send these); the other
+      // way round in a line that reads right to left.
+      if ((k === '\x1b[1;5D') !== cursorRtl()) wordBack()
+      else wordOn()
       break
     case '\x16':
     case '\x1bv':
@@ -3548,7 +3589,7 @@ function quit(code = 0) {
   S.claude?.close()
   btw.close()
   if (IS_WT && tabMark.startsWith('✋')) out.write('\x1b]9;4;0;0\x07')
-  out.write('\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
+  out.write(BIDI_SEQ.end + '\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   if (process.stdin.isTTY) process.stdin.setRawMode(false)
   if (S.sessionId) {
     // Agents still running go with this Claude Code: on resume they say they were stopped, and how.
@@ -3561,6 +3602,8 @@ function quit(code = 0) {
   setTimeout(() => process.exit(code), 300)
 }
 
+/** The app reorders right-to-left text itself: VTE is told not to (bidi.ts). */
+const BIDI_SEQ = modeSequences()
 if (!process.stdin.isTTY) {
   console.error('clued needs a terminal.')
   process.exit(1)
@@ -3568,7 +3611,7 @@ if (!process.stdin.isTTY) {
 process.stdin.setRawMode(true)
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (d: string) => input(d))
-out.write('\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[2J')
+out.write('\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[2J' + BIDI_SEQ.start)
 out.on('resize', () => {
   refreshStatus()
   draw()
@@ -3578,7 +3621,7 @@ process.on('SIGTERM', () => quit())
 process.on('SIGHUP', () => quit())
 process.on('uncaughtException', err => {
   quitting = true
-  out.write('\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
+  out.write(BIDI_SEQ.end + '\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   console.error(err)
   process.exit(1)
 })

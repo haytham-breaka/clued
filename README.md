@@ -56,7 +56,7 @@ clued --model opus     # any other flag goes to claude
 
 ## Documentation
 
-- [Using clued](docs/usage.md): the screen, the panel, sending while Claude works, replies, chains, agents, images, permissions, questions and notifications.
+- [Using clued](docs/usage.md): the screen, the panel, sending while Claude works, replies, chains, agents, images, permissions, questions, notifications, and Arabic, Hebrew and other right-to-left text.
 - [Keys](docs/keys.md) and selecting text.
 - [Commands](docs/commands.md): how to start it, and every slash command.
 - [How it works](docs/architecture.md): what clued adds to the conversation, and what it keeps on disk.
@@ -108,6 +108,8 @@ The method, every table and the earlier results are in [eval/RESULTS.md](eval/RE
 **Where is my data?** The conversation stays in Claude Code's session files, as it always does. clued keeps its own files in `~/.clued/`: per session, the links between messages and replies, read marks, reactions and saved messages; your panel settings; `sent.log`, a log of every message you send, with its hidden note, kept for 7 days and at most 5 MB; and the images you paste. A pasted image is deleted once it is 30 days old and no message was sent with it; one a message was sent with stays, so its `[image N]` still opens it. There's no telemetry. Notifications show Claude's question, so `/notify off` if your screen is shared. Details in [docs/architecture.md](docs/architecture.md#what-clued-keeps-in-clued).
 
 **What happens to agents, background commands and scheduled jobs on exit or `/reload`?** They run inside Claude Code, so they stop with it. A background agent that was cut off shows ■ stopped, with ▶ continue to have Claude resume it. Background commands show as stopped, with ↻ run again. Scheduled jobs that live only in memory end; durable ones and cloud routines may still run. Messages still in queue are held again when you open the session.
+
+**Can I write in Arabic or Hebrew?** Yes. clued puts right-to-left text in reading order and joins Arabic letters itself, since most terminals (Windows Terminal among them) don't, and puts such paragraphs on the right. `CLUED_BIDI=terminal` leaves it to a terminal that does it ([details](docs/usage.md#arabic-hebrew-and-other-right-to-left-text)).
 
 **Is clued an official Anthropic product?** No. It's an independent open-source project that runs on Claude Code.
 

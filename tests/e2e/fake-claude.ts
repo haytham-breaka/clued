@@ -799,6 +799,9 @@ async function scenario(m: Msg) {
     say(`<<reply T999>>\nThis names the wrong message.\n${tag([{ id: m.topic, status: 'done' }])}`)
     return result()
   }
+  // Arabic in, Arabic out: a reply in Arabic, with English words, inline code and a number in it.
+  if (t.includes('بالعربية'))
+    return finish(m, ['أهلاً بك! هذا رد بالعربية.', '', 'شغّل `npm test` ثم افتح app/main.ts في 3 دقائق.'].join('\n'))
   return finish(m, `Echo: ${m.text}`)
 }
 

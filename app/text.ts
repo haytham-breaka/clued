@@ -1,5 +1,8 @@
 // Text on a terminal grid: cell widths, styled spans, wrapping.
 
+import { bidiParagraphs, isControl, isMark } from './bidi.ts'
+import type { Unit } from './bidi.ts'
+
 export type Style = {
   bold?: boolean
   dim?: boolean
@@ -10,8 +13,13 @@ export type Style = {
   fg?: number
   bg?: number
 }
-/** `noCopy`: drawn but left out of a copied selection (a code block's line numbers, a diff's + and −). */
-export type Span = { text: string; style?: Style; action?: () => void; noCopy?: boolean }
+/**
+ * `noCopy`: drawn but left out of a copied selection (a code block's line numbers, a diff's + and −).
+ * `ltr`: kept left to right inside right-to-left text (inline code). `units`: the span is drawn
+ * reordered (bidi.ts), and these are its cells' characters as written; `rtl`: its paragraph reads
+ * right to left, so its line goes on the right.
+ */
+export type Span = { text: string; style?: Style; action?: () => void; noCopy?: boolean; ltr?: boolean; units?: Unit[]; rtl?: boolean }
 export type Line = Span[]
 
 export const C = {
@@ -54,6 +62,8 @@ export function charCells(ch: string): number {
   const cp = ch.codePointAt(0) ?? 0
   if (cp === 0xfe0f || cp === 0x200d || (cp >= 0x300 && cp <= 0x36f)) return 0
   if (cp < 32) return 0
+  // Combining marks (Arabic harakat, Hebrew points) sit on the character before them; bidi controls and joiners take no cell.
+  if (cp >= 0x300 && (cp === 0x200c || isMark(ch) || isControl(ch))) return 0
   return isWide(cp) ? 2 : 1
 }
 
@@ -113,6 +123,9 @@ export function wrap(spans: Span[], width: number, indent: Span[] = []): Line[] 
   for (const sp of spans) for (const part of sp.text.split(/(\s+)/)) if (part) words.push({ ...sp, text: part })
 
   const lines: Line[] = []
+  // Which paragraph (between hard line breaks) each line is of: a paragraph has one direction.
+  const paraOf: number[] = []
+  let para = 0
   let line: Line = []
   let w = 0
   const indentW = lineCells(indent)
@@ -120,6 +133,7 @@ export function wrap(spans: Span[], width: number, indent: Span[] = []): Line[] 
     // No trailing spaces.
     while (line.length && /^\s+$/.test(line.at(-1)!.text)) line.pop()
     lines.push(line)
+    paraOf.push(para)
     line = [...indent]
     w = indentW
   }
@@ -127,7 +141,10 @@ export function wrap(spans: Span[], width: number, indent: Span[] = []): Line[] 
     if (word.text.includes('\n')) {
       const parts = word.text.split('\n')
       for (let i = 0; i < parts.length; i++) {
-        if (i > 0) flush()
+        if (i > 0) {
+          flush()
+          para++
+        }
         if (parts[i]) {
           line.push({ ...word, text: parts[i]!.replace(/\s/g, ' ') })
           w += cells(parts[i]!)
@@ -174,7 +191,8 @@ export function wrap(spans: Span[], width: number, indent: Span[] = []): Line[] 
     }
   }
   if (line.length > indent.length || lines.length === 0) flush()
-  return lines
+  // Wrapped as written, then each line put in display order.
+  return bidiParagraphs(lines, paraOf)
 }
 
 /** The line with its cells from `from` up to (not including) `to` drawn in reverse: a selection. */
@@ -195,27 +213,42 @@ export function markCells(line: Line, from: number, to: number): Line {
       if (cur) out.push({ ...sp, text: cur, style: isCur ? { ...sp.style, inverse: !sp.style?.inverse } : sp.style })
       cur = ''
     }
-    for (const ch of sp.text) {
+    // A reordered span by its cells (a letter and its marks are selected together).
+    for (const ch of sp.units ? sp.units.map(u => u.text) : sp.text) {
       const isSel = at >= from && at < to
       if (isCur !== undefined && isSel !== isCur) flush()
       isCur = isSel
       cur += ch
-      at += charCells(ch)
+      at += cells(ch)
     }
     flush()
   }
   return out
 }
 
-/** The characters in a line's cells from `from` up to (not including) `to`. */
+/**
+ * The characters in a line's cells from `from` up to (not including) `to`. Of a reordered run, the
+ * ones selected, as written (in reading order, not in the order they are drawn).
+ */
 export function cellText(line: Line, from: number, to: number): string {
   let s = ''
   let at = 0
-  for (const sp of line)
-    for (const ch of sp.text) {
-      if (at >= from && at < to && !sp.noCopy) s += ch
-      at += charCells(ch)
+  let run: Unit[] = []
+  const flush = () => {
+    s += run.sort((a, b) => a.at - b.at).map(u => u.src).join('')
+    run = []
+  }
+  for (const sp of line) {
+    if (!sp.units) flush()
+    for (const u of sp.units ?? [...sp.text].map(ch => ({ text: ch, src: ch, at: 0 }))) {
+      if (at >= from && at < to && !sp.noCopy) {
+        if (sp.units) run.push(u)
+        else s += u.src
+      }
+      at += cells(u.text)
     }
+  }
+  flush()
   return s
 }
 

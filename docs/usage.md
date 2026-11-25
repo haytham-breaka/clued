@@ -84,3 +84,30 @@ When Claude asks you something, or needs a permission, you get a notification wi
 - **Elsewhere** it's Notification Center on macOS and `notify-send` on Linux, and the tab title starts with ✋ while Claude waits.
 
 The notification shows the question's words, so they can appear on a shared screen or a lock screen. `/notify off` if that matters.
+
+## Arabic, Hebrew and other right-to-left text
+
+Most terminals draw each row left to right, in the order they get the characters, so Arabic or Hebrew comes out backwards and Arabic letters don't join. clued lays such text out itself:
+
+- Each line of a message, a reply, a table cell or a panel preview is put in reading order (the Unicode Bidirectional Algorithm, line by line after wrapping), and Arabic letters are drawn in their joined forms.
+- A paragraph that starts with an Arabic or Hebrew letter reads right to left and sits on the right of its bubble. English words, numbers, inline code, URLs and paths in it stay left to right. Code blocks stay left to right too; an Arabic string in code reads right to left in its place.
+- Selecting and copying, `⧉ copy` and `/copy` give the text as written, not as drawn.
+- In the input box an Arabic line sits on the right, with the cursor where the next letter goes. ← and → move one character through the text; in a line that reads right to left, ← goes forward, as in any right-to-left text field.
+
+What each terminal does, and what clued does there:
+
+- **Windows Terminal (and WSL), VS Code, WezTerm, Alacritty, foot, xterm and iTerm2** don't reorder, so clued does it (`app`, the default).
+- **GNOME Terminal, Tilix and other VTE terminals** reorder by themselves. clued tells them not to (the BiDi mode escape, `CSI 8 l`) and does it itself. Inside tmux that escape may not reach the terminal: if Arabic looks backwards there, use `terminal`.
+- **macOS Terminal, Konsole and mlterm** reorder by themselves and can't be told not to, so clued sends them the text as written (`terminal`). They put each row in order; clued still puts right-to-left paragraphs on the right.
+- **kitty** turns each right-to-left word round by itself: set `force_ltr yes` in `kitty.conf`.
+- **iTerm2 with its right-to-left support turned on, or WezTerm with `bidi_enabled = true`:** use `terminal`.
+
+To choose, set `CLUED_BIDI` before you start clued, for example `export CLUED_BIDI=terminal` in `~/.zshrc`: `app` (clued reorders), `terminal` (the terminal does) or `off` (text is drawn as it comes, and nothing goes on the right).
+
+The limits:
+
+- The font needs Arabic's joined forms (the Presentation Forms). Cascadia Code, DejaVu Sans Mono and most system fonts have them; otherwise the terminal borrows them from another font.
+- Letters Unicode has no joined forms for (a few rare ones) show unjoined, and only the lam-alef ligature is drawn.
+- A paragraph's direction comes from its first letter: a message that starts with an English word reads left to right, with its Arabic words in order inside it.
+- In mixed text the cursor goes through the text in reading order, so it can jump between an Arabic run and an English one.
+- Part of a mixed line selected copies the characters in those cells, in reading order.
