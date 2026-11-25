@@ -40,7 +40,7 @@ import { lastUsage, listSessions, loadHistory, loadKept, newTurn, saveKept } fro
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
-import { C, cellText, cells, charCells, clip, clipLine, lineCells, markCells, pad, sgr } from './text.ts'
+import { C, cellText, cells, charCells, clip, clipLine, lineCells, markCells, pad, sgr, wrap } from './text.ts'
 import type { Line, Span } from './text.ts'
 
 // ---- Options ---------------------------------------------------------------------
@@ -92,7 +92,7 @@ function logSend(what: string, fields: Record<string, unknown>) {
 }
 const prefs = (() => {
   try {
-    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number> }
+    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify }
   } catch {
     return {}
   }
@@ -202,14 +202,76 @@ const S = {
 }
 
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'demo']
+const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'demo']
+
+// ---- Notifications: a system notification when Claude asks you something ---------------------
+
+/** on: when the window isn't focused; always: also when it is; off: never. Set with /notify. */
+type Notify = 'on' | 'always' | 'off'
+let notifyMode: Notify = prefs.notify ?? 'on'
+const appStart = Date.now()
+const notified = new Set<string>()
+
+/** Notifies about questions that just joined Waiting on you (the ones there at start are only noted). */
+/**
+ * The tab says when Claude waits on you, so with several tabs you can see which one: its title starts
+ * with ✋ and the count, and in Windows Terminal the tab (and taskbar button) shows a paused, yellow mark.
+ */
+let tabMark = ''
+function markTab() {
+  const n = S.box.waiting.length + S.permissions.length
+  const where = cwd.split('/').pop() || cwd
+  const title = `${n ? `✋ ${n} · ` : ''}clued · ${where}`
+  if (title === tabMark) return
+  const had = tabMark.startsWith('✋')
+  tabMark = title
+  out.write(`\x1b]2;${title}\x07`)
+  if (IS_WT && (n > 0) !== had) out.write(n ? '\x1b]9;4;4;100\x07' : '\x1b]9;4;0;0\x07')
+}
+
+function notifyNewQuestions() {
+  const fresh = S.box.waiting.filter(w => !notified.has(w.id))
+  for (const w of fresh) notified.add(w.id)
+  if (!fresh.length || Date.now() - appStart < 5000 || notifyMode === 'off' || (notifyMode === 'on' && S.isFocused)) return
+  const where = cwd.split('/').pop() || cwd
+  notify(fresh.length > 1 ? `Claude asks you ${fresh.length} things · ${where}` : `Claude asks you · ${where}`, preview(fresh.at(-1)!.question, 200))
+}
+
+/**
+ * Terminals that post a notification themselves (OSC 9, or kitty's OSC 99): a click on it
+ * goes back to the very tab that sent it. Everywhere else the system's own notification is used.
+ */
+const TERM_NOTIFIES = process.env.TERM_PROGRAM === 'iTerm.app' || process.env.TERM_PROGRAM === 'WezTerm' || process.env.TERM_PROGRAM === 'ghostty' || !!process.env.KITTY_WINDOW_ID
+const IS_WT = !!process.env.WT_SESSION
+
+/** A system notification: from the terminal itself when it can (so a click opens this tab), else a Windows toast (from WSL too), macOS Notification Center, or notify-send. */
+function notify(title: string, body: string) {
+  const text = `${title}: ${body}`.replace(/[\x00-\x1f\x7f]/g, ' ')
+  try {
+    if (process.env.KITTY_WINDOW_ID) out.write(`\x1b]99;;${text}\x1b\\`)
+    else if (TERM_NOTIFIES) out.write(`\x1b]9;${text}\x07`)
+    else if (IS_WSL || process.platform === 'win32') {
+      const b64 = (t: string) => Buffer.from(t, 'utf8').toString('base64')
+      const ps = [
+        `$u=[Text.Encoding]::UTF8; $t=$u.GetString([Convert]::FromBase64String('${b64(title)}')); $m=$u.GetString([Convert]::FromBase64String('${b64(body)}'))`,
+        '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null',
+        '$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
+        "$e=$x.GetElementsByTagName('text'); [void]$e.Item(0).AppendChild($x.CreateTextNode($t)); [void]$e.Item(1).AppendChild($x.CreateTextNode($m))",
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x))",
+      ].join('; ')
+      execFile(IS_WSL ? 'powershell.exe' : 'powershell', ['-NoProfile', '-Command', ps], () => {})
+    } else if (process.platform === 'darwin') {
+      execFile('osascript', ['-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, body], () => {})
+    } else execFile('notify-send', ['-a', 'clued', title, body], () => {})
+  } catch {}
+}
 
 /** Each model's context size as Claude Code last reported it, for the status line before the first reply. */
 const knownWindows: Record<string, number> = { ...(prefs.windows ?? {}) }
 
 function savePrefs() {
   mkdirSync(`${homedir()}/.clued`, { recursive: true })
-  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows }))
+  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode }))
 }
 
 /** Questions you dismissed since your last message: the next one tells Claude not to wait for them. */
@@ -753,6 +815,8 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'permission':
       S.permissions.push({ requestId: e.requestId, tool: e.tool, input: e.input })
+      if (notifyMode === 'always' || (notifyMode === 'on' && !S.isFocused))
+        notify(`Claude wants to use ${e.tool} · ${cwd.split('/').pop() || cwd}`, preview(String(e.input.description ?? e.input.command ?? e.input.file_path ?? e.input.url ?? ''), 200))
       break
     case 'status':
       if (e.text === 'compacting') toast('Compacting the conversation…')
@@ -1430,7 +1494,14 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   if (perm) {
     const what = String(perm.input.command ?? perm.input.file_path ?? perm.input.url ?? perm.input.pattern ?? JSON.stringify(perm.input))
     L.push([{ text: '╭─ ', style: { fg: C.yellow } }, { text: `Claude wants to use ${perm.tool}`, style: { fg: C.yellow, bold: true } }])
-    L.push([{ text: '│ ', style: { fg: C.yellow } }, { text: clip(firstLine(what, 400), w - 4) }])
+    // What it says the command does, then the whole command, wrapped (long ones up to half the screen).
+    const about = typeof perm.input.description === 'string' ? perm.input.description : ''
+    if (about) for (const l of wrap([{ text: about, style: { fg: C.gray, italic: true } }], w - 4)) L.push([{ text: '│ ', style: { fg: C.yellow } }, ...l])
+    const rows = what.split('\n').flatMap(line => wrap([{ text: line }], w - 4))
+    const room = Math.max(4, Math.floor(height() / 2) - 6)
+    const shown = rows.length > room ? rows.slice(0, room - 1) : rows
+    for (const l of shown) L.push([{ text: '│ ', style: { fg: C.yellow } }, ...(l.length ? l : [{ text: '' }])])
+    if (shown.length < rows.length) L.push([{ text: '│ ', style: { fg: C.yellow } }, { text: `… ${rows.length - shown.length} more lines  `, style: { fg: C.gray } }, { text: '⧉ copy all', style: { fg: C.cyan }, action: () => copyText(what, 'Copied the whole command.') }])
     L.push([
       { text: '╰─ ', style: { fg: C.yellow } },
       { text: ' Allow (y) ', style: { bg: C.green, fg: 16, bold: true }, action: () => answerPermission(true) },
@@ -1542,6 +1613,8 @@ function paint() {
   const busy = new Set([...S.agents.values()].filter(a => a.state === 'running').flatMap(a => a.for))
   const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
   S.box = inbox(S.turns, S.kept.board, S.read, { isWorking: S.isWorking, busy, now: Date.now(), reacted })
+  notifyNewQuestions()
+  markTab()
   // Sorted by what moved last, but never reordered under the pointer or during a search: the new
   // order shows once you leave the panel. A message not in the old order goes on top.
   if ((S.isOnPanel || S.search) && S.recentOrder.length) {
@@ -1841,6 +1914,21 @@ function runCommand(text: string): boolean {
       const order: Work[] = ['folded', 'edits', 'all']
       const want = arg.trim() as Work
       setWork(order.includes(want) ? want : order[(order.indexOf(S.kept.work ?? 'folded') + 1) % 3]!)
+      draw()
+      return true
+    }
+    case 'notify': {
+      // /notify on|always|off, or /notify alone to go round them.
+      if (arg.trim() === 'test') {
+        notify('Claude asks you · test', 'This is how a question from Claude will look.')
+        toast('Sent a test notification.')
+        return true
+      }
+      const order: Notify[] = ['on', 'always', 'off']
+      const want = arg.trim() as Notify
+      notifyMode = order.includes(want) ? want : order[(order.indexOf(notifyMode) + 1) % 3]!
+      savePrefs()
+      toast(notifyMode === 'off' ? 'Notifications off.' : notifyMode === 'always' ? 'You get a notification for every question Claude asks.' : 'You get a notification when Claude asks something while this window is in the background.')
       draw()
       return true
     }
@@ -2274,6 +2362,7 @@ let quitting = false
 function quit(code = 0) {
   quitting = true
   S.claude?.close()
+  if (IS_WT && tabMark.startsWith('✋')) out.write('\x1b]9;4;0;0\x07')
   out.write('\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   if (process.stdin.isTTY) process.stdin.setRawMode(false)
   if (S.sessionId) {

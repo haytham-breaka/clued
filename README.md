@@ -87,7 +87,7 @@ Drag the divider to resize the panel, and click `☰` to fold it to icons. Your 
 
 ### Commands
 
-`/clear` new session · `/resume` pick one · `/model <name>` switch model · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
+`/clear` new session · `/resume` pick one · `/model <name>` switch model · `/notify on|always|off|test` notifications · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
 
 ## Features
 
@@ -119,7 +119,15 @@ Ctrl+V adds the image on the clipboard. This works with the Windows clipboard fr
 
 ### Permissions
 
-When Claude Code needs permission for a tool, clued asks you in the app, the way `claude` would. Your allow and deny rules apply as usual.
+When Claude Code needs permission for a tool, clued asks you in the app, the way `claude` would: with Claude's description of the command and the whole command, wrapped (a very long one has `⧉ copy all`). Your allow and deny rules apply as usual.
+
+### Notifications
+
+When Claude asks you something, or needs a permission, you get a notification with the question and the project folder, while the clued window is in the background. `/notify always` notifies even when it's in front, `/notify off` stops them, `/notify test` sends a sample.
+
+- **iTerm2, WezTerm, Ghostty and kitty** post the notification themselves, so a click on it opens the very tab that asked.
+- **Windows Terminal (and WSL)** gets a Windows toast. Windows has no way to open a given tab from a notification, so the tab marks itself instead: its title starts with `✋ 1 ·` and the tab and taskbar button turn yellow until you answer.
+- **Elsewhere** it's Notification Center on macOS and `notify-send` on Linux, and the tab title starts with ✋ while Claude waits.
 
 ## How it works
 
