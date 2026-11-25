@@ -96,7 +96,7 @@ Drag the divider to resize the panel, and click `≡` to fold it to icons. Your 
 
 ### Commands
 
-`/clear` new session · `/resume` pick one · `/model <name>` switch model · `/notify on|always|off|test` notifications · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
+`/clear` new session · `/btw <question>` a quick side question: it sees the conversation but stays out of it, answered aside even while Claude works · `/resume` pick one · `/model <name>` switch model · `/notify on|always|off|test` notifications · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
 
 ## Features
 

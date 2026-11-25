@@ -3,20 +3,29 @@
 // each user message with a scenario chosen by words in it (see `scenario` below). A scenario that has
 // to wait (streaming, a slow turn) waits for a file named release-<name> in $FAKE_DIR.
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createInterface } from 'node:readline'
 
 const dir = process.env.FAKE_DIR ?? '.'
 const args = process.argv.slice(2)
-const log = (o: unknown) => appendFileSync(`${dir}/claude.log`, JSON.stringify(o) + '\n')
+/**
+ * A /btw side question (app/btw.ts): no tools (`--tools ""`), forked from the session when there is
+ * one. It logs to side.log, so claude.log stays the main session's, and answers once (see `sideAnswer`).
+ */
+const isSide = args[args.indexOf('--tools') + 1] === '' && args.includes('--tools')
+const log = (o: unknown) => appendFileSync(`${dir}/${isSide ? 'side' : 'claude'}.log`, JSON.stringify(o) + '\n')
 const out = (o: unknown) => process.stdout.write(JSON.stringify(o) + '\n')
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 const resumeAt = args.indexOf('--resume')
-const sessionId = resumeAt >= 0 ? args[resumeAt + 1]! : 's1'
+const resumed = resumeAt >= 0 ? args[resumeAt + 1]! : ''
+// --fork-session: a new id for the copy, as Claude Code gives it.
+const sessionId = resumed && args.includes('--fork-session') ? `fork-of-${resumed}` : resumed || 's1'
 const MODEL = 'claude-fake-1-0'
 log({ args, cwd: process.cwd() })
+// A side question's Claude Code says when it ends (the app closes it once it has answered).
+if (isSide) process.on('exit', code => log({ exit: code }))
 
 type Msg = { text: string; topic: string; images: number; raw?: any }
 /**
@@ -489,6 +498,26 @@ async function run() {
   busy = false
 }
 
+/**
+ * A side question's answer: what it can see (the resumed session's messages, read from its file as
+ * Claude Code would), streamed, then said. "slowly" waits for release-btw; "fail" exits without one.
+ */
+async function sideAnswer(m: Msg) {
+  if (m.text.includes('fail')) {
+    process.stderr.write('Side question failed on purpose\n')
+    process.exit(3)
+  }
+  if (m.text.includes('slowly')) await release('btw')
+  const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${resumed}.jsonl`
+  const seen = resumed && existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(l => l.includes('"type":"user"')).length : 0
+  const text = resumed ? `Side answer to “${m.text}”: I can see ${seen} messages of ${resumed}.` : `Side answer to “${m.text}”: there is no conversation yet.`
+  out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Side answer ' } } })
+  await sleep(60)
+  // The app's own markup, which a side answer must not show.
+  say(`${text}\n<clued>{"topics":[]}</clued>`)
+  result({ result: text })
+}
+
 // The tag in "about earlier" names the previous topic, so the app links the two.
 const aboutTag = (m: Msg) => (m.text.toLowerCase().includes('about earlier') && previous ? previous : undefined)
 
@@ -519,6 +548,12 @@ createInterface({ input: process.stdin }).on('line', line => {
     return
   }
   if (e.type !== 'user') return
+  if (isSide) {
+    const c = e.message?.content
+    const texts = (Array.isArray(c) ? c : [{ type: 'text', text: String(c) }]).filter((b: any) => b.type === 'text').map((b: any) => String(b.text))
+    void sideAnswer({ text: texts[0] ?? '', topic: '', images: 0, raw: e })
+    return
+  }
   const c = e.message?.content
   const blocks: any[] = Array.isArray(c) ? c : [{ type: 'text', text: String(c) }]
   const texts = blocks.filter(b => b.type === 'text').map(b => String(b.text))

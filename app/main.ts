@@ -40,6 +40,7 @@ import type { Job } from './scheduled.ts'
 import { assignParts, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
+import { Btw } from './btw.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
@@ -216,7 +217,9 @@ const S = {
 }
 
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'demo']
+const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'demo', 'btw']
+/** /btw side questions: their own Claude Code each, their answers asides in the chat. */
+const btw = new Btw(() => draw())
 
 // ---- Notifications: a system notification when Claude asks you something ---------------------
 
@@ -758,6 +761,8 @@ function setWork(w: Work) {
 
 function start(resume?: string) {
   S.claude?.close()
+  // Another session: its side answers go (the same one again, a new model, keeps them).
+  if (!resume || resume !== S.sessionId) btw.clear()
   S.isWorking = false
   S.permissions = []
   S.asks = []
@@ -2276,7 +2281,8 @@ function paint() {
         ? requestLines(req, reqInfo, { ...ctx, askStatus: () => submit('What is the status of this request?') }, cw - 2)
         : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
     }
-  const { lines: chat, anchors, owners } = chatCache!.out
+  // Side answers (/btw) sit in the chat itself, after the message that was last when asked.
+  const { lines: chat, anchors, owners } = job || req || inside ? chatCache!.out : btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin })
   S.anchors = anchors
   S.owners = owners
   S.chatLines = chat
@@ -2309,7 +2315,7 @@ function paint() {
     S.inView.add(p.id)
   }
   if (banner) frame[0] += ' ' + lineText(banner, cw - 1, 1, cx + 1)
-  if (!S.turns.length) {
+  if (!S.turns.length && !btw.asides.length) {
     const hello = [
       [{ text: 'clued', style: { bold: true, fg: C.cyan } }, { text: `  on Claude Code · ${cwd.replace(homedir(), '~')}`, style: { fg: C.gray } }],
       [{ text: 'Your messages sit on the right, Claude\'s answers on the left, its work folded into one line.', style: { fg: C.gray } }],
@@ -2487,6 +2493,14 @@ function runCommand(text: string): boolean {
       savePrefs()
       toast(notifyMode === 'off' ? 'Notifications off.' : notifyMode === 'always' ? 'You get a notification for every question Claude asks.' : 'You get a notification when Claude asks something while this window is in the background.')
       draw()
+      return true
+    }
+    case 'btw': {
+      if (!arg) return toast('Usage: /btw <question>: a quick side question. It sees the conversation, but stays out of it.'), true
+      const m = passArgs.lastIndexOf('--model')
+      btw.ask(arg, { sessionId: S.sessionId, model: m >= 0 ? passArgs[m + 1] ?? '' : S.model, cwd, after: S.turns.at(-1)?.key ?? '' })
+      if (S.agentView || S.requestView || S.jobView) toast('The side answer is in the chat: ← back to chat.')
+      else S.chatScroll = 0
       return true
     }
     case 'panel':
@@ -2758,6 +2772,7 @@ function key(k: string) {
       else if (S.replyTo) S.replyTo = null
       else if (S.picked) S.picked = ''
       else if (S.agentView || S.requestView || S.jobView) closeAgent()
+      else if (btw.dismissLast()) {}
       else if (S.isWorking) {
         S.claude?.interrupt()
         toast('Interrupted.')
@@ -2965,6 +2980,7 @@ let quitting = false
 function quit(code = 0) {
   quitting = true
   S.claude?.close()
+  btw.close()
   if (IS_WT && tabMark.startsWith('✋')) out.write('\x1b]9;4;0;0\x07')
   out.write('\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   if (process.stdin.isTTY) process.stdin.setRawMode(false)
