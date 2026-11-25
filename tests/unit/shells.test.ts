@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { canRerun, newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText, SHELL_CUT_KEEP_MS, SHELL_KEEP_MS } from '../../app/shells.ts'
+import { canRerun, exitInFile, newShells, onShellCall, onShellLevel, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText, SHELL_CUT_KEEP_MS, SHELL_KEEP_MS } from '../../app/shells.ts'
 import type { Shell } from '../../app/shells.ts'
 import { panelLines } from '../../app/panel.ts'
 import type { PanelCtx } from '../../app/panel.ts'
@@ -92,6 +92,16 @@ describe('background commands from the stream', () => {
     onShellCall(sh, bash('u3', { command: 'x', run_in_background: true }), NOW, { for: [] })
     onShellResult(sh, 'u3', 'Started.', false, undefined, NOW)
     assert.equal(sh.list.find(x => x.id === 'u3')!.taskId, undefined)
+    // A command whose output prints Claude Code's words (a grep of a transcript, a test file): none of its own.
+    onShellCall(sh, bash('u4', { command: 'grep -r ID: .' }), NOW, { for: [] })
+    onShellResult(sh, 'u4', 'a.ts: "Command running in background with ID: bq1. Output…"\nb.ts: toolResult(`Command did not complete within its 120s timeout and was moved to the background (ID: bq2).`)', false, undefined, NOW)
+    onShellCall(sh, bash('u5', { command: 'cat log', run_in_background: true }), NOW, { for: [] })
+    onShellResult(sh, 'u5', 'log: Command running in background with ID: bq3.', false, undefined, NOW)
+    assert.deepEqual(sh.list.map(x => x.taskId), ['bm1', undefined, undefined])
+    // One moved after printing something: its line comes after that output.
+    onShellCall(sh, bash('u6', { command: 'git push' }), NOW, { for: [] })
+    onShellResult(sh, 'u6', 'Please make sure you have the correct access rights\nCommand did not complete within its 600s timeout and was moved to the background (ID: bq4). Output is being written to: /tmp/bq4.output.', false, undefined, NOW)
+    assert.equal(sh.list.at(-1)!.taskId, 'bq4')
   })
 
   test("one only Claude Code's event shows (an agent's): listed from it; a foreground task is not", () => {
@@ -103,6 +113,65 @@ describe('background commands from the stream', () => {
     onShellCall(sh, bash('ag-1', { command: 'make', description: 'Build' }), NOW, { for: ['k'], by: 'agent-1' })
     onShellTask(sh, { phase: 'started', taskId: 'b10', toolUseId: 'ag-1', type: 'local_bash', isBackgrounded: true }, NOW, { for: [] })
     assert.deepEqual([sh.list[1]!.command, sh.list[1]!.by, sh.list[1]!.taskId], ['make', 'agent-1', 'b10'])
+  })
+
+  test("an agent's command: listed from its task event, by the agent; its call (from the transcript) fills it in; ended by the notification given to the agent", () => {
+    const sh = newShells()
+    // task_started (owned by the agent): no call seen yet. main.ts names the agent from parent_task_id.
+    onShellTask(sh, { phase: 'started', taskId: 'bci1', toolUseId: 'aw-b1', type: 'local_bash', isBackgrounded: true, text: 'Wait for CI', parentTaskId: 'aw-3' }, NOW, { for: ['k'], by: 'agent-1' })
+    const s = sh.list[0]!
+    assert.deepEqual([s.id, s.by, s.command, s.state], ['aw-b1', 'agent-1', '', 'running'])
+    // The agent's call and result, read from its transcript: the same row, now with its command.
+    onShellCall(sh, bash('aw-b1', { command: 'gh pr checks 7 --watch', description: 'Wait for CI', run_in_background: true }), NOW + 1, { for: ['k'], by: 'agent-1' })
+    onShellResult(sh, 'aw-b1', started('bci1'), false, undefined, NOW + 2)
+    assert.equal(sh.list.length, 1)
+    assert.deepEqual([s.command, s.description, s.outputFile, s.taskId], ['gh pr checks 7 --watch', 'Wait for CI', '/tmp/tasks/bci1.output', 'bci1'])
+    // A later task event names no other agent over it.
+    onShellTask(sh, { phase: 'progress', taskId: 'bci1' }, NOW + 3, { for: [], by: 'agent-2' })
+    assert.equal(s.by, 'agent-1')
+    // Its end, from the notification in the agent's transcript (as followAgent passes it).
+    onShellTask(sh, { phase: 'done', taskId: 'bci1', toolUseId: 'aw-b1', status: 'completed', text: 'Background command "Wait for CI" completed (exit code 0)' }, NOW + 60_000, { for: [] })
+    assert.deepEqual([s.state, s.exitCode, s.endedAt], ['done', 0, NOW + 60_000])
+    // One listed by its task id alone (no call id): its call's result joins it, one row.
+    onShellTask(sh, { phase: 'started', taskId: 'bx', type: 'local_bash', isBackgrounded: true, text: 'Serve' }, NOW, { for: [] })
+    onShellCall(sh, bash('aw-b2', { command: 'npm run serve', description: 'Serve', run_in_background: true }), NOW, { for: [], by: 'agent-1', cwd: '/tmp/w' })
+    onShellResult(sh, 'aw-b2', started('bx'), false, undefined, NOW)
+    const x = sh.list.filter(r => r.taskId === 'bx')
+    assert.deepEqual(x.map(r => [r.id, r.command, r.by, r.cwd]), [['task:bx', 'npm run serve', 'agent-1', '/tmp/w']])
+    assert.equal(sh.list.length, 2)
+  })
+
+  test("Claude Code's list of live tasks: one it drops has ended (how, from its output file); one it still lists runs on", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clued-level-'))
+    try {
+      const sh = newShells()
+      const file = (id: string, text: string) => {
+        writeFileSync(join(dir, `${id}.output`), text)
+        return join(dir, `${id}.output`)
+      }
+      const outs = { ok: file('ok', 'fine\n\n[exited with code 0]\n'), bad: file('bad', 'oops\n[exited with code 3]'), mute: file('mute', 'still writing\n') }
+      for (const id of ['ok', 'bad', 'mute', 'gone', 'kept', 'never']) {
+        onShellCall(sh, bash(`u-${id}`, { command: id, run_in_background: true }), NOW, { for: [] })
+        onShellResult(sh, `u-${id}`, `Command running in background with ID: b-${id}. Output is being written to: ${(outs as Record<string, string>)[id] ?? `${dir}/${id}.missing`}.`, false, undefined, NOW)
+      }
+      const by = (id: string) => sh.list.find(s => s.taskId === `b-${id}`)!
+      onShellLevel(sh, ['b-ok', 'b-bad', 'b-mute', 'b-gone', 'b-kept', 'agent-1'], NOW + 1)
+      assert.ok(sh.list.every(s => s.state === 'running'))
+      // All but one leave the list; "never" was never on it (an older Claude Code sends none): left alone.
+      onShellLevel(sh, ['b-kept'], NOW + 2)
+      assert.deepEqual([by('ok').state, by('ok').exitCode, by('ok').note], ['done', 0, 'exited with code 0'])
+      assert.deepEqual([by('bad').state, by('bad').exitCode, shellState(by('bad'))], ['failed', 3, 'failed (exit 3)'])
+      assert.deepEqual([by('mute').state, by('gone').state, shellState(by('gone'))], ['ended', 'ended', 'ended'])
+      assert.match(by('gone').note!, /said nothing of how it went/)
+      assert.equal(canRerun(by('gone')), false)
+      assert.deepEqual([by('kept').state, by('never').state], ['running', 'running'])
+      // Claude Code exits: its list goes with it; the next one's list starts empty.
+      onShellsExit(sh, NOW + 3)
+      assert.equal(sh.live.size, 0)
+      assert.equal(exitInFile(join(dir, 'nope')), undefined)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('names, the stop message, and how long finished ones stay listed', () => {

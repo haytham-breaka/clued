@@ -174,6 +174,28 @@ describe('background commands', () => {
       assert.match(sent.text, /^Please run the background command “Build the app” again: it failed \(exit 1\)\.\nCommand: make build\nYour agent .+ \(agent ar-task\) ran it: if its work needs the result, have it run the command again \(SendMessage to it\); otherwise run it again yourself\.\nRun it in the background \(run_in_background\), as before\.$/)
     }))
 
+  test("an agent's commands: one ends when only its transcript says so; one it leaves running stays running", () =>
+    withApp({ setup: widePanel, width: 160, height: 50 }, async app => {
+      await app.send('the agent waits on CI')
+      await app.waitFor('Started the merge helper.')
+      let s = await app.waitFor(/◐ Wait for CI +running/)
+      assert.match(s, /◐ Serve the docs +running/)
+      assert.match(s, /2 running/)
+      // Who ran each: the agent Claude Code names as its parent; the call (from the transcript) gives the command.
+      s = await app.waitFor(/\$ gh pr checks 7 --watch · by /)
+      assert.doesNotMatch(subRowOf(s, 'Wait for CI'), /Claude \(lead\)/)
+      // The agent ends: its commands are still running, as Claude Code still lists them.
+      app.release('aw-agent')
+      await app.settle()
+      s = await app.waitFor(/◐ Serve the docs +running/)
+      assert.match(s, /◐ Wait for CI +running/)
+      // CI ends: no word of it in the stream, only in the agent's transcript.
+      app.release('aw-ci')
+      s = await app.waitFor(/✓ Wait for CI +done/)
+      assert.match(s, /◐ Serve the docs +running/)
+      assert.match(s, /1 running/)
+    }))
+
   test('on resume, commands come back from the session file: ended as it says, or stopped with its Claude Code', async () => {
     const t0 = Date.now() - 3 * 60_000
     const iso = (ms: number) => new Date(t0 + ms).toISOString()

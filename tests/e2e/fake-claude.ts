@@ -416,6 +416,39 @@ async function scenario(m: Msg) {
     toolResult('ar-1', 'The build failed.')
     return finish(m, 'The build helper says the build failed.')
   }
+  // A background agent's own background commands, as Claude Code 2.1 shows them: each one's
+  // task_started (owned by the agent, its parent), but the end of the first reaches only the agent,
+  // written in its transcript as a mid-turn attachment. The second it leaves running when it ends:
+  // Claude Code still lists it as live.
+  if (t.includes('agent waits on ci')) {
+    tool('aw-1', 'Agent', { description: 'Merge helper', subagent_type: 'general-purpose', prompt: 'Merge it after CI.', run_in_background: true })
+    out({ type: 'system', subtype: 'task_started', task_id: 'aw-3', tool_use_id: 'aw-1', description: 'Merge helper', task_type: 'local_agent', is_backgrounded: true })
+    toolResult('aw-1', 'Async agent launched successfully. agentId: aw-3')
+    finish(m, 'Started the merge helper.', 'claude')
+    const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}/subagents/agent-aw-3.jsonl`
+    mkdirSync(dirname(file), { recursive: true })
+    const line = (o: unknown) => appendFileSync(file, JSON.stringify(o) + '\n')
+    const output = (id: string) => `${dir}/tasks/${id}.output`
+    mkdirSync(`${dir}/tasks`, { recursive: true })
+    line({ type: 'user', isSidechain: true, message: { content: 'Merge it after CI.' } })
+    for (const [id, task, command, description] of [['aw-b1', 'bci1', 'gh pr checks 7 --watch', 'Wait for CI'], ['aw-b2', 'bsrv2', 'npm run serve', 'Serve the docs']] as const) {
+      writeFileSync(output(task), '')
+      line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command, description, run_in_background: true } }] } })
+      out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'aw-3', task_type: 'local_agent', description: 'Merge helper' }, { task_id: 'bci1', task_type: 'local_bash', description: 'Wait for CI', parent_task_id: 'aw-3' }, ...(task === 'bsrv2' ? [{ task_id: 'bsrv2', task_type: 'local_bash', description: 'Serve the docs', parent_task_id: 'aw-3' }] : [])] })
+      out({ type: 'system', subtype: 'task_started', task_id: task, tool_use_id: id, description, task_type: 'local_bash', is_backgrounded: true, owned_by_subagent: true, parent_task_id: 'aw-3' })
+      line({ type: 'user', isSidechain: true, message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Command running in background with ID: ${task}. Output is being written to: ${output(task)}. You will be notified when it completes.` }] } })
+    }
+    // The agent ends (its own end is streamed), and leaves both running.
+    await release('aw-agent', 20_000)
+    line({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'Waiting on CI.' }] } })
+    out({ type: 'system', subtype: 'task_notification', task_id: 'aw-3', tool_use_id: 'aw-1', status: 'completed', summary: 'Waiting on CI.' })
+    out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bci1', task_type: 'local_bash', description: 'Wait for CI', parent_task_id: 'aw-3' }, { task_id: 'bsrv2', task_type: 'local_bash', description: 'Serve the docs', parent_task_id: 'aw-3' }] })
+    // CI is green: only the agent's transcript says so.
+    await release('aw-ci', 20_000)
+    appendFileSync(output('bci1'), 'All checks were successful\n\n[exited with code 0]\n')
+    line({ type: 'attachment', isSidechain: true, attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification>\n<task-id>bci1</task-id>\n<tool-use-id>aw-b1</tool-use-id>\n<output-file>${output('bci1')}</output-file>\n<status>completed</status>\n<summary>Background command "Wait for CI" completed (exit code 0)</summary>\n</task-notification>` } })
+    return
+  }
   if (t.includes('background agent')) {
     tool('bg-1', 'Agent', { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true })
     toolResult('bg-1', 'Started in the background. agentId: bg-42')

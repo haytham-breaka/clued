@@ -253,6 +253,30 @@ describe('session files', () => {
     ])
     assert.equal(S.sentMessage('plain'), 'plain')
   })
+  test("readAgentFile: task notifications given to it are task-ends (its background commands' ends), mid-turn or waking it", () => {
+    const note = (id: string, tool: string, status: string, summary: string) =>
+      `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>${tool}</tool-use-id>\n<output-file>/tmp/${id}.output</output-file>\n<status>${status}</status>\n<summary>${summary}</summary>\n</task-notification>`
+    const entries = agentFile('ends', [
+      { type: 'user', message: { content: 'Do it.' } },
+      // Mid-turn: an attachment Claude Code adds to the agent's next step.
+      { type: 'attachment', timestamp: '2026-11-25T10:02:00.000Z', attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: note('b1', 'x1', 'completed', 'Background command "Run tests" completed (exit code 0)') } },
+      // Waking it when it had finished: a hidden message, as text blocks too.
+      { type: 'user', isMeta: true, origin: { kind: 'task-notification' }, message: { content: `[SYSTEM NOTIFICATION - NOT USER INPUT]\n${note('b2', 'x2', 'killed', 'Background command "Wait" was stopped')}` } },
+      { type: 'user', isMeta: true, message: { content: [{ type: 'text', text: note('b3', 'x3', 'failed', 'Background command "Lint" failed with exit code 2') }] } },
+      // Not one: Claude quoting one to it, a tool result that prints one, another kind of attachment.
+      sent(note('b4', 'x4', 'completed', 'quoted')),
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x9', content: note('b5', 'x5', 'completed', 'printed') }] } },
+      { type: 'attachment', attachment: { type: 'queued_command', prompt: 'just a message' } },
+      { type: 'attachment', attachment: { type: 'other', prompt: note('b6', 'x6', 'completed', 'other') } },
+    ])
+    assert.deepEqual(entries, [
+      { kind: 'task-end', end: { taskId: 'b1', toolUseId: 'x1', status: 'completed', summary: 'Background command "Run tests" completed (exit code 0)', at: Date.parse('2026-11-25T10:02:00.000Z'), after: 0 } },
+      { kind: 'task-end', end: { taskId: 'b2', toolUseId: 'x2', status: 'killed', summary: 'Background command "Wait" was stopped', at: (entries[1] as any).end.at, after: 0 } },
+      { kind: 'task-end', end: { taskId: 'b3', toolUseId: 'x3', status: 'failed', summary: 'Background command "Lint" failed with exit code 2', at: (entries[2] as any).end.at, after: 0 } },
+      { kind: 'prompt', text: note('b4', 'x4', 'completed', 'quoted') },
+      { kind: 'result', id: 'x9', text: note('b5', 'x5', 'completed', 'printed'), isError: false },
+    ])
+  })
   test('readAgentFile: what a compaction writes, and an interruption line, are not messages to it', () => {
     const entries = agentFile('cut', [
       { type: 'user', message: { content: 'Do it.' } },

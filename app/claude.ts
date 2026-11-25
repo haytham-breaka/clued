@@ -43,7 +43,9 @@ export type ClaudeEvent =
    * went to the background), or finished (status). `type`: local_agent, local_bash (a background shell
    * command)…; `outputFile`: where a shell command's output goes.
    */
-  | { kind: 'task'; phase: 'started' | 'progress' | 'updated' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; lastTool?: string; type?: string; isBackgrounded?: boolean; outputFile?: string }
+  | { kind: 'task'; phase: 'started' | 'progress' | 'updated' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; lastTool?: string; type?: string; isBackgrounded?: boolean; outputFile?: string; parentTaskId?: string }
+  /** Every background task Claude Code runs now (background_tasks_changed, sent on each change): their ids. */
+  | { kind: 'live-tasks'; ids: string[] }
 
 export type McpServer = { name: string; status: string }
 export type CommandInfo = { name: string; description?: string; argumentHint?: string }
@@ -249,7 +251,11 @@ export class Claude {
             ...(e.task_type ? { type: String(e.task_type) } : {}),
             ...(typeof e.is_backgrounded === 'boolean' ? { isBackgrounded: e.is_backgrounded } : {}),
             ...(e.output_file ? { outputFile: String(e.output_file) } : {}),
+            // An agent's own task (its background command): the agent's id.
+            ...(e.parent_task_id ? { parentTaskId: String(e.parent_task_id) } : {}),
           })
+        else if (e.subtype === 'background_tasks_changed' && Array.isArray(e.tasks))
+          emit({ kind: 'live-tasks', ids: e.tasks.map((x: any) => String(x?.task_id ?? '')).filter(Boolean) })
         else if (e.subtype === 'task_updated' && e.patch && typeof e.patch === 'object')
           emit({
             kind: 'task',

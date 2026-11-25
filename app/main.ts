@@ -36,7 +36,7 @@ import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.
 import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
 import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
-import { canRerun, newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText } from './shells.ts'
+import { canRerun, newShells, onShellCall, onShellLevel, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText } from './shells.ts'
 import type { Job } from './scheduled.ts'
 import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
@@ -424,7 +424,8 @@ function openAgent(id: string) {
 function followBackgroundAgents() {
   let moved = false
   for (const a of S.agents.values()) {
-    if (a.state !== 'running' && a.fileAt != null && (a.endedAt ?? 0) < Date.now() - 5000) continue
+    // One that ended is read on while a command it started runs: that command's end is given to it.
+    if (a.state !== 'running' && a.fileAt != null && (a.endedAt ?? 0) < Date.now() - 5000 && !runsShells(a)) continue
     if (followAgent(a)) moved = true
   }
   // Their "last step … ago" moves even when nothing else does.
@@ -432,15 +433,34 @@ function followBackgroundAgents() {
 }
 setInterval(followBackgroundAgents, 1000).unref()
 
-/** Reads what is new in one agent's transcript, if it is one the app follows; true when there was some. */
+/** A background command this agent started still runs, as far as the app knows. */
+const runsShells = (a: Agent) => S.shells.list.some(x => x.by === a.id && x.state === 'running')
+
+/** When the Claude Code running now started: an agent's commands from before went with the one before. */
+let claudeAt = 0
+
+/**
+ * Reads what is new in one agent's transcript, if it is one the app follows; true when there was
+ * some. Its background commands too: Claude Code streams their start, but the end of one often
+ * reaches only the agent, and so its transcript.
+ */
 function followAgent(a: Agent): boolean {
-  if (!S.sessionId || !a.taskId || !(a.isBackground || a.isPast || a.tasks.length > 1)) return false
+  if (!S.sessionId || !a.taskId || !(a.isBackground || a.isPast || a.tasks.length > 1 || runsShells(a))) return false
   // Steps the stream already gave (a foreground agent's first run) are not added twice.
   const isStreamed = !a.isBackground && a.fileAt == null && a.log.length > 0
   const { entries, next } = readAgentFile(cwd, S.sessionId, a.taskId, a.fileAt ?? 0)
   a.fileAt = next
   for (const e of entries) {
+    if (e.kind === 'task-end') {
+      // One of its background commands ended: Claude Code told the agent, not always the stream.
+      const { end } = e
+      onShellTask(S.shells, { phase: 'done', taskId: end.taskId, ...(end.toolUseId ? { toolUseId: end.toolUseId } : {}), status: end.status, ...(end.summary ? { text: end.summary } : {}) }, e.at, { for: a.for })
+      continue
+    }
     if (e.kind !== 'prompt') touch(a, e.at)
+    // Its shell calls and their results (a call from before this Claude Code started ran under the one before).
+    if (e.kind === 'step' && e.at >= claudeAt) onShellCall(S.shells, e.tool, e.at, { by: a.id, for: a.for })
+    if (e.kind === 'result') onShellResult(S.shells, e.id, e.text, e.isError, undefined, e.at)
     if (e.kind === 'step') {
       if (a.log.some(x => 'step' in x && x.step.tool.id === e.tool.id)) continue
       a.steps++
@@ -893,6 +913,7 @@ function start(resume?: string) {
   // The folders /add-dir added to this session go each time it starts.
   // Only the Claude Code running now is heard: the one before (a /model, /branch or /add-dir restart)
   // still exits after this, and its exit would say this one stopped.
+  claudeAt = Date.now()
   const claude: Claude = new Claude({ args: [...(resume ? ['--resume', resume] : []), ...passArgs, ...local.dirArgs(resume, S.kept)], cwd, appendSystemPrompt: APP_GUIDE }, e => {
     if (S.claude === claude) onEvent(e)
   })
@@ -1137,7 +1158,9 @@ function onEvent(e: ClaudeEvent) {
     }
     case 'task': {
       // A background shell command's: Claude follows up on its end as it does on an agent's.
-      if (onShellTask(S.shells, e, Date.now(), { for: openFor() })) {
+      // An agent's command: the agent is the task Claude Code names as its parent.
+      const owner = e.parentTaskId ? [...S.agents.values()].find(x => x.taskId === e.parentTaskId) : undefined
+      if (onShellTask(S.shells, e, Date.now(), { for: owner?.for ?? openFor(), ...(owner ? { by: owner.id } : {}) })) {
         if (e.phase === 'done' && !t) endedIdle ??= e.taskId || e.toolUseId
         break
       }
@@ -1161,6 +1184,9 @@ function onEvent(e: ClaudeEvent) {
       }
       break
     }
+    case 'live-tasks':
+      onShellLevel(S.shells, e.ids, Date.now())
+      break
     case 'rate': {
       const w = (e.info.unifiedWindows ?? {}) as Record<string, { utilization?: number; resetsAt?: number }>
       for (const [k, v] of Object.entries(w)) S.rate[k] = { used_percentage: Math.round((v.utilization ?? 0) * 100), resets_at: v.resetsAt }

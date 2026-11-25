@@ -469,6 +469,8 @@ export type AgentFileEntry = (
   | { kind: 'result'; id: string; text: string; isError: boolean }
   /** A message to it after its first (a SendMessage arriving). */
   | { kind: 'prompt'; text: string }
+  /** A task notification it was given: one of its background commands (or its own agents) ended. */
+  | { kind: 'task-end'; end: AgentEnd }
 ) & { at: number }
 
 /** How Claude Code writes a message Claude sends a running agent (SendMessage): hidden, in these words. */
@@ -489,7 +491,9 @@ const isInterruption = (t: string) => /^\[Request interrupted by user[^\]]*\]$/.
  * prompt, is skipped (the app has it from the Agent call). Later ones are SendMessage arriving:
  * Claude Code writes them hidden, as "The coordinator sent a message while you were working: …".
  * Not messages to it: the summary a compaction writes, an interruption line, other hidden entries
- * (another session's or the user's message to it, a task notification, a reminder). A fork's file
+ * (another session's or the user's message to it, a reminder). A task notification (as a hidden
+ * message, or an attachment when it came mid-turn) is a task-end: often the only word of the end of
+ * a background command the agent started, as Claude Code may not stream it. A fork's file
  * starts with a reference to Claude's context and Claude's own Agent call (its prompt is in it): it
  * has no first message to skip, and that call is not one of its steps.
  */
@@ -529,6 +533,14 @@ export function readAgentFile(cwd: string, sessionId: string, agentId: string, f
         if (calls.length) continue
       }
       const isResult = Array.isArray(content) && content.some((b: any) => b.type === 'tool_result')
+      // A task notification given to it: mid-turn (an attachment), or waking it (a hidden message).
+      // Only Claude Code's own (hidden) entries: a message that quotes one (Claude's, another session's) is still a message.
+      const note = e.type === 'attachment' && e.attachment?.type === 'queued_command' ? e.attachment.prompt : e.type === 'user' && !isResult && (e.origin?.kind === 'task-notification' || (e.isMeta && !e.origin)) ? content : undefined
+      const noteText = typeof note === 'string' ? note : Array.isArray(note) ? note.filter((b: any) => b.type === 'text').map((b: any) => String(b.text)).join('\n') : ''
+      if (noteText.includes('<task-notification>')) {
+        for (const end of agentEndsIn(noteText, at, 0)) entries.push({ kind: 'task-end', end, at })
+        continue
+      }
       if (e.type === 'user' && !isResult && (typeof content === 'string' || Array.isArray(content))) {
         const text = typeof content === 'string' ? content : content.filter((b: any) => b.type === 'text').map((b: any) => String(b.text)).join('\n')
         // A message Claude sent it (SendMessage), hidden in Claude Code's words.

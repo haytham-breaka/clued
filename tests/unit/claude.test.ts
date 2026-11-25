@@ -25,6 +25,10 @@ const events = [
   { type: 'system', subtype: 'task_updated', task_id: 'b1', patch: { is_backgrounded: true } },
   { type: 'system', subtype: 'task_updated', task_id: 'b1' },
   { type: 'system', subtype: 'task_notification', task_id: 'b1', tool_use_id: 'u9', status: 'completed', output_file: '/tmp/b1.output', summary: 'Background command "Run tests" completed (exit code 0)' },
+  // An agent's: its parent is the agent's task. And the set of live background tasks, after a change.
+  { type: 'system', subtype: 'task_started', task_id: 'b2', tool_use_id: 'u8', description: 'Wait for CI', task_type: 'local_bash', is_backgrounded: true, owned_by_subagent: true, parent_task_id: 't1' },
+  { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't1', task_type: 'local_agent' }, { task_id: 'b2', task_type: 'local_bash', parent_task_id: 't1' }, {}, null] },
+  { type: 'system', subtype: 'background_tasks_changed' },
   { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hel' } } },
   { type: 'stream_event', parent_tool_use_id: 'a1', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'sub' } } },
   { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 12 } } },
@@ -100,7 +104,7 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
 
   const kinds = got.map(e => e.kind)
   assert.deepEqual(kinds, [
-    'init', 'init', 'status', 'status', 'task', 'task', 'task', 'task', 'task', 'task', 'task', 'task', 'text-delta', 'output-tokens',
+    'init', 'init', 'status', 'status', 'task', 'task', 'task', 'task', 'task', 'task', 'task', 'task', 'task', 'live-tasks', 'text-delta', 'output-tokens',
     'usage', 'text', 'tool', 'tool', 'agent-step', 'agent-text', 'tool-result', 'tool-result', 'tool-result',
     'agent-tool-result', 'received', 'tool-result', 'agent-tool-result', 'fired', 'rate', 'rate', 'permission', 'permission', 'result', 'result', 'exit',
   ])
@@ -116,6 +120,8 @@ test('Claude: spawns claude headless, reads every kind of event, writes messages
   assert.deepEqual(by('task', 5), { kind: 'task', phase: 'updated', taskId: 'b1', status: 'completed' })
   assert.deepEqual(by('task', 6), { kind: 'task', phase: 'updated', taskId: 'b1', isBackgrounded: true })
   assert.deepEqual(by('task', 7), { kind: 'task', phase: 'done', taskId: 'b1', toolUseId: 'u9', status: 'completed', text: 'Background command "Run tests" completed (exit code 0)', outputFile: '/tmp/b1.output' })
+  assert.deepEqual(by('task', 8), { kind: 'task', phase: 'started', taskId: 'b2', toolUseId: 'u8', text: 'Wait for CI', type: 'local_bash', isBackgrounded: true, parentTaskId: 't1' })
+  assert.deepEqual(by('live-tasks'), { kind: 'live-tasks', ids: ['t1', 'b2'] })
   assert.deepEqual(by('text-delta'), { kind: 'text-delta', text: 'Hel' })
   assert.deepEqual(by('output-tokens'), { kind: 'output-tokens', tokens: 12 })
   assert.deepEqual(by('tool', 1), { kind: 'tool', tool: { id: 'u2', name: 'Read', input: {} } })

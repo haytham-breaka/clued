@@ -10,12 +10,19 @@
 // output_file; summary: 'Background command "…" completed (exit code 0)', '… failed with exit code 1',
 // '… was stopped'). KillShell (shell_id) and TaskStop (task_id) stop one. In the session file the end
 // is a <task-notification> user message with the same fields, which loadHistory keeps as AgentEnds.
+// Claude Code also sends `background_tasks_changed`: every live background task, after each change.
+//
+// An agent's command: its task_started comes (owned_by_subagent, parent_task_id: the agent's id),
+// but its end may never reach the stream: its notification goes to the agent, and Claude Code
+// writes it in the agent's transcript (an attachment or a hidden message). So the app also reads
+// the agent's calls, results and notifications from that transcript (followAgent in main.ts).
 
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs'
 import type { ToolUse } from './claude.ts'
 import type { Turn } from './session.ts'
 
-export type ShellState = 'running' | 'done' | 'failed' | 'stopped'
+/** `ended`: it no longer runs, but nothing said how it went. */
+export type ShellState = 'running' | 'done' | 'failed' | 'stopped' | 'ended'
 
 export type Shell = {
   /** The Bash call's tool use id (`task:<id>` for one known only from Claude Code's task event). */
@@ -44,9 +51,10 @@ export type Shell = {
 
 /** Each background command, and the shell calls still waiting for their results (by tool use id). */
 type Call = ToolUse & { by?: string; for: string[]; at: number; cwd?: string }
-export type Shells = { list: Shell[]; calls: Map<string, Call> }
+/** `live`: the task ids Claude Code has listed as live background tasks (background_tasks_changed). */
+export type Shells = { list: Shell[]; calls: Map<string, Call>; live: Set<string> }
 
-export const newShells = (): Shells => ({ list: [], calls: new Map() })
+export const newShells = (): Shells => ({ list: [], calls: new Map(), live: new Set() })
 
 /** Finished commands stay listed this long (as agents do); one an exit cut off, an hour. */
 export const SHELL_KEEP_MS = 10 * 60 * 1000
@@ -101,7 +109,19 @@ export function onShellCall(sh: Shells, tool: ToolUse, at: number, ctx: { by?: s
   if (!SHELL_TOOLS.has(tool.name)) return
   const call = { ...tool, ...ctx, at }
   sh.calls.set(tool.id, call)
-  if (tool.name === 'Bash' && tool.input.run_in_background === true && !sh.list.some(s => s.id === tool.id)) add(sh, call)
+  if (tool.name !== 'Bash') return
+  // Listed already from Claude Code's task event (an agent's): now its command, and who ran it, are known.
+  const known = sh.list.find(s => s.id === tool.id)
+  if (known) fill(known, call)
+  else if (tool.input.run_in_background === true) add(sh, call)
+}
+
+/** What a call tells about a command listed without it. */
+function fill(s: Shell, call: Call) {
+  s.command ||= str(call.input.command)
+  s.description ||= str(call.input.description)
+  if (call.by && !s.by) s.by = call.by
+  if (call.cwd && !s.cwd) s.cwd = call.cwd
 }
 
 /**
@@ -119,11 +139,21 @@ export function onShellResult(sh: Shells, toolId: string, text: string, isError:
       if (s && !s.taskId) sh.list = sh.list.filter(x => x !== s)
       return
     }
-    const id = str(d.backgroundTaskId) || text.match(/running in background with ID: ([\w-]+)/i)?.[1] || text.match(/moved to the background \(ID: ([\w-]+)\)/i)?.[1]
+    // Claude Code's own line, at the start of one: a command's output that prints such words (a
+    // grep of a transcript, a test file) is no command of its own. A background call's result starts
+    // with it; a foreground one moved to the background ends with it, after what it printed so far.
+    const id = str(d.backgroundTaskId) || (call.input.run_in_background === true ? text.match(/^\s*Command running in background with ID: ([\w-]+)/)?.[1] : undefined) || text.match(/(?:^|\n)Command did not complete within its \S+ timeout and was moved to the background \(ID: ([\w-]+)\)/)?.[1]
     if (!id) return
     if (!s) {
       s = add(sh, call)
       s.note = 'moved to the background when it ran past its timeout'
+    }
+    // Listed already from its task event alone (no call id): one row for it, with what the call tells.
+    const twin = sh.list.find(x => x !== s && x.taskId === id)
+    if (twin) {
+      sh.list = sh.list.filter(x => x !== s)
+      fill(twin, call)
+      s = twin
     }
     s.taskId = id
     const file = text.match(/Output is being written to: (\S+?)\.?(?=\s|$)/)?.[1]
@@ -138,21 +168,22 @@ export function onShellResult(sh: Shells, toolId: string, text: string, isError:
 }
 
 /** Claude Code's task event, as main.ts gets it from claude.ts. */
-export type TaskNews = { phase: 'started' | 'progress' | 'updated' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; type?: string; isBackgrounded?: boolean; outputFile?: string }
+export type TaskNews = { phase: 'started' | 'progress' | 'updated' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; type?: string; isBackgrounded?: boolean; outputFile?: string; parentTaskId?: string }
 
 /**
  * Claude Code's news about a task, when it is a background command (true: it was one): its id from
  * the start, its end (state, exit code, Claude Code's summary). A background command it starts that
  * no call here shows (an agent's, whose steps aren't streamed) is listed from the event alone.
  */
-export function onShellTask(sh: Shells, e: TaskNews, at: number, ctx: { for: string[] }): boolean {
+export function onShellTask(sh: Shells, e: TaskNews, at: number, ctx: { for: string[]; by?: string }): boolean {
   let s = find(sh, e)
   if (!s && e.type === 'local_bash' && e.isBackgrounded === true) {
     const call = e.toolUseId ? sh.calls.get(e.toolUseId) : undefined
-    s = add(sh, call ?? { id: e.toolUseId || `task:${e.taskId}`, name: 'Bash', input: { description: e.text ?? '' }, for: ctx.for, at })
+    s = add(sh, call ?? { id: e.toolUseId || `task:${e.taskId}`, name: 'Bash', input: { description: e.text ?? '' }, for: ctx.for, at, ...(ctx.by ? { by: ctx.by } : {}) })
   }
   // (A foreground command Claude Code moves to the background is listed from its call's result.)
   if (!s) return false
+  if (ctx.by && !s.by) s.by = ctx.by
   if (e.taskId) s.taskId = e.taskId
   if (e.outputFile) s.outputFile = e.outputFile
   const state = stateOf(e.status)
@@ -169,8 +200,47 @@ export function onShellTask(sh: Shells, e: TaskNews, at: number, ctx: { for: str
   return true
 }
 
+/**
+ * Claude Code's list of its live background tasks (background_tasks_changed: the whole set, each
+ * time it changes). A command it listed and lists no more has ended, even when no word of its end
+ * came (an agent's, whose notification went to the agent): how it went is read from the end of its
+ * output file ("[exited with code N]"), else unknown. One it still lists runs on, whatever its
+ * agent does. One it never listed is left alone (an older Claude Code sends no list).
+ */
+export function onShellLevel(sh: Shells, ids: string[], at: number) {
+  const now = new Set(ids)
+  for (const s of sh.list) {
+    if (s.state !== 'running' || !s.taskId || now.has(s.taskId) || !sh.live.has(s.taskId)) continue
+    const code = s.outputFile ? exitInFile(s.outputFile) : undefined
+    if (code != null) s.exitCode = code
+    end(s, code == null ? 'ended' : code === 0 ? 'done' : 'failed', at, code == null ? 'ended: Claude Code no longer runs it, and said nothing of how it went' : `exited with code ${code}`)
+  }
+  for (const id of ids) sh.live.add(id)
+}
+
+/** The exit code Claude Code writes at the end of a command's output file, if it wrote one. */
+export function exitInFile(path: string): number | undefined {
+  try {
+    const fd = openSync(path, 'r')
+    try {
+      const size = fstatSync(fd).size
+      const len = Math.min(size, 256)
+      const buf = Buffer.alloc(len)
+      readSync(fd, buf, 0, len, size - len)
+      const m = buf.toString('utf8').match(/\[exited with code (\d+)\]\s*$/)
+      return m ? Number(m[1]) : undefined
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return undefined
+  }
+}
+
 /** Claude Code stopped: the commands it was running went with it. */
 export function onShellsExit(sh: Shells, now: number, why = 'stopped when Claude Code exited') {
+  // Its list of live tasks went with it: the next Claude Code starts its own.
+  sh.live.clear()
   for (const s of sh.list)
     if (s.state === 'running') {
       end(s, 'stopped', now, why)
