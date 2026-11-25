@@ -3,7 +3,7 @@
 // each user message with a scenario chosen by words in it (see `scenario` below). A scenario that has
 // to wait (streaming, a slow turn) waits for a file named release-<name> in $FAKE_DIR.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createInterface } from 'node:readline'
 
@@ -20,8 +20,14 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 const resumeAt = args.indexOf('--resume')
 const resumed = resumeAt >= 0 ? args[resumeAt + 1]! : ''
-// --fork-session: a new id for the copy, as Claude Code gives it.
-const sessionId = resumed && args.includes('--fork-session') ? `fork-of-${resumed}` : resumed || 's1'
+// --fork-session: a new id for the copy, as Claude Code gives it (the one --session-id names, when given).
+const isFork = !!resumed && args.includes('--fork-session')
+const named = args.includes('--session-id') ? args[args.indexOf('--session-id') + 1]! : ''
+const sessionId = named || (isFork ? `fork-of-${resumed}` : resumed || 's1')
+// A fork's session file starts as a copy of the original's (none with --no-session-persistence, as /btw runs).
+const sessionFile = (id: string) => `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${id}.jsonl`
+if (isFork && !args.includes('--no-session-persistence') && existsSync(sessionFile(resumed)))
+  writeFileSync(sessionFile(sessionId), readFileSync(sessionFile(resumed), 'utf8').replaceAll(`"sessionId":"${resumed}"`, `"sessionId":"${sessionId}"`))
 const MODEL = 'claude-fake-1-0'
 log({ args, cwd: process.cwd() })
 // A side question's Claude Code says when it ends (the app closes it once it has answered).
@@ -588,7 +594,9 @@ async function sideAnswer(m: Msg) {
 // The tag in "about earlier" names the previous topic, so the app links the two.
 const aboutTag = (m: Msg) => (m.text.toLowerCase().includes('about earlier') && previous ? previous : undefined)
 
-init()
+// A real Claude Code says init with the first message; the fake says it at once, unless FAKE_LATE_INIT=1.
+let isInit = !process.env.FAKE_LATE_INIT
+if (isInit) init()
 
 createInterface({ input: process.stdin }).on('line', line => {
   let e: any
@@ -629,6 +637,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     return
   }
   if (e.type !== 'user') return
+  if (!isInit) {
+    isInit = true
+    init()
+  }
   if (isSide) {
     const c = e.message?.content
     const texts = (Array.isArray(c) ? c : [{ type: 'text', text: String(c) }]).filter((b: any) => b.type === 'text').map((b: any) => String(b.text))

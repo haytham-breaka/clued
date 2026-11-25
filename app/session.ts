@@ -153,6 +153,10 @@ export type Kept = {
    * again when it opens the session. `from`: what each replied to, the view it was written in, its images.
    */
   held?: { text: string; from: unknown }[]
+  /** A branch (/branch): the session it was forked from, when, and the name you gave it. */
+  forkOf?: { id: string; at: number; name?: string }
+  /** Folders /add-dir added: Claude Code gets each (--add-dir) whenever it starts on this session. */
+  addDirs?: string[]
 }
 
 /**

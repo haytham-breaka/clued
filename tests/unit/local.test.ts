@@ -184,6 +184,27 @@ describe('local commands', () => {
     }
   })
 
+  test('/add-dir folders and /branch titles in the picker', () => {
+    const local = new L.Local(() => {})
+    local.fresh.push('/tmp/a')
+    assert.deepEqual(local.dirArgs(undefined, { board: {} as any, reactions: {}, links: {} }), ['--add-dir', '/tmp/a'])
+    const kept = { board: {} as any, reactions: {}, links: {}, addDirs: ['/tmp/b'] }
+    assert.ok(local.settle(kept))
+    assert.deepEqual(kept.addDirs, ['/tmp/b', '/tmp/a'])
+    assert.ok(!local.settle(kept))
+    local.fresh.push('/tmp/c')
+    // Another session opened: the new one's folders are dropped.
+    assert.deepEqual(local.dirArgs('s2', kept), ['--add-dir', '/tmp/b', '--add-dir', '/tmp/a'])
+    assert.deepEqual(local.fresh, [])
+    mkdirSync(join(home, '.clued', 'sessions'), { recursive: true })
+    writeFileSync(join(home, '.clued', 'sessions', 'b1.json'), JSON.stringify({ forkOf: { id: 'original-id', at: 1 } }))
+    writeFileSync(join(home, '.clued', 'sessions', 'b2.json'), JSON.stringify({ forkOf: { id: 'original-id', at: 2, name: 'other way' } }))
+    const sessions = [{ id: 'b2', mtime: 3, title: 'T' }, { id: 'b1', mtime: 2, title: 'T' }, { id: 'original-id', mtime: 1, title: 'T' }, { id: 'x', mtime: 0, title: 'U' }]
+    const titles = local.titles(sessions, '/tmp/w')
+    assert.deepEqual(titles, ['⑂ other way · T  (a branch of original)', '⑂ T  (a branch of original)', 'T  (⑂ 2 branches; original)', 'U'])
+    assert.equal(local.titles(sessions, '/tmp/w'), titles, 'worked out once for the list')
+  })
+
   test('cards: one per command, laid out once per width, Esc closes the latest', () => {
     let draws = 0
     const cards = new L.Cards(() => draws++)

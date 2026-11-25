@@ -1,9 +1,10 @@
 // clued's own versions of Claude Code commands that headless mode refuses ("/help isn't available
-// in this environment"): /help, /status, /plan, /diff, /copy and /export. What they show is a card
+// in this environment"): /help, /status, /plan, /diff, /copy, /export, /branch and /add-dir. What they show is a card
 // in the chat, after the message that was last when you typed it, like a /btw answer: no topic, no
 // part, nothing sent to Claude. ✕ or Esc closes it.
 
 import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -13,7 +14,8 @@ import type { ClaudeEvent, CommandInfo, Hello, McpServer } from './claude.ts'
 import { block, codeRows, diffHead, diffRows, hunkGap, K, langOf } from './code.ts'
 import type { Row } from './code.ts'
 import { stripMarks } from './inbox.ts'
-import type { Turn } from './session.ts'
+import { loadKept, projectDir } from './session.ts'
+import type { Kept, SessionInfo, Turn } from './session.ts'
 import { C, cells, clip, pad, wrap } from './text.ts'
 import type { Line, Span } from './text.ts'
 
@@ -25,6 +27,8 @@ export const ABOUT: Record<string, { args?: string; about: string }> = {
   diff: { about: 'the uncommitted changes in this folder\'s git repository' },
   copy: { args: '[N]', about: 'copy Claude\'s last reply, or the Nth back' },
   export: { args: '[file]', about: 'the chat as Markdown: to a file, or to the clipboard' },
+  branch: { args: '[name]', about: 'a new session with the conversation so far, to try another way (/resume goes back)' },
+  'add-dir': { args: '<path>', about: 'let Claude work in another folder too, for this session' },
   clear: { about: 'a new session' },
   resume: { about: 'pick a session to go back to' },
   model: { args: '<name>', about: 'switch model: opus, sonnet, haiku or a model id' },
@@ -41,7 +45,7 @@ export const ABOUT: Record<string, { args?: string; about: string }> = {
 }
 
 /** The commands this module runs. */
-export const LOCAL_COMMANDS = ['help', 'status', 'plan', 'diff', 'copy', 'export']
+export const LOCAL_COMMANDS = ['help', 'status', 'plan', 'diff', 'copy', 'export', 'branch', 'add-dir']
 
 // ---- Cards: what a command shows, in the chat -----------------------------------------
 
@@ -433,6 +437,14 @@ export type Ctx = {
   send: (text: string) => void
   /** A card was added: the chat goes to it. */
   shown: (card: Card) => void
+  sessionId: string
+  isWorking: boolean
+  /** What the app keeps with this session (the folders /add-dir added). */
+  kept: Kept
+  /** Starts Claude Code again on this session (as /model does), with `args` this once. */
+  restart: (args: string[]) => void
+  /** The chat goes on as session `id` (a branch): what the app keeps goes with it, with `more`. */
+  adopt: (id: string, more: Partial<Kept>) => void
   now?: number
 }
 
@@ -443,6 +455,22 @@ export class Local {
   facts: Facts = { commands: [] }
   constructor(changed: () => void) {
     this.cards = new Cards(changed)
+  }
+
+  /** Folders added (/add-dir) before the session had an id: they go with it once it has one. */
+  fresh: string[] = []
+
+  /** Claude Code's --add-dir arguments as it starts: the session's folders, or a new one's. */
+  dirArgs(resume: string | undefined, kept: Kept): string[] {
+    if (resume) this.fresh = []
+    return (resume ? kept.addDirs ?? [] : this.fresh).flatMap(d => ['--add-dir', d])
+  }
+
+  /** The session has its id now: the folders added before go with it. */
+  settle(kept: Kept): boolean {
+    if (!this.fresh.length) return false
+    kept.addDirs = [...new Set([...(kept.addDirs ?? []), ...this.fresh.splice(0)])]
+    return true
   }
 
   /** Every event from Claude Code: what it says of itself. */
@@ -476,6 +504,14 @@ export class Local {
         return this.export(arg, ctx), true
       case 'diff':
         return this.diff(ctx), true
+      case 'branch':
+        return this.branch(arg, ctx), true
+      case 'add-dir':
+        return this.addDir(arg, ctx), true
+      // A new session starts with no folders added.
+      case 'clear':
+        this.fresh = []
+        return false
     }
     return false
   }
@@ -523,6 +559,49 @@ export class Local {
     })
     ctx.shown(card)
   }
+
+  /** /branch: Claude Code again with the conversation so far, as a new session (--fork-session). */
+  private branch(name: string, ctx: Ctx) {
+    if (ctx.isWorking) return ctx.toast('Claude is working: /branch once its turn is over (Esc interrupts it).')
+    const from = ctx.sessionId
+    if (!from || !existsSync(`${projectDir(ctx.cwd)}/${from}.jsonl`)) return ctx.toast('Nothing to branch yet: send a message first.')
+    // Its id is given now (--session-id), so what the app keeps goes to the branch from the start, not to the original.
+    const id = randomUUID()
+    ctx.restart(['--fork-session', '--session-id', id])
+    ctx.adopt(id, { forkOf: { id: from, at: ctx.now ?? Date.now(), ...(name ? { name } : {}) } })
+    ctx.toast(`Branched${name ? ` as “${name}”` : ''}: a new session with the conversation so far. /resume goes back to the original.`)
+  }
+
+  /** /add-dir <path>: Claude Code again on this session, with --add-dir for the folder (and the ones before). */
+  private addDir(arg: string, ctx: Ctx) {
+    const dirs = ctx.sessionId ? ctx.kept.addDirs ?? [] : this.fresh
+    if (!arg) return ctx.toast(`Usage: /add-dir <path>: let Claude work in another folder too.${dirs.length ? ` Added: ${dirs.map(tilde).join(', ')}` : ''}`)
+    const path = arg.replace(/^['"]|['"]$/g, '')
+    const p = path === '~' ? homedir() : path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(ctx.cwd, path)
+    if (!existsSync(p) || !statSync(p).isDirectory()) return ctx.toast(`Not a folder: ${tilde(p)}`)
+    if (p === ctx.cwd || dirs.includes(p)) return ctx.toast(`Claude can already work in ${tilde(p)}.`)
+    if (ctx.isWorking) return ctx.toast('Claude is working: /add-dir once its turn is over (Esc interrupts it).')
+    if (ctx.sessionId) ctx.kept.addDirs = [...dirs, p]
+    else this.fresh.push(p)
+    ctx.restart([])
+    ctx.toast(`Added ${tilde(p)}: Claude can work there too, in this session from now on.`)
+  }
+
+  /** The picker's titles: a branch says what it branched from, the original how many branches it has. */
+  titles(sessions: SessionInfo[], cwd: string): string[] {
+    const known = this.titleCache.get(sessions)
+    if (known) return known
+    const forks = sessions.map(s => loadKept(s.id, cwd).forkOf)
+    const out = sessions.map((s, i) => {
+      const f = forks[i]
+      const n = forks.filter(x => x?.id === s.id).length
+      if (f) return `⑂ ${f.name ? `${f.name} · ` : ''}${s.title}  (a branch of ${f.id.slice(0, 8)})`
+      return n ? `${s.title}  (⑂ ${n} branch${n > 1 ? 'es' : ''}; ${s.id.slice(0, 8)})` : s.title
+    })
+    this.titleCache.set(sessions, out)
+    return out
+  }
+  private titleCache = new WeakMap<SessionInfo[], string[]>()
 
   private diff(ctx: Ctx) {
     const d = gitDiff(ctx.cwd)

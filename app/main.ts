@@ -838,7 +838,13 @@ function start(resume?: string) {
   S.chatScroll = 0
   initRead()
   unparkHeld()
-  S.claude = new Claude({ args: [...(resume ? ['--resume', resume] : []), ...passArgs], cwd, appendSystemPrompt: APP_GUIDE }, onEvent)
+  // The folders /add-dir added to this session go each time it starts.
+  // Only the Claude Code running now is heard: the one before (a /model, /branch or /add-dir restart)
+  // still exits after this, and its exit would say this one stopped.
+  const claude: Claude = new Claude({ args: [...(resume ? ['--resume', resume] : []), ...passArgs, ...local.dirArgs(resume, S.kept)], cwd, appendSystemPrompt: APP_GUIDE }, e => {
+    if (S.claude === claude) onEvent(e)
+  })
+  S.claude = claude
   refreshStatus()
   draw()
 }
@@ -936,6 +942,8 @@ function onEvent(e: ClaudeEvent) {
           S.kept = kept
           initRead()
         }
+        // At once: a restart (/model) reads it back.
+        if (local.settle(S.kept)) saveKept(S.sessionId, S.kept, true)
       }
       S.model = e.model
       S.commands = e.commands
@@ -2616,13 +2624,15 @@ function paintPicker(W: number, H: number) {
   }
   const room = H - L.length
   const first = Math.max(0, Math.min(p.at - Math.floor(room / 2), p.sessions.length - room))
+  // A branch says what it branched from (/branch): its first words are the original's.
+  const titles = local.titles(p.sessions, cwd)
   p.sessions.slice(Math.max(0, first), Math.max(0, first) + room).forEach((s, i) => {
     const idx = Math.max(0, first) + i
     const on = idx === p.at
     const open = () => { S.picker = null; start(s.id) }
     L.push([
       { text: on ? ' ▸ ' : '   ', style: { fg: C.cyan }, action: open },
-      { text: clip(s.title, W - 20), style: on ? { bold: true, fg: C.cyan } : {}, action: open },
+      { text: clip(titles[idx] ?? s.title, W - 20), style: on ? { bold: true, fg: C.cyan } : {}, action: open },
       { text: `  ${ago(s.mtime)}`, style: { fg: C.gray }, action: open },
     ])
   })
@@ -2690,7 +2700,10 @@ function localCtx(): LocalCtx {
     turns: S.turns,
     after: S.turns.at(-1)?.key ?? '',
     own: [...OUR_COMMANDS, ...LOCAL_COMMANDS],
-    status: () => ({ cliVersion: cluedVersion(), sessionId: S.sessionId, cwd, here: (S.sessionId && lastCwd(cwd, S.sessionId)) || cwd, model: S.model, permissionMode: S.permissionMode, contextUsed: used, contextSize: S.contextWindow || knownWindows[S.model] || 0, costUsd: S.costUsd }),
+    status: () => ({ cliVersion: cluedVersion(), sessionId: S.sessionId, cwd, here: (S.sessionId && lastCwd(cwd, S.sessionId)) || cwd, model: S.model, permissionMode: S.permissionMode, contextUsed: used, contextSize: S.contextWindow || knownWindows[S.model] || 0, costUsd: S.costUsd, extra: [
+      ...(S.kept.forkOf ? [['Branch of', `${S.kept.forkOf.id}${S.kept.forkOf.name ? ` (as “${S.kept.forkOf.name}”)` : ''}`] as [string, string]] : []),
+      ...((S.sessionId ? S.kept.addDirs ?? [] : local.fresh).length ? [['Added folders', (S.sessionId ? S.kept.addDirs ?? [] : local.fresh).join('\n')] as [string, string]] : []),
+    ] }),
     copy: (text, note) => copyText(text, note),
     toast,
     permissionMode: S.permissionMode,
@@ -2699,6 +2712,22 @@ function localCtx(): LocalCtx {
       S.claude!.setMode(mode)
     },
     send: text => sendTyped(text),
+    sessionId: S.sessionId,
+    isWorking: S.isWorking,
+    kept: S.kept,
+    restart: args => {
+      // What the app keeps is read again as Claude Code starts: written first.
+      if (S.sessionId) saveKept(S.sessionId, S.kept, true)
+      passArgs.push(...args)
+      start(S.sessionId || undefined)
+      passArgs.splice(passArgs.length - args.length, args.length)
+    },
+    adopt: (id, more) => {
+      S.sessionId = id
+      S.kept = { ...S.kept, ...more }
+      saveKept(id, S.kept, true)
+      refreshStatus()
+    },
     shown: (card: Card) => {
       if (S.agentView || S.requestView || S.jobView) toast(`/${card.title} is in the chat: ← back to chat.`)
       else S.pendingJump = `card:${card.id}`
