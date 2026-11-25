@@ -43,7 +43,7 @@ import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
 import type { Pulse } from './tasks.ts'
 import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, isQuiet, nudgeText, pulseOf, QUIET_MS, resume as resumeRun, sendFailed, sendTask, taskArrived, touch, workingFor } from './tasks.ts'
-import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
+import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept, toggleSaved } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
@@ -1422,6 +1422,25 @@ function react(t: Turn, emoji: string, part?: number) {
   draw()
 }
 
+// ---- Saved messages ---------------------------------------------------------------------
+
+/** Saves a message to get back to later, or unsaves it; kept with the session, so a resume has it. */
+function saveMessage(anchor: string, who: 'me' | 'claude', text: string) {
+  const was = !!S.kept.saved?.some(x => x.anchor === anchor)
+  S.kept.saved = toggleSaved(S.kept.saved ?? [], { anchor, who, text: stripMarks(text), at: Date.now() })
+  keep()
+  toast(was ? 'Unsaved.' : 'Saved: it is under ★ Saved in the panel.')
+  draw()
+}
+
+/** A click on a saved message: the chat goes to it (in Main, when this view hides it). */
+function openSaved(anchor: string) {
+  if (anchor.startsWith('part:')) return openPart(anchor.slice(5))
+  const turn = S.turns.findLast(t => `me:${t.key}` === anchor)
+  if (turn) return jumpTo(turn)
+  toast('That message is no longer in this chat.')
+}
+
 function jump(anchor: string) {
   const at = S.anchors[anchor]
   if (at == null) return toast('That message is hidden by this view. Show Main to see it.')
@@ -2012,6 +2031,9 @@ function paint() {
         fold: folded => { S.isFolded = folded; savePrefs(); draw() },
         readParts: ids => setRead(ids, true),
         unreadParts: ids => setRead(ids, false),
+        saved: S.kept.saved ?? [],
+        openSaved,
+        unsave: anchor => { const x = S.kept.saved?.find(y => y.anchor === anchor); if (x) saveMessage(x.anchor, x.who, x.text) },
         isReadTab: S.isReadTab,
         readTab: on => { S.isReadTab = on; S.listAt.read = 0; draw() },
         readList: S.isReadTab ? readList() : [],
@@ -2115,6 +2137,7 @@ function paint() {
       replying: new Set((S.replyTo?.quotes ?? []).map(q => q.anchor ?? '')),
       react,
       jump,
+      save: (anchor, who, text) => saveMessage(anchor, who, text),
       copy: text => copyText(text),
       hover: S.hover,
       unread: new Set(S.box.unread.map(p => p.id)),
@@ -2541,6 +2564,16 @@ function key(k: string) {
     case '\x1b\x1b[B':
       pickMessage(1)
       break
+    case '\x1bs': {
+      // On a message (Alt+↑/↓): save it to get back to later, or unsave it.
+      const m = S.picked ? S.box.messages.find(x => x.turn.key === S.picked) : undefined
+      if (!m) {
+        toast('Pick one of your messages with Alt+↑/↓ first, or use ☆ save under any message.')
+        break
+      }
+      saveMessage(`me:${m.turn.key}`, 'me', m.turn.text)
+      break
+    }
     case '\x1bb':
     case '\x1b[1;3D':
       // On a message (Alt+↑/↓) with nothing typed: back to it. Otherwise a word back.
@@ -2825,7 +2858,7 @@ function input(data: string) {
       continue
     }
     // Alt+letter keys the app uses come as ESC and the letter: read them as one key (Alt+V would otherwise be Esc, then v).
-    const seq = s.match(/^\x1b\[[0-9;]*[A-Za-z~]|^\x1bO[A-Za-z]|^\x1b[\r\x7f\bbdfvV]|^\x1b(?!\[)/)
+    const seq = s.match(/^\x1b\[[0-9;]*[A-Za-z~]|^\x1bO[A-Za-z]|^\x1b[\r\x7f\bbdfsvV]|^\x1b(?!\[)/)
     if (seq) {
       key(seq[0] === '\x1bOA' ? '\x1b[A' : seq[0] === '\x1bOB' ? '\x1b[B' : seq[0] === '\x1bOC' ? '\x1b[C' : seq[0] === '\x1bOD' ? '\x1b[D' : seq[0] === '\x1bOH' ? '\x1b[H' : seq[0] === '\x1bOF' ? '\x1b[F' : seq[0])
       s = s.slice(seq[0].length)

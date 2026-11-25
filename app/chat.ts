@@ -34,6 +34,8 @@ export type ChatCtx = {
   /** `part`: a reaction on one reply part (when the answer has several), not on the whole answer. */
   react: (t: Turn, emoji: string, part?: number) => void
   jump: (anchor: string) => void
+  /** Saves a message to get back to later (`me:<key>` or `part:<id>`), or unsaves it. */
+  save?: (anchor: string, who: 'me' | 'claude', text: string) => void
   /** Puts text on the clipboard. */
   copy: (text: string) => void
   /** The message under the pointer (`me:<key>` or `claude:<key>`): only it shows its actions. */
@@ -271,6 +273,12 @@ function bubble(body: Line[], inner: number, left: number, border: Style, header
   return out
 }
 
+/** ☆ save on hover, ★ saved once saved (a click unsaves): under every message. */
+const saveSpan = (ctx: ChatCtx, anchor: string, who: 'me' | 'claude', text: string): Span => {
+  const on = !!ctx.kept.saved?.some(x => x.anchor === anchor)
+  return { text: on ? '★ saved' : '☆ save', style: { fg: on ? C.yellow : C.gray }, action: () => ctx.save?.(anchor, who, text) }
+}
+
 /** The widest line of `text` wrapped at `max`, so short messages get snug bubbles. */
 const snug = (lines: Line[], max: number) => Math.min(max, Math.max(8, ...lines.map(lineCells)))
 
@@ -378,13 +386,16 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       if (chain > 0) foot.push({ text: `⛓ chain · ${chain}  `, style: { fg: C.cyan }, action: () => ctx.openChain(turn) })
       // Sent while Claude worked, and Claude hasn't got to it yet.
       if (turn.queued && turn.delivery && !turn.isDone && !turn.steps.length && !turn.live && !turn.pending && !turn.early?.length) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
+      // Saved to get back to later: shown always, so it is easy to spot.
+      const isSaved = !!ctx.kept.saved?.some(x => x.anchor === `me:${turn.key}`)
+      if (isSaved && ctx.hover !== `me:${turn.key}`) foot.push(saveSpan(ctx, `me:${turn.key}`, 'me', turn.text), { text: '  ' })
       // Where it is on its way, last: the app has it, it went to Claude Code, Claude Code took it in.
       if (!turn.text.startsWith('/')) foot.push(delivered(turn))
       while (foot.length && foot.at(-1)!.text.trim() === '') foot.pop()
       // Actions show while the pointer is on this message, on the left of the row: what is on the
       // right (answered, replies) keeps its place, so a click never lands on something that moved.
       const acts: Span[] = ctx.hover === `me:${turn.key}`
-        ? [{ text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(turn.text) }, pad(2), { text: '↩ reply', style: { fg: C.gray }, action: () => ctx.reply('me', turn) }]
+        ? [{ text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(turn.text) }, pad(2), { text: '↩ reply', style: { fg: C.gray }, action: () => ctx.reply('me', turn) }, pad(2), saveSpan(ctx, `me:${turn.key}`, 'me', turn.text)]
         : []
       const rightAt = width - lineCells(foot) - 1
       const actsAt = Math.max(0, Math.min(left + 1, rightAt - lineCells(acts) - 3))
@@ -551,11 +562,15 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
           if (ctx.hover === key) {
             row.push({ text: isPicked ? '✓ in your reply' : '↩ reply', style: { fg: isPicked ? C.cyan : C.gray }, action: () => ctx.reply('claude', turn, [i]) }, pad(2))
             row.push({ text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(part.text) }, pad(2))
+            row.push(saveSpan(ctx, key, 'claude', part.text), pad(2))
             for (const e of QUICK) row.push({ text: e, style: given.includes(e) ? { bg: C.meBg } : {}, action: () => ctx.react(turn, e, i) }, pad(1))
             row.push(pad(1), { text: isUnread ? '✓ mark read' : '● mark unread', style: { fg: C.faint }, action: () => ctx.setRead([id], isUnread) })
-          } else if (given.length) {
-            for (const e of given) row.push({ text: e, style: { bg: C.meBg }, action: () => ctx.react(turn, e, i) }, pad(1))
-            row.push({ text: 'you', style: { fg: C.faint } })
+          } else {
+            if (ctx.kept.saved?.some(x => x.anchor === key)) row.push(saveSpan(ctx, key, 'claude', part.text), pad(2))
+            if (given.length) {
+              for (const e of given) row.push({ text: e, style: { bg: C.meBg }, action: () => ctx.react(turn, e, i) }, pad(1))
+              row.push({ text: 'you', style: { fg: C.faint } })
+            }
           }
           out.push(row)
           mark(key)
@@ -583,11 +598,17 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
           const ids = parts.map((pt, i) => pt.id ?? `${turn.key}:${i}`)
           const anyUnread = ids.some(id => ctx.unread.has(id))
           foot.push({ text: anyUnread ? '✓ mark read' : '● mark unread', style: { fg: anyUnread ? C.gray : C.faint }, action: () => ctx.setRead(ids, anyUnread) }, pad(2))
+          // A single reply is saved as its one part (several parts: each has its own ☆ save).
+          if (parts.length === 1) foot.push(saveSpan(ctx, `part:${ids[0]}`, 'claude', parts[0]!.text), pad(2))
           for (const e of QUICK) foot.push({ text: e, style: given.includes(e) ? { bg: C.meBg } : {}, action: () => ctx.react(turn, e) }, pad(1))
-        } else if (given.length) {
-          // Your reactions stay; a click takes one back.
-          for (const e of given) foot.push({ text: e, style: { bg: C.meBg }, action: () => ctx.react(turn, e) }, pad(1))
-          foot.push({ text: 'you', style: { fg: C.faint } })
+        } else {
+          const one = parts.length === 1 ? `part:${parts[0]!.id ?? `${turn.key}:0`}` : ''
+          if (one && ctx.kept.saved?.some(x => x.anchor === one)) foot.push(saveSpan(ctx, one, 'claude', parts[0]!.text), pad(2))
+          if (given.length) {
+            // Your reactions stay; a click takes one back.
+            for (const e of given) foot.push({ text: e, style: { bg: C.meBg }, action: () => ctx.react(turn, e) }, pad(1))
+            foot.push({ text: 'you', style: { fg: C.faint } })
+          }
         }
         out.push(foot)
       }

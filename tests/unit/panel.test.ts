@@ -161,3 +161,38 @@ describe('scheduled jobs', () => {
     assert.deepEqual(opened, ['tu-2'])
   })
 })
+
+describe('saved messages', () => {
+  const saved = [
+    { anchor: 'me:k1', who: 'me' as const, text: 'remember the staging port', at: NOW - 3_600_000 },
+    { anchor: 'part:k2:0', who: 'claude' as const, text: '<<reply T3>>\nUse port 8137 for staging.', at: NOW - 60_000 },
+  ]
+
+  test('★ Saved lists them newest first: who, the first words, when; a click goes to one, ✕ unsaves it', () => {
+    const opened: string[] = []
+    const gone: string[] = []
+    const p = ctx([], { saved, openSaved: a => opened.push(a), unsave: a => gone.push(a) })
+    const lines = text(p, 60)
+    const head = lines.findIndex(l => l.startsWith('★ Saved'))
+    assert.ok(head > 0, 'the section is there')
+    assert.match(lines[head]!, /^★ Saved +2$/)
+    assert.match(lines[head + 1]!, /✕ ✻ Use port 8137 for staging\./)
+    assert.match(lines[head + 2]!, /✕ you remember the staging port/)
+    const first = panelLines(p, 60).lines[head + 1]!
+    first.find(s => s.text.includes('Use port'))!.action!()
+    first.find(s => s.text === ' ✕')!.action!()
+    assert.deepEqual([opened, gone], [['part:k2:0'], ['part:k2:0']])
+    // Between Unread and Waiting on you: it comes right after Unread.
+    assert.ok(lines.findIndex(l => l.startsWith('Unread')) < head)
+  })
+
+  test('nothing saved: no section; folded: a ★ count that opens the newest', () => {
+    assert.ok(!text(ctx([])).some(l => l.includes('★ Saved')))
+    const opened: string[] = []
+    const folded = panelLines(ctx([], { saved, isFolded: true, openSaved: a => opened.push(a) }), 12).lines
+    const star = folded.find(l => l.some(s => s.text === '★'))!
+    assert.ok(star.map(s => s.text).join('').includes('2'))
+    star.find(s => s.text === '★')!.action!()
+    assert.deepEqual(opened, ['part:k2:0'])
+  })
+})

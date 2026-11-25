@@ -62,6 +62,7 @@ Your messages are on the right and Claude's replies on the left, with Markdown d
 
 The panel on the left has these sections:
 - **Unread / Read:** replies you haven't seen yet, and the ones you have. A reply counts as read after 3 seconds on screen with the window focused.
+- **★ Saved:** the messages you saved to get back to later, newest first (shown once there is one). Click one to go to it; ✕ unsaves it.
 - **Waiting on you:** Claude's open questions to you. The ✕ on the left, or `✕ dismiss` under the question, drops one you don't want to answer: its message counts as done, and your next message tells Claude not to wait for an answer.
 - **Agents:** Claude first, then each agent it started, by name and role (`James (implementer)`, `Jake (explorer)`), running or just finished, with the message it is working on. Click one to open its live view. Claude is told the names too, so you can write "ask Jake to check the tests". When Claude sends an agent more work, each message is a new task: the agent's row says how many tasks it has and which one it is on, and its view lists them, with the agent's own to-do list below. On the right of a running agent: `last step 12s ago`, or `running Bash 6m` while a tool runs (a long test run is not stuck), or, after 5 minutes with no new step and nothing running, `quiet 6m` in yellow: its view says it may be stuck, with ▶ continue to have Claude check on it.
 - **Not started:** right under Agents, the requests Claude said it still owes work on that nothing is working on right now, with how long each has waited. Click one to open it, or ▶ start to ask Claude to start on it now.
@@ -79,6 +80,7 @@ Drag the divider to resize the panel, and click `≡` to fold it to icons. Your 
 | Ctrl+C | clear the input or interrupt; twice to quit |
 | Alt+↑ / Alt+↓ | go through your recent messages; the chat scrolls to each |
 | Alt+→ / Alt+← | from a message to its reply, and back |
+| Alt+S | save the message Alt+↑/↓ picked to get back to later, or unsave it |
 | Ctrl+F | search your messages |
 | Ctrl+N | next unread reply |
 | Ctrl+O | show or hide Claude's steps |
@@ -105,6 +107,8 @@ When one reply answers several messages, it splits into one bubble per message, 
 ### Reply to anything, react to anything
 
 Hover over a message for `↩ reply`, `copy` and 👍 👎 ❓ 👀. A reply quotes the message to Claude. A 👍 on a question is a go-ahead, so Claude proceeds. 👎 asks Claude what to change, and ❓ asks it to explain again, more simply. Other reactions start no turn.
+
+`☆ save` under any message, yours or one part of Claude's reply, keeps it in the panel's **★ Saved** list to get back to later; the bubble then shows `★ saved`, and a click on it again unsaves it. The list is kept with the session, so it's still there after `--resume` or `/resume`.
 
 Claude reacts too, only where it means something: 👀 seen (for a message sent while it was busy), 👍 noted, ✅ done with nothing to add, 🎉 good news.
 

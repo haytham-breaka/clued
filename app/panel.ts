@@ -5,7 +5,7 @@ import { answerGist, matches, preview } from './inbox.ts'
 import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
-import type { Step, Turn, Work } from './session.ts'
+import type { Saved, Step, Turn, Work } from './session.ts'
 import { canContinue, currentTask, cutLabel, pulseOf, workingFor } from './tasks.ts'
 import type { AgentTask, Pulse } from './tasks.ts'
 import { C, cells, clip } from './text.ts'
@@ -121,6 +121,10 @@ const pulseText = (pulse: Pulse | undefined, now: number, plain?: string, short 
 export const FOLDED = 7
 
 export type PanelCtx = {
+  /** Messages you saved to get back to later; a click goes to one, ✕ unsaves it. */
+  saved?: readonly Saved[]
+  openSaved?: (anchor: string) => void
+  unsave?: (anchor: string) => void
   isResultsOnly: boolean
   isWorking: boolean
   /** The spinner's frame, for messages something is working on now. */
@@ -291,11 +295,16 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       const first = () => p.openPart(p.box.waiting[0]!.id)
       L.push(row(width, [{ text: '✋', action: first }], [{ text: String(p.box.waiting.length), style: { fg: C.yellow, bold: true }, action: first }]))
     }
+    const saved = p.saved ?? []
+    if (saved.length) {
+      const last = () => p.openSaved?.(saved.at(-1)!.anchor)
+      L.push(row(width, [{ text: '★', style: { fg: C.yellow }, action: last }], [{ text: String(saved.length), style: { fg: C.yellow, bold: true }, action: last }]))
+    }
     const running = p.agents.filter(a => a.state === 'running').length
     if (running) L.push(row(width, [{ text: '◐', style: { fg: C.cyan } }], [{ text: String(running), style: { fg: C.cyan, bold: true } }]))
     const live = p.jobs.filter(x => x.job.state === 'scheduled').length
     if (live) L.push(row(width, [{ text: '⏰', style: { fg: C.yellow }, action: () => p.openJob(p.jobs.find(x => x.job.state === 'scheduled')!.job.toolId) }], [{ text: String(live), style: { fg: C.yellow, bold: true } }]))
-    if (p.box.unread.length || p.box.waiting.length || running || live) L.push(rule(width))
+    if (p.box.unread.length || p.box.waiting.length || saved.length || running || live) L.push(rule(width))
     return { lines: L, head: 2 }
   }
 
@@ -375,6 +384,23 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
         { text: slide(w.question, p.hscroll), action: () => p.openPart(w.id) },
       ])),
       ...(waiting.length > 1 ? { footer: [row(width, [{ text: '    dismiss all', style: { fg: C.gray }, action: () => p.dismiss(waiting.map(w => w.id)) }])] } : {}),
+    })
+
+  // ---- Messages you saved to get back to later, newest first. ✕ unsaves one; a click goes to it.
+  const saved = [...(p.saved ?? [])].reverse()
+  if (saved.length)
+    sections.push({
+      id: 'saved',
+      cap: 5,
+      header: [row(width, [{ text: '★ Saved', style: { bold: true, fg: C.yellow } }], [{ text: String(saved.length), style: { fg: C.yellow, bold: true } }])],
+      rows: saved.map(x => {
+        const open = () => p.openSaved?.(x.anchor)
+        return row(iw, [
+          { text: ' ✕', style: { fg: C.gray }, action: () => p.unsave?.(x.anchor) },
+          { text: x.who === 'me' ? ' you ' : ' ✻ ', style: { fg: x.who === 'me' ? C.cyan : C.gray }, action: open },
+          { text: slide(preview(x.text, 200), p.hscroll), action: open },
+        ], [{ text: stamp(x.at, now), style: { fg: C.faint }, action: open }])
+      }),
     })
 
   // ---- Who is working on what: Claude itself, then (a section of their own) the agents it started,

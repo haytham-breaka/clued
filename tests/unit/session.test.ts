@@ -216,3 +216,18 @@ describe('session files', () => {
     assert.deepEqual(S.readAgentFile(CWD, 'sess', 'missing', 0), { entries: [], next: 0 })
   })
 })
+
+describe('saved messages', () => {
+  test('toggleSaved saves, and unsaves the same anchor; the list survives saveKept and loadKept', async () => {
+    const a = { anchor: 'me:k1', who: 'me' as const, text: 'one', at: 1 }
+    const b = { anchor: 'part:k2:0', who: 'claude' as const, text: 'two', at: 2 }
+    let list = S.toggleSaved([], a)
+    list = S.toggleSaved(list, b)
+    assert.deepEqual(list.map(x => x.anchor), ['me:k1', 'part:k2:0'])
+    assert.deepEqual(S.toggleSaved(list, { ...a, at: 9 }).map(x => x.anchor), ['part:k2:0'])
+    const { emptyBoard } = await import('../../hooks/model.ts')
+    S.saveKept('saved-1', { board: emptyBoard(), reactions: {}, links: {}, saved: list })
+    await new Promise(r => setTimeout(r, 450))
+    assert.deepEqual(S.loadKept('saved-1', CWD).saved, list)
+  })
+})

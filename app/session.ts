@@ -131,6 +131,20 @@ export type Kept = {
    * miss them, and the chat is rebuilt from it on load.
    */
   early?: Record<string, string[]>
+  /** Messages you saved to get back to later, newest last. */
+  saved?: Saved[]
+}
+
+/**
+ * A message you saved: `anchor` is where it is in the chat (`me:<turn key>` for yours, `part:<id>`
+ * for one of Claude's reply parts; both stay the same on resume). Its words are kept too, so the
+ * Saved list still shows it when the chat can't.
+ */
+export type Saved = { anchor: string; who: 'me' | 'claude'; text: string; at: number }
+
+/** Saves a message, or unsaves it when it was saved. */
+export function toggleSaved(list: readonly Saved[], item: Saved): Saved[] {
+  return list.some(x => x.anchor === item.anchor) ? list.filter(x => x.anchor !== item.anchor) : [...list, item].slice(-500)
 }
 
 /**
