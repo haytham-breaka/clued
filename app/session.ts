@@ -137,11 +137,18 @@ export type Kept = {
   links: Record<string, Link>
   /** Reply parts you have read (`<turn key>:<index>`). */
   read?: string[]
+  /** Their fingerprints (partPrints in inbox.ts): a part read stays read if its id changes. */
+  readPrints?: string[]
   /** Agents still running when the app quit (Agent tool use id: how), so on resume they say why they stopped. */
   stopped?: Record<string, 'reload' | 'exit'>
+  /** When the app started Claude Code on this session again (a /reload, /model), newest last. */
+  starts?: number[]
   /** Set once the parts there were when the app first opened this session were marked read. */
   readInit?: boolean
-  /** 2: the replies Claude wrote by itself (after an agent, a job) have the same ids live and on resume. */
+  /**
+   * 2: the replies Claude wrote by itself (after an agent, a job) have the same ids live and on resume.
+   * 3: also those after a command's end, and read parts have fingerprints too.
+   */
   readIds?: number
   /** This chat's work setting. */
   work?: Work
@@ -293,8 +300,11 @@ const isNoise = (t: string) =>
 /** The topic id the app's hidden note gave a message ("This message is topic T63"). */
 const briefTopic = (raw: string) => raw.match(/\[(?:clued|threadline)\] This message is (?:provisional )?topic (T\d+)/)?.[1]
 
-/** Turns from a Claude Code session file, for showing history on resume. */
-export function loadHistory(cwd: string, sessionId: string): Turn[] {
+/**
+ * Turns from a Claude Code session file, for showing history on resume. `starts`: when the app started
+ * Claude Code on this session (Kept.starts): a turn the one before was on when it stopped is over.
+ */
+export function loadHistory(cwd: string, sessionId: string, starts: readonly number[] = []): Turn[] {
   const path = `${projectDir(cwd)}/${sessionId}.jsonl`
   if (!existsSync(path)) return []
   const turns: Turn[] = []
@@ -302,6 +312,8 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
   const byId = new Map<string, { turn: Turn; step: Step }>()
   // Whether Claude's last turn had ended (so news from an agent starts a turn of its own).
   let ended = false
+  const restarts = [...starts].sort((a, b) => a - b)
+  let restart = 0
   const finish = () => {
     if (cur && !cur.answer && cur.pending) cur.answer = stripTag(cur.pending)
     if (cur) {
@@ -324,6 +336,12 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       continue
     }
     const at = Date.parse(e.timestamp ?? '') || 0
+    // Claude Code was started again before this (a /reload, /model): what it is told now starts a turn
+    // of its own, as live, even if the one before stopped mid-turn.
+    if (at && restart < restarts.length && restarts[restart]! <= at) {
+      while (restart < restarts.length && restarts[restart]! <= at) restart++
+      ended = true
+    }
     // A background agent's run ended: Claude Code tells Claude with a task notification.
     if (cur && (e.type === 'user' || (e.type === 'attachment' && e.attachment?.type === 'queued_command'))) {
       const c = e.type === 'user' ? e.message?.content : e.attachment.prompt

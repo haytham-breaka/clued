@@ -374,6 +374,9 @@ async function scenario(m: Msg) {
     tool('qc-1', 'Bash', { command: 'true', description: 'Quick check', run_in_background: true })
     toolResult('qc-1', 'Command running in background with ID: bqc1. Output is being written to: /tmp/bqc1.output.', false, undefined, { backgroundTaskId: 'bqc1' })
     out({ type: 'system', subtype: 'task_notification', task_id: 'bqc1', tool_use_id: 'qc-1', status: 'completed', summary: 'Background command "Quick check" completed (exit code 0)' })
+    // Claude is told of its end with its next step's result.
+    tool('qc-2', 'Read', { file_path: `${cwd}/README.md` })
+    toolResult('qc-2', '# Readme')
     finish(m, 'Ran the quick check.')
     if (!(await release('wj-end', 20_000))) return
     out({ type: 'system', subtype: 'task_notification', task_id: 'wj-7', tool_use_id: 'wj-1', status: 'completed', summary: 'Watched job finished' })
@@ -383,6 +386,101 @@ async function scenario(m: Msg) {
   // A background shell command, as Claude Code runs one: the Bash call, its task_started, the result
   // naming its id and output file; output appended on release-bsh-more; on release-bsh-end its last
   // line, task_updated and task_notification, and Claude's follow-up in a turn of its own.
+  // A reply streamed while a message you sent meanwhile is taken in (its echo comes mid-stream), whose
+  // whole text block Claude Code then drops before the next tool call: only the deltas carry it.
+  if (t.includes('block dropped mid-echo')) {
+    tool('ds-1', 'Bash', { command: 'make', description: 'Make it' })
+    await release('ds', 20_000)
+    // The echo of the message sent meanwhile: held back until the reply has begun streaming.
+    const held = unechoed
+    unechoed = []
+    toolResult('ds-1', 'ok')
+    const delta = (text: string) => out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } })
+    delta(`<<reply ${previous}>>\nThat earlier one `)
+    await sleep(80)
+    unechoed = held
+    echoJoined()
+    await sleep(80)
+    delta(`needs your pick: red or blue?\n${tag([{ id: previous, status: 'me' }])}`)
+    await sleep(80)
+    tool('ds-2', 'Read', { file_path: `${cwd}/README.md` })
+    toolResult('ds-2', '# Readme')
+    return finish(m, `<<reply ${m.topic}>>\nMade it.`)
+  }
+  // Every kind of turn Claude starts by itself, streamed and also written to the session file as
+  // Claude Code writes it, so a test can resume and compare: an end told mid-turn (with a tool
+  // result: no turn of its own), one that came after the last tool result (its own turn once this one
+  // ends), an agent's and a command's ends told at once while idle, that agent continued and ending
+  // again with nothing new to say (a turn with no text), then again with two parts and their tags,
+  // and a scheduled job firing.
+  if (t.includes('follow-up kinds')) {
+    mkdirSync(dirname(sessionFile(sessionId)), { recursive: true })
+    const rec = (o: Record<string, unknown>) => appendFileSync(sessionFile(sessionId), JSON.stringify({ sessionId, isSidechain: false, timestamp: new Date().toISOString(), ...o }) + '\n')
+    const recUser = (content: unknown, extra: Record<string, unknown> = {}) => rec({ type: 'user', message: { role: 'user', content }, ...extra })
+    const recSaid = (content: unknown[], stop: string) => rec({ type: 'assistant', message: { role: 'assistant', content, stop_reason: stop } })
+    const notice = (task: string, toolUse: string, summary: string) => `<task-notification>\n<task-id>${task}</task-id>\n<tool-use-id>${toolUse}</tool-use-id>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>`
+    const ended = (task: string, toolUse: string, summary: string) => out({ type: 'system', subtype: 'task_notification', task_id: task, tool_use_id: toolUse, status: 'completed', summary })
+    const call = (id: string, name: string, input: Record<string, unknown>, text: string, data?: unknown) => {
+      tool(id, name, input)
+      recSaid([{ type: 'tool_use', id, name, input }], 'tool_use')
+      toolResult(id, text, false, undefined, data)
+      recUser([{ type: 'tool_result', tool_use_id: id, content: text }])
+    }
+    const words = (text: string) => {
+      say(text)
+      recSaid([{ type: 'text', text }], 'end_turn')
+    }
+    recUser(m.raw.message.content)
+    call('fk-a', 'Agent', { description: 'Helper', subagent_type: 'general-purpose', prompt: 'Help.', run_in_background: true }, 'Async agent launched successfully.\nagentId: afk1')
+    out({ type: 'system', subtype: 'task_started', task_id: 'afk1', tool_use_id: 'fk-a', description: 'Helper', task_type: 'local_agent', is_backgrounded: true })
+    for (const n of [1, 2, 3]) {
+      tool(`fk-s${n}`, 'Bash', { command: `step ${n}`, description: `Step ${n}`, run_in_background: true })
+      recSaid([{ type: 'tool_use', id: `fk-s${n}`, name: 'Bash', input: { command: `step ${n}`, description: `Step ${n}`, run_in_background: true } }], 'tool_use')
+      out({ type: 'system', subtype: 'task_started', task_id: `bfk${n}`, tool_use_id: `fk-s${n}`, description: `Step ${n}`, task_type: 'local_bash', is_backgrounded: true })
+      const started = `Command running in background with ID: bfk${n}. Output is being written to: /tmp/bfk${n}.output.`
+      toolResult(`fk-s${n}`, started, false, undefined, { backgroundTaskId: `bfk${n}` })
+      recUser([{ type: 'tool_result', tool_use_id: `fk-s${n}`, content: started }])
+    }
+    // Step 1 ends mid-turn: told with the next tool result.
+    ended('bfk1', 'fk-s1', 'Background command "Step 1" completed (exit code 0)')
+    call('fk-r', 'Read', { file_path: `${cwd}/README.md` }, '# Readme')
+    rec({ type: 'attachment', attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: notice('bfk1', 'fk-s1', 'Background command "Step 1" completed (exit code 0)') } })
+    // Step 2 ends after the last tool result: told once this turn ends, in a turn of its own.
+    ended('bfk2', 'fk-s2', 'Background command "Step 2" completed (exit code 0)')
+    words(`<<reply ${m.topic}>>\nStarted the work.\n${tag([{ id: m.topic, status: 'claude' }])}`)
+    result()
+    await sleep(150)
+    recUser(notice('bfk2', 'fk-s2', 'Background command "Step 2" completed (exit code 0)'))
+    words(`<<reply ${m.topic}>>\nStep 2 finished.\n${tag([{ id: m.topic, status: 'claude' }])}`)
+    result()
+    await sleep(150)
+    // The agent and step 3 end while Claude is idle: one notification tells both.
+    ended('afk1', 'fk-a', 'Helper finished')
+    ended('bfk3', 'fk-s3', 'Background command "Step 3" completed (exit code 0)')
+    recUser(`${notice('afk1', 'fk-a', 'Helper finished')}\n${notice('bfk3', 'fk-s3', 'Background command "Step 3" completed (exit code 0)')}`)
+    words(`<<reply ${m.topic}>>\nThe helper and step 3 are done.\n${tag([{ id: m.topic, status: 'claude' }])}`)
+    result()
+    await sleep(150)
+    // Continued, the agent ends again: nothing new, so no text at all.
+    ended('afk1', 'fk-a', 'Helper finished again')
+    recUser(notice('afk1', 'fk-a', 'Helper finished again'))
+    recSaid([{ type: 'thinking', thinking: '' }], 'end_turn')
+    result()
+    await sleep(150)
+    // And again: two parts, each with its own tag; the second settles the message before this one.
+    ended('afk1', 'fk-a', 'Helper finished a third time')
+    recUser(notice('afk1', 'fk-a', 'Helper finished a third time'))
+    words(`<<reply ${m.topic}>>\nThe helper's third run is in.\n${tag([{ id: m.topic, status: 'claude' }])}\n\n<<reply ${previous}>>\nWhich name do you want?\n${tag([{ id: previous, status: 'me' }])}`)
+    result()
+    await sleep(150)
+    // A job fires, not near a minute's end (its turn is keyed by the minute, live and from the file).
+    while (Date.now() % 60_000 > 55_000) await sleep(100)
+    recUser('Check the build.', { isMeta: true, turnOrigin: 'scheduled' })
+    out({ type: 'command_lifecycle', command_uuid: 'cmd-fk', state: 'started', wakeup_source: 'schedule_wakeup' })
+    words(`<<reply ${m.topic}>>\nThe job ran.\n${tag([{ id: m.topic, status: 'done' }])}`)
+    result()
+    return
+  }
   if (t.includes('start a background command')) {
     const file = `${dir}/tasks/bsh42.output`
     mkdirSync(dirname(file), { recursive: true })

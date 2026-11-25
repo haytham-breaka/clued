@@ -29,7 +29,7 @@ export function firstLine(text: string, max = 48): string {
 // ---- The tag Claude ends each reply with -------------------------------
 
 // Sessions from before the rename (threadline) used <threadline> and [threadline]; both still read.
-const TAG = /<(?:clued|threadline)>([\s\S]*?)<\/(?:clued|threadline)>/
+const TAGS = /<(?:clued|threadline)>([\s\S]*?)<\/(?:clued|threadline)>/g
 /** Removes the tag, including a half-streamed one at the end. */
 export const stripTag = (text: string) =>
   text.replace(/\s*<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>\s*/g, '\n').replace(/\s*<(?:clued|threadline)>[\s\S]*$/, '').trim()
@@ -44,14 +44,25 @@ export type TagTopic = {
   about?: string
   /** Where an unsorted topic belongs: an existing thread's id, or "new". */
   thread?: number | 'new'
+  /** Which of the text's tags it is in (0 for the first): a later tag's status replaces an earlier one's. */
+  n?: number
 }
 export type Tag = { topics: TagTopic[]; threads: Record<string, string> }
 
 const STATUSES: readonly TopicStatus[] = ['claude', 'me', 'done']
 
+/**
+ * Claude's tags in a text, all of them, in order: a text can hold several reply parts, each ending in
+ * its own tag. Null when none can be read.
+ */
 export function parseTag(text: string): Tag | null {
-  const raw = text.match(TAG)?.[1]
-  if (!raw) return null
+  const tags = [...text.matchAll(TAGS)].map((m, n) => parseOne(m[1]!, n)).filter((t): t is Tag => !!t)
+  if (!tags.length) return null
+  return { topics: tags.flatMap(t => t.topics), threads: Object.assign({}, ...tags.map(t => t.threads)) }
+}
+
+function parseOne(raw: string, n: number): Tag | null {
+  if (!raw.trim()) return null
   try {
     const data = JSON.parse(raw) as { topics?: unknown; threads?: unknown }
     const topics = (Array.isArray(data.topics) ? data.topics : []).flatMap((t): TagTopic[] => {
@@ -67,6 +78,7 @@ export function parseTag(text: string): Tag | null {
           same_as: typeof o.same_as === 'string' ? o.same_as : undefined,
           about: typeof o.about === 'string' ? o.about : undefined,
           thread,
+          n,
         },
       ]
     })
@@ -188,6 +200,8 @@ export function settleTurn(board: Board, answer: string, now: number, opts: { fl
   let topics = board.topics.map(t => ({ ...t, messageKeys: [...t.messageKeys] }))
   let threads = board.threads.map(t => ({ ...t, topicIds: [...t.topicIds] }))
   const touched = new Set<string>()
+  // Which tag settled each topic last: two entries in one tag rank, a later tag's replaces it.
+  const touchedIn = new Map<string, number | undefined>()
   const drop = (topic: Topic) => {
     topics = topics.filter(t => t.id !== topic.id)
     threads = threads.map(th => ({ ...th, topicIds: th.topicIds.filter(id => id !== topic.id) }))
@@ -202,7 +216,7 @@ export function settleTurn(board: Board, answer: string, now: number, opts: { fl
     // Two entries for one topic (its own, a follow-up folded in): waiting on you wins, then on Claude.
     const status = entry?.status ?? (touched.has(topic.id) ? topic.status : fallback)
     // A question only kept open across a follow-up (held) gives way to the topic's own entry.
-    const keep = entry?.status && touched.has(topic.id) && !(held.has(topic.id) && !merged) && RANK[topic.status] > RANK[status]
+    const keep = entry?.status && touched.has(topic.id) && touchedIn.get(topic.id) === entry.n && !(held.has(topic.id) && !merged) && RANK[topic.status] > RANK[status]
     topic.status = keep ? topic.status : status
     if (!merged) held.delete(topic.id)
     if (entry?.status && entry.status !== 'me' && !merged) settledNow.add(topic.id)
@@ -218,6 +232,7 @@ export function settleTurn(board: Board, answer: string, now: number, opts: { fl
       topic.threadId = placed.threadId
     }
     touched.add(topic.id)
+    if (entry) touchedIn.set(topic.id, entry.n)
   }
 
   // The messages each topic got this turn: a topic raised now has its own; an older one, those folded in.

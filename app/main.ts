@@ -38,7 +38,7 @@ import type { RequestInfo } from './chat.ts'
 import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
 import { canRerun, newShells, onShellCall, onShellLevel, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText } from './shells.ts'
 import type { Job } from './scheduled.ts'
-import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
+import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, partPrints, questionsOf, readByTime, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import { imageSpans, openerFor } from './images.ts'
@@ -197,6 +197,8 @@ const S = {
   lastClick: { x: 0, y: 0, at: 0 },
   /** Reply parts read, when each unread part on screen came into view, and whether the window has focus. */
   read: new Set<string>(),
+  /** The fingerprints of the parts read (partPrints): what was read stays read if its id changes. */
+  readPrints: new Set<string>(),
   /**
    * Reading: for each unread reply, which of its lines have been on screen and for how long it has been
    * in view with the window focused. It counts as read once every line was seen, long enough to read.
@@ -360,29 +362,59 @@ function keep() {
 /** Loads what you have read; the first time the app opens a session, everything already there counts as read. */
 function initRead() {
   S.read = new Set(S.kept.read ?? [])
+  S.readPrints = new Set(S.kept.readPrints ?? [])
   S.seen.clear()
+  const prints = partPrints(S.turns)
+  let changed = false
   if (!S.kept.readInit) {
     for (const t of S.turns) (t.parts ?? []).forEach((_, i) => S.read.add(partId(t, i)))
     S.kept.readInit = true
-    S.kept.readIds = 2
-    S.kept.read = [...S.read]
-    keep()
+    S.kept.readIds = 3
+    changed = true
   }
-  // Before, those replies had other ids after a reload, so they came back unread: what you read
-  // then can't be told apart now. They count as read once, rather than all coming back.
-  if (S.kept.readIds !== 2) {
-    for (const t of S.turns) if (/^(?:follow|fired)-/.test(t.key)) (t.parts ?? []).forEach((_, i) => S.read.add(partId(t, i)))
-    S.kept.readIds = 2
-    S.kept.read = [...S.read].slice(-3000)
-    keep()
+  if ((S.kept.readIds ?? 0) < 3) {
+    // Before, those replies had other ids after a reload, so they came back unread: what you read
+    // then can't be told apart now. They count as read once, rather than all coming back.
+    if (S.kept.readIds !== 2) {
+      for (const t of S.turns) if (/^(?:follow|fired)-/.test(t.key)) (t.parts ?? []).forEach((_, i) => S.read.add(partId(t, i)))
+    } else {
+      // Until 3, an update after a command's end was keyed by its time live: found again by that time.
+      for (const id of readByTime(S.turns, S.read)) S.read.add(id)
+    }
+    S.kept.readIds = 3
+    changed = true
   }
+  // A part whose id changed since you read it is found by its fingerprint; and every part read has
+  // its fingerprint kept (those read before fingerprints were kept, too).
+  for (const [id, p] of prints) {
+    if (S.readPrints.has(p) && !S.read.has(id)) {
+      S.read.add(id)
+      changed = true
+    } else if (S.read.has(id) && !S.readPrints.has(p)) {
+      S.readPrints.add(p)
+      changed = true
+    }
+  }
+  keepRead()
+  if (changed) keep()
+}
+
+/** What you have read, as kept: the newest 3000 ids, and as many fingerprints. */
+function keepRead() {
+  S.kept.read = [...S.read].slice(-3000)
+  S.kept.readPrints = [...S.readPrints].slice(-3000)
 }
 
 function markRead(ids: string[]) {
   const fresh = ids.filter(id => !S.read.has(id))
   if (!fresh.length) return
-  for (const id of fresh) S.read.add(id)
-  S.kept.read = [...S.read].slice(-3000)
+  const prints = partPrints(S.turns)
+  for (const id of fresh) {
+    S.read.add(id)
+    const p = prints.get(id)
+    if (p) S.readPrints.add(p)
+  }
+  keepRead()
   keep()
 }
 
@@ -621,7 +653,6 @@ function cancelJob(j: Job) {
 function firedTurn(now: number, source: string): Turn {
   const turn = newTurn('', now)
   turn.key = firedKey(now)
-  endedIdle = []
   const job = onFire(S.jobs, now, { turn: turn.key, source })
   turn.fired = job ? { prompt: job.prompt, source, job: job.toolId } : { source }
   turn.followUp = job?.for.length ? job.for : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key)
@@ -816,11 +847,14 @@ function nextUnread() {
 function setRead(ids: string[], isRead: boolean) {
   if (isRead) markRead(ids)
   else {
+    const prints = partPrints(S.turns)
     for (const id of ids) {
       S.read.delete(id)
       S.seen.delete(id)
+      const p = prints.get(id)
+      if (p) S.readPrints.delete(p)
     }
-    S.kept.read = [...S.read]
+    keepRead()
     keep()
   }
   draw()
@@ -877,14 +911,20 @@ function start(resume?: string) {
   S.isWorking = false
   S.permissions = []
   S.asks = []
+  // What the Claude Code before was yet to tell Claude went with it.
+  unheard = []
   const wasSession = S.sessionId
   if (resume) {
     S.sessionId = resume
-    S.turns = loadHistory(cwd, resume)
+    S.kept = loadKept(resume, cwd)
+    S.turns = loadHistory(cwd, resume, S.kept.starts)
     // The context as the session left it, so the status line isn't empty until the next reply.
     S.usage = lastUsage(cwd, resume) ?? S.usage
-    S.kept = loadKept(resume, cwd)
     S.kept.board = prune(S.kept.board, Date.now())
+    // Claude Code starts again on it now: on resume, what it is told after this starts a turn of its
+    // own, as it does live (see loadHistory).
+    S.kept.starts = [...(S.kept.starts ?? []), Date.now()].slice(-200)
+    keep()
     // Mid-turn replies the transcript lost, from the app's own copy.
     for (const [key, texts] of Object.entries(S.kept.early ?? {})) {
       const t = S.turns.findLast(x => x.key === key)
@@ -924,10 +964,15 @@ function start(resume?: string) {
   draw()
 }
 
-/** The agents and commands that ended while Claude was idle, first first: Claude's next words answer them. */
-let endedIdle: string[] = []
-const endIdle = (id: string | undefined) => {
-  if (id && !endedIdle.includes(id)) endedIdle.push(id)
+/**
+ * The agents and commands that ended and whose end Claude hasn't been told of yet, first first.
+ * Claude Code tells Claude at its next step (with a tool result) while a turn runs, else in a turn of
+ * its own once the turn ends: that turn answers them, and is keyed by the first of them, as
+ * loadHistory keys it from the notification in the session file (so its replies keep their ids).
+ */
+let unheard: string[] = []
+const endHeard = (id: string | undefined) => {
+  if (id && !unheard.includes(id)) unheard.push(id)
 }
 
 /** The turn Claude's events belong to: the newest one still open. */
@@ -946,6 +991,9 @@ function handOver(turn: Turn, now = Date.now()) {
   for (const t of S.turns.filter(x => !x.isDone && x !== turn && !waiting(x))) {
     turn.pending = [t.pending, turn.pending].filter(Boolean).join('\n\n')
     t.pending = ''
+    // Words still streaming go on there too: if Claude Code drops their block, what streamed (its
+    // reply marks and tag) is all there is.
+    turn.live = t.live + turn.live
     t.live = ''
     t.isDone = true
     t.continued = true
@@ -964,12 +1012,12 @@ function followUpTurn(): Turn {
   const from = [...(back.length ? back : bg.filter(a => a.state === 'running')), ...S.shells.list.filter(x => x.endedAt && now - x.endedAt < 2 * 60 * 1000)]
   // The ones whose end started it, when they all worked for the same messages: what Claude writes
   // without a <<reply>> line is about those, not your latest message. Else a guess from what ended lately.
-  const told = notifiedFor(S.agents.values(), S.shells.list, endedIdle)
+  const told = notifiedFor(S.agents.values(), S.shells.list, unheard)
   const keys = told ?? (from.length ? [...new Set(from.flatMap(a => a.for))] : S.turns.filter(x => !x.reaction && !x.followUp).slice(-1).map(x => x.key))
   const turn = newTurn('', now)
-  // Keyed by the agent whose end it answers, as the session file will show it on resume.
-  turn.key = endedIdle[0] ? followKey(S.turns, endedIdle[0]) : `follow-${now.toString(36)}`
-  endedIdle = []
+  // Keyed by the agent or command whose end it answers, as the session file will show it on resume.
+  turn.key = unheard[0] ? followKey(S.turns, unheard[0]) : `follow-${now.toString(36)}`
+  unheard = []
   turn.followUp = keys
   S.turns.push(turn)
   S.isWorking = true
@@ -1103,6 +1151,8 @@ function onEvent(e: ClaudeEvent) {
       }
       break
     case 'tool-result': {
+      // The ends Claude Code had by now reach Claude with this result, not in a turn of their own.
+      unheard = []
       onResult(S.jobs, e.id, e.text, e.isError, e.data, Date.now())
       onShellResult(S.shells, e.id, e.text, e.isError, e.data, Date.now())
       const a = S.agents.get(e.id)
@@ -1168,10 +1218,11 @@ function onEvent(e: ClaudeEvent) {
       // A background shell command's: Claude follows up on its end as it does on an agent's.
       // An agent's command: the agent is the task Claude Code names as its parent.
       const owner = e.parentTaskId ? [...S.agents.values()].find(x => x.taskId === e.parentTaskId) : undefined
-      if (onShellTask(S.shells, e, Date.now(), { for: owner?.for ?? openFor(), ...(owner ? { by: owner.id } : {}) })) {
-        if (e.phase === 'done' && !t) endIdle(e.taskId || e.toolUseId)
-        break
-      }
+      // Claude's own background work (an agent's command is told to that agent, a foreground agent's
+      // end is its call's result): Claude is told of its end at its next step or in a turn of its own.
+      const known = [...S.agents.values()].find(x => (e.toolUseId && x.id === e.toolUseId) || (e.taskId && x.taskId === e.taskId))
+      if (e.phase === 'done' && !e.parentTaskId && (known?.isBackground !== false || e.isBackgrounded === true)) endHeard(e.taskId || e.toolUseId)
+      if (onShellTask(S.shells, e, Date.now(), { for: owner?.for ?? openFor(), ...(owner ? { by: owner.id } : {}) })) break
       if (e.phase === 'updated') break
       const a = (e.toolUseId && S.agents.get(e.toolUseId)) || [...S.agents.values()].find(x => x.taskId && x.taskId === e.taskId)
       if (!a) break
@@ -1183,7 +1234,6 @@ function onEvent(e: ClaudeEvent) {
         // Its transcript is read once a second: what it did last is read now, so the view never has
         // it handed back before the steps that came first.
         followAgent(a)
-        if (!t) endIdle(e.taskId || e.toolUseId)
         endRun(a, e.status === 'failed' ? 'failed' : e.status === 'stopped' || e.status === 'killed' ? 'stopped' : 'done', Date.now())
         if (e.text) {
           a.last = e.text
@@ -1202,6 +1252,9 @@ function onEvent(e: ClaudeEvent) {
       break
     }
     case 'result':
+      // A turn of Claude's own that wrote nothing (news from an agent or command with nothing new for
+      // you): it is still a turn, as the session file shows it, so the next one's key counts it.
+      if (!t && unheard.length) followUpTurn()
       finishTurn(e.text, e.isError, e.durationMs)
       // A question still on the card when the turn ends (interrupted) can no longer be answered.
       S.asks = []
@@ -1357,16 +1410,17 @@ function finishTurn(resultText: string, isError: boolean, durationMs: number) {
     }
     if (old.length) markRead(old)
   }
-  // Claude's reaction, from its tag.
-  const m = raw.match(/<(?:clued|threadline)>\s*(\{[\s\S]*\})\s*<\/(?:clued|threadline)>/)
-  try {
-    const react = m ? (JSON.parse(m[1]!) as { react?: unknown }).react : undefined
-    const mine = S.turns.findLast(x => !x.reaction && !x.followUp)
-    if (typeof react === 'string' && ['👀', '👍', '✅', '🎉'].includes(react) && mine && !S.kept.reactions[mine.key]?.some(r => r.by === 'claude')) {
-      S.kept.reactions[mine.key] = [...(S.kept.reactions[mine.key] ?? []), { emoji: react, by: 'claude' }]
-    }
-  } catch {}
-  if (m) autoLink(m[1]!)
+  // Claude's reaction and links, from its tags (a text with several parts has one each).
+  for (const m of raw.matchAll(/<(?:clued|threadline)>\s*(\{[\s\S]*?\})\s*<\/(?:clued|threadline)>/g)) {
+    try {
+      const react = (JSON.parse(m[1]!) as { react?: unknown }).react
+      const mine = S.turns.findLast(x => !x.reaction && !x.followUp)
+      if (typeof react === 'string' && ['👀', '👍', '✅', '🎉'].includes(react) && mine && !S.kept.reactions[mine.key]?.some(r => r.by === 'claude')) {
+        S.kept.reactions[mine.key] = [...(S.kept.reactions[mine.key] ?? []), { emoji: react, by: 'claude' }]
+      }
+    } catch {}
+    autoLink(m[1]!)
+  }
   keep()
   askForLost()
 }
@@ -1460,7 +1514,6 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   const at = from ?? here()
   const now = Date.now()
   const turn = newTurn(text, now)
-  endedIdle = []
   if (opts.reaction) turn.reaction = opts.reaction
   if (opts.retry) turn.retry = opts.retry
   if (opts.deletes) turn.deletes = opts.deletes

@@ -187,6 +187,37 @@ describe('session files', () => {
     assignParts(turns, emptyBoard())
     assert.deepEqual(turns.slice(1, 3).map(t => t.parts?.map(p => p.id)), [['follow-bg-42:0'], ['follow-bg-42.2:0']])
   })
+  test('loadHistory: after the app started Claude Code again, news starts a turn of its own, even if the one before stopped mid-turn', () => {
+    const note = (id: string) => `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Done</summary>\n</task-notification>`
+    write('restarted', [
+      user('build it', { timestamp: '2026-11-25T10:00:00.000Z' }),
+      { type: 'assistant', timestamp: '2026-11-25T10:00:05.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Started.' }] } },
+      // Claude starts on the agent's news, and a /reload stops it before it writes anything.
+      user(note('a9'), { timestamp: '2026-11-25T10:05:00.000Z' }),
+      // The Claude Code started again is told again: live, a turn of its own (and the app counted the first).
+      user(note('a9'), { timestamp: '2026-11-25T10:06:00.000Z' }),
+      { type: 'assistant', timestamp: '2026-11-25T10:06:05.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The agent is done.' }] } },
+      // Your message, then a restart mid-turn: what comes next isn't that turn's.
+      user('and test it', { timestamp: '2026-11-25T10:07:00.000Z' }),
+      { type: 'assistant', timestamp: '2026-11-25T10:07:05.000Z', message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'g1', name: 'Grep', input: {} }] } },
+      user(note('a9'), { timestamp: '2026-11-25T10:09:00.000Z' }),
+      { type: 'assistant', timestamp: '2026-11-25T10:09:05.000Z', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Again done.' }] } },
+    ])
+    const keys = (starts?: number[]) => S.loadHistory(CWD, 'restarted', starts).map(t => [t.key.startsWith('follow-') ? t.key : t.text, t.answer ?? ''])
+    assert.deepEqual(keys([Date.parse('2026-11-25T10:05:30.000Z'), Date.parse('2026-11-25T10:08:00.000Z')]), [
+      ['build it', 'Started.'],
+      ['follow-a9', ''],
+      ['follow-a9.2', 'The agent is done.'],
+      ['and test it', ''],
+      ['follow-a9.3', 'Again done.'],
+    ])
+    // Without the app's starts: told twice in a row is one turn, and news mid-turn stays on that turn.
+    assert.deepEqual(keys(), [
+      ['build it', 'Started.'],
+      ['follow-a9', 'The agent is done.'],
+      ['and test it', 'Again done.'],
+    ])
+  })
   test('loadHistory: a turn a notification started follows up on what the ended agent or command worked for, not your latest message', async () => {
     const note = (...ids: string[]) => ids.map(id => `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Done</summary>\n</task-notification>`).join('\n')
     const ended = (text: string, at: string) => ({ type: 'assistant', timestamp: at, message: { stop_reason: 'end_turn', content: [{ type: 'text', text }] } })

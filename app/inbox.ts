@@ -1,7 +1,7 @@
 // Replies and the inbox: Claude's answer split into parts, each a reply to one or more of your
 // messages; which parts you haven't read; which questions wait on you; where each message stands.
 
-import { stripTag } from '../hooks/model.ts'
+import { keyOf, stripTag } from '../hooks/model.ts'
 import type { Board } from '../types/index.d.ts'
 import type { Turn } from './session.ts'
 import { remember } from './text.ts'
@@ -147,6 +147,56 @@ export function matches(text: string, query: string): boolean {
 }
 
 export const partId = (turn: Turn, i: number) => turn.parts?.[i]?.id ?? `${turn.key}:${i}`
+
+const printCache = new Map<string, string>()
+/**
+ * Each reply part's fingerprint (by part id), kept beside the ids of what you have read, so a part
+ * stays read if its id ever changes (as the updates Claude wrote by itself once did on resume, or
+ * if its turn is taken for another kind): a hash of its words (spacing aside), their length, and how
+ * many parts before it had the same words. So a new "Done." is not taken for the one you read before.
+ */
+export function partPrints(turns: readonly Turn[]): Map<string, string> {
+  const out = new Map<string, string>()
+  const times = new Map<string, number>()
+  for (const t of turns) {
+    for (const p of t.parts ?? []) {
+      if (!p.id) continue
+      let words = printCache.get(p.text)
+      if (words == null) {
+        const flat = p.text.replace(/\s+/g, ' ').trim()
+        words = `${keyOf(flat)}.${flat.length.toString(36)}`
+        remember(printCache, p.text, words)
+      }
+      const n = times.get(words) ?? 0
+      times.set(words, n + 1)
+      out.set(p.id, n ? `${words}~${n}` : words)
+    }
+  }
+  return out
+}
+
+/**
+ * The parts read under the ids the app used to give an update Claude wrote by itself when it didn't
+ * know which agent's or command's end started it: follow-<the time it began, in base 36 ms>. From
+ * the session file the same update is keyed by that agent or command, so what was read is found
+ * again by that time: in the update that began last before it, if that was at most two minutes before.
+ */
+export function readByTime(turns: readonly Turn[], read: Iterable<string>, now = Date.now()): string[] {
+  const follows = turns.filter(t => t.key.startsWith('follow-') && t.parts?.length)
+  const out: string[] = []
+  for (const id of read) {
+    const m = id.match(/^follow-([0-9a-z]{7,9}):(\d+)$/)
+    if (!m) continue
+    const at = parseInt(m[1]!, 36)
+    // Not a time (a command's id, "b6txj58po", reads as one far in the future).
+    if (at < 1.5e12 || at > now) continue
+    const t = follows.findLast(x => x.at <= at + 5000)
+    if (!t || at - t.at > 2 * 60_000) continue
+    const p = t.parts![Number(m[2])]
+    if (p?.id) out.push(p.id)
+  }
+  return out
+}
 
 export type PartRef = { id: string; turn: Turn; index: number; part: Part; preview: string }
 /**

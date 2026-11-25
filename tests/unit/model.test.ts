@@ -76,9 +76,9 @@ describe('the tag', () => {
     const t = parseTag(`x ${tag({ topics: [{ id: 'T1', title: ' A title ', status: 'me', thread: '#2', same_as: 'T0', about: 'T0' }, { id: 'T2', status: 'bogus', thread: 'new' }, { id: 3 }, null, { id: 'T4', title: '  ' }], threads: { '#2': 'Some name', '3': 5 } })}`)
     assert.deepEqual(t, {
       topics: [
-        { id: 'T1', title: 'A title', status: 'me', same_as: 'T0', about: 'T0', thread: 2 },
-        { id: 'T2', title: undefined, status: undefined, same_as: undefined, about: undefined, thread: 'new' },
-        { id: 'T4', title: undefined, status: undefined, same_as: undefined, about: undefined, thread: undefined },
+        { id: 'T1', title: 'A title', status: 'me', same_as: 'T0', about: 'T0', thread: 2, n: 0 },
+        { id: 'T2', title: undefined, status: undefined, same_as: undefined, about: undefined, thread: 'new', n: 0 },
+        { id: 'T4', title: undefined, status: undefined, same_as: undefined, about: undefined, thread: undefined, n: 0 },
       ],
       threads: { '2': 'Some name' },
     })
@@ -116,6 +116,21 @@ describe('raising and settling topics', () => {
     assert.deepEqual(nowWaiting.map(t => t.id), ['T1', 'T2'])
     assert.deepEqual(board.turnTopics, [])
     assert.equal(board.answers.at(-1)!.text, 'Which?')
+  })
+
+  test('every tag in a text settles its topics, a later tag\'s status over an earlier one\'s', () => {
+    // One text, two reply parts, a tag each: the second tag's topic (not raised this turn) settles too.
+    const two = `<<reply T2>>\nOn it.\n${tag({ topics: [{ id: 'T2', status: 'claude' }, { id: 'T3', status: 'done' }] })}\n\n<<reply T1>>\nThat one is done.\n${tag({ topics: [{ id: 'T1', status: 'done' }, { id: 'T2', status: 'done' }] })}`
+    const b = { ...raised('one', 'two', 'three'), turnTopics: [] }
+    const { board } = settleTurn(b, two, NOW + 1, { flat: true })
+    assert.deepEqual(board.topics.map(t => [t.id, t.status]), [['T1', 'done'], ['T2', 'done'], ['T3', 'done']])
+    // Within one tag, two entries for a topic: waiting on you still wins.
+    const one = settleTurn(raised('x'), `Hm.\n${tag({ topics: [{ id: 'T1', status: 'me' }, { id: 'T1', status: 'done' }] })}`, NOW, { flat: true })
+    assert.equal(one.board.topics[0]!.status, 'me')
+    // A tag that can't be read doesn't lose the others.
+    const bad = settleTurn({ ...raised('y'), turnTopics: [] }, `<clued>{bad</clued>\n<clued>${JSON.stringify({ topics: [{ id: 'T1', status: 'me' }] })}</clued>`, NOW, { flat: true })
+    assert.equal(bad.board.topics[0]!.status, 'me')
+    assert.deepEqual(parseTag(`${tag({ topics: [{ id: 'T1' }], threads: { '1': 'One' } })} ${tag({ topics: [{ id: 'T2' }], threads: { '2': 'Two' } })}`)?.topics.map(t => [t.id, t.n]), [['T1', 0], ['T2', 1]])
   })
 
   test('the tag\'s "me" is trusted, with or without a question mark', () => {

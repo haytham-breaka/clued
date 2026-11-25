@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyBoard, keyOf } from '../../hooks/model.ts'
-import { answerGist, assignParts, lostRepliesAsked, hasMarks, inbox, lostRepliesPrompt, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
+import { answerGist, assignParts, lostRepliesAsked, hasMarks, inbox, lostRepliesPrompt, matches, partId, partPrints, preview, questionOf, questionsOf, readByTime, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
 import { chatLines, foldedUpdates, revealPart } from '../../app/chat.ts'
 import type { ChatCtx } from '../../app/chat.ts'
 import type { Turn } from '../../app/session.ts'
@@ -382,5 +382,28 @@ describe('an unread part folded out of sight', () => {
     const { turns } = setup()
     assert.equal(revealPart(turns, 'follow-gone:0'), false)
     assert.ok(turns.every(t => !t.showUpdates))
+  })
+})
+
+describe('read state that survives a change of ids', () => {
+  const follow = (key: string, at: number, answer: string): Turn => turn('', { key, at, answer, followUp: ['k'] })
+  test('partPrints: the same words give the same print whatever the id, and each repeat its own', () => {
+    const live = [follow('follow-mwvb6pob', NOW, '<<reply T1>>\nDone.'), follow('follow-b1', NOW + 1, '<<reply T1>>\nDone.'), follow('follow-b2', NOW + 2, '<<reply T1>>\nAll  tests\npass.')]
+    const resumed = [follow('follow-b0', NOW, '<<reply T1>>\nDone.'), follow('follow-b1', NOW + 1, '<<reply T1>>\nDone.'), follow('follow-b2', NOW + 2, '<<reply T1>>\nAll tests pass.')]
+    assignParts(live, emptyBoard())
+    assignParts(resumed, emptyBoard())
+    const a = partPrints(live)
+    const b = partPrints(resumed)
+    assert.deepEqual([...a.values()], [...b.values()])
+    // The second "Done." is not the first: a new one stays unread.
+    assert.notEqual(a.get('follow-mwvb6pob:0'), a.get('follow-b1:0'))
+    assert.equal(a.get('follow-mwvb6pob:0'), b.get('follow-b0:0'))
+  })
+  test('readByTime: parts read under a time key are found in the update that began last before it', () => {
+    const at = 1_795_000_000_000
+    const turns = [follow('follow-b6txj58po', at, '<<reply T1>>\nOne.\n\n<<reply T2>>\nTwo.'), follow('follow-a1', at + 600_000, 'Later.')]
+    assignParts(turns, emptyBoard())
+    const key = (ms: number, i: number) => `follow-${ms.toString(36)}:${i}`
+    assert.deepEqual(readByTime(turns, [key(at + 1500, 1), key(at + 300_000, 0), key(at - 60_000, 0), 'follow-b6txj58po:0', 'follow-zzzzzzzzz:0', key(at + 601_000, 0), key(at + 2000, 5)], at + 3_600_000), ['follow-b6txj58po:1', 'follow-a1:0'])
   })
 })
