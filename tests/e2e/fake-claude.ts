@@ -403,6 +403,19 @@ async function scenario(m: Msg) {
     toolResult('ts-1', JSON.stringify({ message: 'Successfully stopped task: bstop2 (npm run dev)', task_id: 'bstop2', task_type: 'local_bash' }))
     return finish(m, 'The lint failed, and I stopped the dev server.')
   }
+  // An agent's own background command (its step, streamed with the agent's id) that fails, then the agent ends.
+  if (t.includes('agent runs a command')) {
+    const file = `${dir}/tasks/bagent9.output`
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, 'build broke\n')
+    tool('ar-1', 'Agent', { description: 'Build helper', subagent_type: 'general-purpose', prompt: 'Build the app.' })
+    out({ type: 'system', subtype: 'task_started', task_id: 'ar-task', tool_use_id: 'ar-1', description: 'Build helper' })
+    tool('ar-b1', 'Bash', { command: 'make build', description: 'Build the app', run_in_background: true }, 'ar-1')
+    toolResult('ar-b1', `Command running in background with ID: bagent9. Output is being written to: ${file}. You will be notified when it completes.`, false, 'ar-1', { backgroundTaskId: 'bagent9' })
+    out({ type: 'system', subtype: 'task_notification', task_id: 'bagent9', tool_use_id: 'ar-b1', status: 'failed', output_file: file, summary: 'Background command "Build the app" failed with exit code 1' })
+    toolResult('ar-1', 'The build failed.')
+    return finish(m, 'The build helper says the build failed.')
+  }
   if (t.includes('background agent')) {
     tool('bg-1', 'Agent', { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true })
     toolResult('bg-1', 'Started in the background. agentId: bg-42')

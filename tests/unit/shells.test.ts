@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, shellName, shellsFromTurns, shellState, shownShells, stopText, SHELL_CUT_KEEP_MS, SHELL_KEEP_MS } from '../../app/shells.ts'
+import { canRerun, newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText, SHELL_CUT_KEEP_MS, SHELL_KEEP_MS } from '../../app/shells.ts'
 import type { Shell } from '../../app/shells.ts'
 import { panelLines } from '../../app/panel.ts'
 import type { PanelCtx } from '../../app/panel.ts'
@@ -124,6 +124,19 @@ describe('background commands from the stream', () => {
     )
     assert.deepEqual(shownShells(sh, NOW).map(x => x.id), ['run', 'fresh', 'cut'])
   })
+
+  test('↻ run again: only a stopped or failed one; its message names it, how it ended, the command, its folder, its agent', () => {
+    const s = (x: Partial<Shell>): Shell => ({ id: 'u', command: 'make lint', description: 'Lint', state: 'failed', exitCode: 2, startedAt: NOW, for: [], ...x })
+    assert.deepEqual((['running', 'done', 'failed', 'stopped'] as const).map(state => canRerun(s({ state }))), [false, false, true, true])
+    const end = 'Run it in the background (run_in_background), as before.'
+    assert.equal(rerunText(s({ cwd: '/tmp/w' })), `Please run the background command “Lint” again: it failed (exit 2).\nCommand: make lint\nFolder: /tmp/w\n${end}`)
+    assert.equal(rerunText(s({ state: 'stopped', exitCode: undefined, note: 'stopped when Claude Code exited', isCut: true })), `Please run the background command “Lint” again: it was stopped when Claude Code exited.\nCommand: make lint\n${end}`)
+    assert.equal(rerunText(s({ state: 'stopped', exitCode: undefined, note: 'Background command "Lint" was stopped', command: 'a &&\n  b' })), `Please run the background command “Lint” again: it was stopped.\nCommand:\na &&\n  b\n${end}`)
+    assert.equal(rerunText(s({ state: 'failed', exitCode: undefined, command: '' })), `Please run the background command “Lint” again: it failed.\n${end}`)
+    assert.match(rerunText(s({}), { name: 'Maya (tester)', taskId: 'a7', isRunning: true }), /\nYour agent Maya \(tester\) \(agent a7\) ran it and is still working: have it run the command again \(SendMessage to it\), or run it yourself if that fits better\.\n/)
+    assert.match(rerunText(s({}), { name: 'Maya (tester)', taskId: 'a7', isRunning: false }), /\nYour agent Maya \(tester\) \(agent a7\) ran it: if its work needs the result, have it run the command again \(SendMessage to it\); otherwise run it again yourself\.\n/)
+    assert.match(rerunText(s({}), { name: 'Maya (tester)', isRunning: true }), /\nYour agent Maya \(tester\) ran it, and can't be sent a message: run it again yourself\.\n/)
+  })
 })
 
 describe('background commands from the session file', () => {
@@ -131,7 +144,7 @@ describe('background commands from the session file', () => {
     const t1 = { ...newTurn('run them', NOW), key: 'k1' }
     t1.steps = [
       { tool: bash('u1', { command: 'npm test', description: 'Tests', run_in_background: true }), result: started('b1'), data: { backgroundTaskId: 'b1' }, at: NOW + 1000 },
-      { tool: bash('u2', { command: 'npm run watch', run_in_background: true }), result: started('b2') },
+      { tool: bash('u2', { command: 'npm run watch', run_in_background: true }), result: started('b2'), cwd: '/tmp/w' },
       { tool: { id: 'u3', name: 'Read', input: {} }, result: 'x' },
     ]
     t1.agentEnds = [{ taskId: 'b1', toolUseId: 'u1', status: 'failed', summary: 'Background command "Tests" failed with exit code 1', at: NOW + 5000, after: 2 }]
@@ -140,7 +153,7 @@ describe('background commands from the session file', () => {
     const sh = shellsFromTurns([t1, t2])
     const [a, b] = sh.list
     assert.deepEqual([a!.state, a!.exitCode, a!.endedAt, a!.for, a!.startedAt], ['failed', 1, NOW + 5000, ['k1'], NOW + 1000])
-    assert.deepEqual([b!.state, b!.isCut, b!.endedAt, b!.startedAt], ['stopped', true, NOW + 62_000, NOW])
+    assert.deepEqual([b!.state, b!.isCut, b!.endedAt, b!.startedAt, b!.cwd, a!.cwd], ['stopped', true, NOW + 62_000, NOW, '/tmp/w', undefined])
   })
 })
 
@@ -208,6 +221,31 @@ describe('the Background section', () => {
     assert.match(text(ctx({ shells: [{ shell: s({ state: 'done', endedAt: now }) }] })).find(l => l.includes('Background'))!, /all done/)
     // None: no section.
     assert.ok(!text(ctx({})).some(l => l.includes('Background')))
+  })
+
+  test('↻ run again on a stopped or failed row, when there is room; a click asks for that command', () => {
+    let again = ''
+    const shells = [
+      { shell: s({ id: 'a' }) },
+      { shell: s({ id: 'b', description: 'Lint', command: 'make lint', state: 'failed', exitCode: 2, endedAt: now - 5000 }) },
+      { shell: s({ id: 'c', state: 'stopped', endedAt: now - 5000 }) },
+      { shell: s({ id: 'd', state: 'done', endedAt: now - 5000 }) },
+    ]
+    const p = ctx({ shells, rerunShell: id => (again = id) })
+    const L = text(p)
+    assert.equal(L.filter(l => l.includes('↻ run again')).length, 2)
+    assert.match(L.find(l => l.includes('$ make lint'))!, /\$ make lint · ran 1m 0s +↻ run again/)
+    assert.match(L.find(l => l.includes('ran 1m') && !l.includes('make lint'))!, /ran 1m 0s +↻ run again/)
+    const rows = panelLines(p, 56).lines
+    rows.find(l => l.some(x => x.text === '↻ run again'))!.find(x => x.text === '↻ run again')!.action!()
+    assert.equal(again, 'b')
+    // Too narrow for it beside the rest: the command's view still has it.
+    assert.ok(!text(p, 24).some(l => l.includes('↻ run again')))
+    // No way to ask (a panel without it): no button.
+    assert.ok(!text(ctx({ shells })).some(l => l.includes('↻ run again')))
+    // A stopped one with nothing else to say under it: the button alone.
+    const bare = text(ctx({ shells: [{ shell: s({ state: 'stopped' }) }], rerunShell: noop }))
+    assert.match(bare.find(l => l.includes('↻ run again'))!, /^\W*\s+↻ run again/)
   })
 
   test('folded: how many run, and a click opens the first', () => {

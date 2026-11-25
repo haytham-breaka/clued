@@ -36,7 +36,7 @@ import { answer, answeredInput, askLines, DISMISSED, newAsk, pick } from './ask.
 import type { Ask } from './ask.ts'
 import type { RequestInfo } from './chat.ts'
 import { cancelText, jobMark, jobName, jobsFromTurns, newJobs, onCall, onExit, onFire, onResult, shownJobs, stateLabel, tick } from './scheduled.ts'
-import { newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, shellName, shellsFromTurns, shellState, shownShells, stopText } from './shells.ts'
+import { canRerun, newShells, onShellCall, onShellResult, onShellsExit, onShellTask, readOutput, rerunText, shellName, shellsFromTurns, shellState, shownShells, stopText } from './shells.ts'
 import type { Job } from './scheduled.ts'
 import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, questionsOf, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
@@ -561,6 +561,19 @@ function openShell(id: string) {
   openJob(id)
 }
 const shellView = () => (S.jobView ? S.shells.list.find(x => x.id === S.jobView) : undefined)
+/**
+ * ↻ run again on a command that was stopped or failed: asks Claude, in the chat, to run it in the
+ * background again (or to have the agent that ran it do so). The message is about the command (it
+ * shows in its view) and about the message it was run for.
+ */
+function rerunShell(id: string) {
+  const s = S.shells.list.find(x => x.id === id)
+  if (!s || !canRerun(s)) return
+  const a = s.by ? S.agents.get(s.by) : undefined
+  submit(rerunText(s, a ? { name: who(a, S.agents.values()), ...(a.taskId ? { taskId: a.taskId } : {}), isRunning: a.state === 'running' } : undefined), { shell: s.id })
+  toast(`Asked Claude to run “${shellName(s, 40)}” again.`)
+}
+
 /** Who ran a background command: Claude itself, or the agent whose step started it. */
 function shellBy(x: { by?: string }): { name: string; agent?: Agent } {
   const a = x.by ? S.agents.get(x.by) : undefined
@@ -1001,7 +1014,8 @@ function onEvent(e: ClaudeEvent) {
     case 'tool':
       // A scheduling call: the job it makes shows under Scheduled once its result says so.
       onCall(S.jobs, e.tool, Date.now(), { for: t?.followUp ?? openFor() })
-      onShellCall(S.shells, e.tool, Date.now(), { for: t?.followUp ?? openFor() })
+      // Claude's own background command: in the folder Claude Code is in now (it moves with cd), for ↻ run again.
+      onShellCall(S.shells, e.tool, Date.now(), { for: t?.followUp ?? openFor(), ...(e.tool.name === 'Bash' ? { cwd: (S.sessionId && lastCwd(cwd, S.sessionId)) || cwd } : {}) })
       // A message to an agent is a task of its own: it waits while the agent runs, and continues
       // one that finished (back under Agents, running).
       if (e.tool.name === 'SendMessage') {
@@ -1397,7 +1411,7 @@ const here = (): From => ({ replyTo: S.replyTo, about: S.requestView, job: S.job
 /** `agent`: the agent (Agent tool use id) it is about, as when written inside that agent's view. */
 /** `deletes`: the app telling Claude to ignore a message you deleted (its topic id). */
 /** `from`: where it was written (a held message's, from when you pressed Enter); else here and now. */
-function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; retry?: string[]; deletes?: string } = {}, from?: From) {
+function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; shell?: string; retry?: string[]; deletes?: string } = {}, from?: From) {
   if (!S.claude) start(S.sessionId || undefined)
   const isNow = !from
   const at = from ?? here()
@@ -1441,11 +1455,18 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
       if (!reply?.quotes.length) S.kept.links[turn.key] = { key: req.key, who: 'me', text: preview(req.text, 60) }
       hidden = `${hidden}\nThe user wrote this from inside the view of their request ${req.topicId ?? ''} ("${preview(req.text, 80)}"): it is part of that request (use same_as ${req.topicId ?? 'its topic'} unless it is a new subject). Reply to its id.`
     }
-    const job = at.job ? S.jobs.list.find(j => j.toolId === at.job) : undefined
+    const job = at.job && !opts.shell ? S.jobs.list.find(j => j.toolId === at.job) : undefined
     if (job) turn.aboutJob = job.toolId
-    const sh = at.job ? S.shells.list.find(x => x.id === at.job) : undefined
+    const shellId = opts.shell ?? at.job
+    const sh = shellId ? S.shells.list.find(x => x.id === shellId) : undefined
     if (sh) turn.aboutJob = sh.id
-    if (sh) hidden = `${hidden}\nThe user wrote this from inside the view of your background command "${shellName(sh, 80)}" (${sh.taskId ? `task ${sh.taskId}, ` : ''}${shellState(sh)}; command ${JSON.stringify(preview(sh.command, 120))}${sh.outputFile ? `; output in ${sh.outputFile}` : ''}): it is about that command.`
+    if (sh) hidden = `${hidden}\nThe user ${opts.shell ? 'sent this with ↻ run again on' : 'wrote this from inside the view of'} your background command "${shellName(sh, 80)}" (${sh.taskId ? `task ${sh.taskId}, ` : ''}${shellState(sh)}; command ${JSON.stringify(preview(sh.command, 120))}${sh.outputFile ? `; output in ${sh.outputFile}` : ''}): it is about that command.`
+    // ↻ run again: about the message the command was run for, as a reply to it, and part of its request.
+    const runFor = opts.shell && sh ? sh.for.map(k => S.turns.findLast(t => t.key === k && !t.reaction)).findLast(t => !!t) : undefined
+    if (runFor && !reply?.quotes.length) {
+      S.kept.links[turn.key] = { key: runFor.key, who: 'me', text: preview(runFor.text, 60), anchor: `me:${runFor.key}`, auto: true }
+      hidden = `${hidden}\nThe command was run for the user's message${runFor.topicId ? ` ${runFor.topicId}` : ''} ("${preview(runFor.text, 80)}"): this is part of that request${runFor.topicId ? ` (use same_as ${runFor.topicId})` : ''}.`
+    }
     if (job) hidden = `${hidden}\nThe user wrote this from inside the view of your scheduled job ${job.id} (${job.kind === 'wakeup' ? 'ScheduleWakeup' : job.kind === 'remote' ? 'RemoteTrigger' : `CronCreate "${job.cron ?? ''}"`}, ${stateLabel(job)}; prompt "${preview(job.prompt, 120)}"): it is about that job.`
     const inside = opts.agent ? S.agents.get(opts.agent) : at.agent ? S.agents.get(at.agent) : undefined
     if (inside) {
@@ -2434,6 +2455,7 @@ function paint() {
         jobView: S.jobView,
         shells: shownShells(S.shells, Date.now()).map(x => ({ shell: x, by: x.by ? shellBy(x).name : undefined })),
         openShell,
+        rerunShell,
         scroll: S.listAt,
         height: H,
         side: d => { S.hscroll = Math.max(0, S.hscroll + d); draw() },
@@ -2582,6 +2604,7 @@ function paint() {
             openMessage,
             openAgent,
             stop: () => { submit(stopText(shell)); toast('Asked Claude to stop it.') },
+            rerun: () => rerunShell(shell.id),
             copy: text => copyText(text),
             now: Date.now(),
           }, { ...ctx, turns: S.turns.filter(t => t.aboutJob === shell.id) }, cw - 2)

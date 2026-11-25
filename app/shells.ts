@@ -38,10 +38,13 @@ export type Shell = {
   note?: string
   /** Still running when the Claude Code that ran it stopped: it went with it. */
   isCut?: boolean
+  /** The folder it ran in, when the app knows it (Claude's own commands; an agent may work elsewhere). */
+  cwd?: string
 }
 
 /** Each background command, and the shell calls still waiting for their results (by tool use id). */
-export type Shells = { list: Shell[]; calls: Map<string, ToolUse & { by?: string; for: string[]; at: number }> }
+type Call = ToolUse & { by?: string; for: string[]; at: number; cwd?: string }
+export type Shells = { list: Shell[]; calls: Map<string, Call> }
 
 export const newShells = (): Shells => ({ list: [], calls: new Map() })
 
@@ -86,15 +89,15 @@ const end = (s: Shell, state: ShellState, at: number, note?: string) => {
 const find = (sh: Shells, ref: { taskId?: string; toolUseId?: string }) =>
   sh.list.find(s => (ref.toolUseId && s.id === ref.toolUseId) || (ref.taskId && s.taskId === ref.taskId))
 
-function add(sh: Shells, call: ToolUse & { by?: string; for: string[]; at: number }): Shell {
+function add(sh: Shells, call: Call): Shell {
   const i = call.input
-  const s: Shell = { id: call.id, command: str(i.command), description: str(i.description), state: 'running', startedAt: call.at, for: call.for, ...(call.by ? { by: call.by } : {}) }
+  const s: Shell = { id: call.id, command: str(i.command), description: str(i.description), state: 'running', startedAt: call.at, for: call.for, ...(call.by ? { by: call.by } : {}), ...(call.cwd ? { cwd: call.cwd } : {}) }
   sh.list.push(s)
   return s
 }
 
 /** A Bash call (a background one is listed at once), or one that stops a command: remembered until its result. */
-export function onShellCall(sh: Shells, tool: ToolUse, at: number, ctx: { by?: string; for: string[] }) {
+export function onShellCall(sh: Shells, tool: ToolUse, at: number, ctx: { by?: string; for: string[]; cwd?: string }) {
   if (!SHELL_TOOLS.has(tool.name)) return
   const call = { ...tool, ...ctx, at }
   sh.calls.set(tool.id, call)
@@ -192,7 +195,7 @@ export function shellsFromTurns(turns: Turn[]): Shells {
       endsAt(n)
       const at = s.at ?? t.at
       last = Math.max(last, at)
-      onShellCall(sh, s.tool, at, { for: forKeys })
+      onShellCall(sh, s.tool, at, { for: forKeys, ...(s.cwd ? { cwd: s.cwd } : {}) })
       if (s.result != null) onShellResult(sh, s.tool.id, s.result, !!s.isError, s.data, at)
     })
     endsAt(t.steps.length)
@@ -206,6 +209,32 @@ export function shellsFromTurns(turns: Turn[]): Shells {
 /** What the app asks Claude when you stop a command from its view. */
 export const stopText = (s: Shell) =>
   `Please stop the background command “${shellName(s, 80)}”${s.taskId ? ` (task ${s.taskId})` : ''} with TaskStop.`
+
+/** A command that ended without finishing its work (stopped, or by Claude Code's exit, or failed): ↻ run again offers it. */
+export const canRerun = (s: Shell) => s.state === 'stopped' || s.state === 'failed'
+
+/** How it ended, for the message: "it failed (exit 2)", "it was stopped when Claude Code exited". */
+const endedHow = (s: Shell) => (s.state === 'failed' ? `it ${shellState(s)}` : `it was ${s.note?.startsWith('stopped') ? s.note : 'stopped'}`)
+
+/** The agent that ran a command, as the app names it: whether it still runs, and its id for SendMessage. */
+export type RanBy = { name: string; taskId?: string; isRunning: boolean }
+
+/**
+ * What the app asks Claude with ↻ run again: the command's name, how it ended, the whole command
+ * and its folder (when known), to run in the background again. One an agent ran: that agent runs it
+ * again when it still works or can be sent a message (its work may need the result), else Claude.
+ */
+export function rerunText(s: Shell, by?: RanBy): string {
+  const out = [`Please run the background command “${shellName(s, 80)}” again: ${endedHow(s)}.`]
+  const cmd = s.command.trim()
+  if (cmd) out.push(cmd.includes('\n') ? `Command:\n${cmd}` : `Command: ${cmd}`)
+  if (s.cwd) out.push(`Folder: ${s.cwd}`)
+  if (by?.isRunning && by.taskId) out.push(`Your agent ${by.name} (agent ${by.taskId}) ran it and is still working: have it run the command again (SendMessage to it), or run it yourself if that fits better.`)
+  else if (by?.taskId) out.push(`Your agent ${by.name} (agent ${by.taskId}) ran it: if its work needs the result, have it run the command again (SendMessage to it); otherwise run it again yourself.`)
+  else if (by) out.push(`Your agent ${by.name} ran it, and can't be sent a message: run it again yourself.`)
+  out.push('Run it in the background (run_in_background), as before.')
+  return out.join('\n')
+}
 
 // ---- Its output ------------------------------------------------------------------------
 

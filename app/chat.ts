@@ -13,7 +13,7 @@ import { canContinue, currentTask, cutLabel, isQuiet, pulseOf, todosOf } from '.
 import type { AgentTask, Todo } from './tasks.ts'
 import { clock, cronWords, jobMark, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
-import { shellName, shellState } from './shells.ts'
+import { canRerun, shellName, shellState } from './shells.ts'
 import type { Output, Shell } from './shells.ts'
 import type { Part } from './inbox.ts'
 import { C, cells, clip, lineCells, pad, wrap } from './text.ts'
@@ -1073,6 +1073,8 @@ export type ShellInfo = {
   openAgent: (id: string) => void
   /** Asks Claude to stop it. */
   stop: () => void
+  /** Asks Claude to run it again (one that was stopped or failed). */
+  rerun?: () => void
   copy: (text: string) => void
   now: number
 }
@@ -1092,6 +1094,7 @@ export function shellLines(s: Shell, info: ShellInfo, ctx: ChatCtx, width: numbe
   const stateFg = isRunning ? C.cyan : s.state === 'failed' ? C.red : s.state === 'done' ? C.green : C.gray
   const head: Span[] = [pad(2), { text: '$ Background command', style: { bold: true, fg: C.cyan } }, { text: s.taskId ? `  ${s.taskId}` : '', style: { fg: C.gray } }, { text: `  ·  ${shellState(s)}`, style: { bold: true, fg: stateFg } }]
   if (isRunning) head.push({ text: '   ' }, { text: ' ✕ stop ', style: { inverse: true, fg: C.red, bold: true }, action: info.stop })
+  if (canRerun(s) && info.rerun) head.push({ text: '   ' }, { text: ' ↻ run again ', style: { inverse: true, fg: C.cyan, bold: true }, action: info.rerun })
   out.push(head)
   const section = (title: string) => out.push([], [pad(2), { text: title, style: { bold: true } }])
   const field = (label: string, value: Span[]) => {

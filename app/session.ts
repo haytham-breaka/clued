@@ -22,6 +22,8 @@ export type Step = {
   data?: unknown
   /** When Claude made the call (from the session file). */
   at?: number
+  /** The folder Claude Code was in when it ran a shell command (from the session file). */
+  cwd?: string
 }
 
 /** How much of Claude's work a chat shows: one folded line, the file edits as diffs, or every step with its output. */
@@ -419,6 +421,7 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
             cur.pending = ''
           }
           const step: Step = { tool: { id: b.id, name: b.name, input: b.input ?? {} }, ...(cur.pending ? { said: stripTag(cur.pending) } : {}), ...(at ? { at } : {}) }
+          if (b.name === 'Bash' && typeof e.cwd === 'string' && e.cwd) step.cwd = e.cwd
           cur.pending = ''
           cur.steps.push(step)
           byId.set(b.id, { turn: cur, step })

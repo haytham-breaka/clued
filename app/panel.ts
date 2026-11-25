@@ -5,7 +5,7 @@ import { answerGist, matches, preview } from './inbox.ts'
 import type { Inbox, MessageRef, PartRef } from './inbox.ts'
 import { jobMark, jobName, scheduleLine, stateLabel } from './scheduled.ts'
 import type { Job } from './scheduled.ts'
-import { shellName, shellState } from './shells.ts'
+import { canRerun, shellName, shellState } from './shells.ts'
 import type { Shell } from './shells.ts'
 import type { Saved, Step, Turn, Work } from './session.ts'
 import { canContinue, currentTask, cutLabel, pulseOf, workingFor } from './tasks.ts'
@@ -185,6 +185,8 @@ export type PanelCtx = {
   /** Background shell commands to list (with the agent's name when one ran it), and opening one (its view is jobView's). */
   shells?: { shell: Shell; by?: string }[]
   openShell?: (id: string) => void
+  /** Asks Claude to run a stopped or failed command again (see canRerun). */
+  rerunShell?: (id: string) => void
   /** A topic's title (Not started shows it), and asking Claude to start on a request now. */
   topicTitle?: (id: string) => string | undefined
   startRequest?: (m: MessageRef) => void
@@ -192,6 +194,9 @@ export type PanelCtx = {
   scroll: Record<string, number>
   height: number
 }
+
+/** The button on a stopped or failed background command's row. */
+const RERUN = '↻ run again'
 
 /** Your recent messages show at most this many rows; each section scrolls inside its own box. */
 export const RECENT_ROWS = 20
@@ -507,7 +512,9 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       // Under it: the command itself (when the row shows its description), and who ran it.
       const cmd = s.description.trim() ? s.command.trim().split('\n')[0]! : ''
       const sub = [cmd && `$ ${cmd}`, by && `by ${by}`, !isRunning && s.endedAt ? `ran ${ago(s.endedAt - s.startedAt)}` : ''].filter(Boolean).join(' · ')
-      if (sub) rows.push(row(iw, [{ text: '   ' }, { text: slide(sub, p.hscroll), style: { fg: C.faint }, action: open }]))
+      // Stopped or failed: ↻ run again at its end, when the row has room for it beside a little of the rest.
+      const again = canRerun(s) && p.rerunShell && iw >= 3 + RERUN.length + 1 + (sub ? 12 : 0) ? [{ text: RERUN, style: { fg: C.cyan, bold: true }, action: () => p.rerunShell!(s.id) }] : []
+      if (sub || again.length) rows.push(row(iw, [{ text: '   ' }, ...(sub ? [{ text: slide(sub, p.hscroll), style: { fg: C.faint }, action: open }] : [])], again))
     }
     const live = shells.filter(x => x.shell.state === 'running').length
     sections.push({
