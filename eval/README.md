@@ -38,6 +38,7 @@ node --no-warnings eval/run.ts --set hard --reps 5 --concurrency 3 --judge --bud
 node --no-warnings eval/run.ts --set baseline                    # the 5 easy pilot scenarios
 node --no-warnings eval/run.ts --model opus --reps 1             # another model (both arms and the judge)
 node --no-warnings eval/run.ts --rescore eval/results/hard [--judge]   # score saved runs again; no new sessions
+node --no-warnings eval/run.ts --scenarios burst --reps 5 --concurrency 2 --seed 7 --judge --budget 1.9 --out eval/results/burst   # one scenario, in its own folder
 ```
 
 | flag | default | meaning |
@@ -130,6 +131,7 @@ node --no-warnings eval/run.ts --rescore eval/results/hard [--judge]   # score s
 node --no-warnings eval/visibility.ts --dry                                  # replay and the rules only; no model calls
 node --no-warnings eval/visibility.ts --truth-judge --glance --full --budget 3
 node --no-warnings eval/visibility.ts --run interleaved-A-r1 --screens --dry  # one run: transcript, marks, screens
+node --no-warnings eval/visibility.ts --in eval/results/burst --out eval/results/burst/visibility --truth-judge --glance --full --budget 1.55
 ```
 
 - **Arm A** replays the recorded stream through the app's own code (`app/claude.ts`, `app/inbox.ts`, `hooks/model.ts`, and `submit`/`onEvent`/`finishTurn` ported from `app/main.ts`). `panelLines()` and `chatLines()` then draw one 120 × 40 screen. **Arm B** draws the same stream as Claude Code's terminal.

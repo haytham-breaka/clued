@@ -1,0 +1,2517 @@
+{
+  "about": "Can you see what was answered? Ids, states, counts and scores only: no transcript text (that stays in raw/, which is never committed).",
+  "input": {
+    "results": "eval/results/burst/results.json",
+    "runs": 10
+  },
+  "screen": {
+    "cols": 120,
+    "rows": 40,
+    "panel": 38
+  },
+  "models": {
+    "glance": "haiku",
+    "truth": "sonnet"
+  },
+  "spentUsd": 0.221,
+  "cap": 1.55,
+  "spend": {
+    "truth (sonnet)": {
+      "calls": 10,
+      "usd": 0.126
+    },
+    "glance (haiku)": {
+      "calls": 100,
+      "usd": 0.0791
+    },
+    "full (haiku)": {
+      "calls": 10,
+      "usd": 0.016
+    }
+  },
+  "stopped": "",
+  "truthSources": {
+    "judged": [
+      "burst-A-r1",
+      "burst-B-r1",
+      "burst-A-r2",
+      "burst-B-r2",
+      "burst-A-r3",
+      "burst-B-r3",
+      "burst-A-r4",
+      "burst-B-r4",
+      "burst-A-r5",
+      "burst-B-r5"
+    ],
+    "why": {
+      "burst-A-r1": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r1": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-A-r2": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r2": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-A-r3": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r3": [
+        "rules found no answer"
+      ],
+      "burst-A-r4": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r4": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-A-r5": [
+        "Claude asked a question",
+        "rules found no answer"
+      ],
+      "burst-B-r5": [
+        "rules found no answer"
+      ]
+    },
+    "rulesVsJudge": {
+      "msgs": 100,
+      "same": 84,
+      "flaggedMsgs": 100,
+      "flaggedSame": 84
+    }
+  },
+  "truthCounts": {
+    "A": {
+      "done": 121,
+      "waiting": 14,
+      "working": 140
+    },
+    "B": {
+      "done": 121,
+      "waiting": 16,
+      "working": 138
+    }
+  },
+  "reading": {
+    "A": {
+      "frames": 50,
+      "screenWords": 155,
+      "fullWordsAtEnd": 516,
+      "screenChars": 2614,
+      "fullCharsAtEnd": 7935
+    },
+    "B": {
+      "frames": 50,
+      "screenWords": 98,
+      "fullWordsAtEnd": 347,
+      "screenChars": 681,
+      "fullCharsAtEnd": 2408
+    }
+  },
+  "scores": {
+    "A panel": {
+      "all": {
+        "n": 275,
+        "answered": 1,
+        "open": 0.9890909090909091,
+        "state": 0.9890909090909091,
+        "link": 1,
+        "linkN": 111,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 154
+      },
+      "end": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.96,
+        "state": 0.96,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 275,
+        "answered": 1,
+        "open": 0.9890909090909091,
+        "state": 0.9890909090909091,
+        "link": 1,
+        "linkN": 111,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 154
+      },
+      "no offers": {
+        "n": 275,
+        "answered": 1,
+        "open": 0.9890909090909091,
+        "state": 0.9890909090909091,
+        "link": 1,
+        "linkN": 111,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 154
+      }
+    },
+    "A glance": {
+      "all": {
+        "n": 275,
+        "answered": 0.9927272727272727,
+        "open": 0.9745454545454545,
+        "state": 0.9709090909090909,
+        "link": 0.8727272727272727,
+        "linkN": 110,
+        "found": 0.8648648648648649,
+        "unknown": 0.0036363636363636364,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 3,
+        "notAnswered": 140,
+        "openTruth": 154
+      },
+      "end": {
+        "n": 50,
+        "answered": 0.98,
+        "open": 0.92,
+        "state": 0.92,
+        "link": 0.7560975609756098,
+        "linkN": 41,
+        "found": 0.7380952380952381,
+        "unknown": 0.02,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 1,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 275,
+        "answered": 0.9927272727272727,
+        "open": 0.9745454545454545,
+        "state": 0.9709090909090909,
+        "link": 0.8727272727272727,
+        "linkN": 110,
+        "found": 0.8648648648648649,
+        "unknown": 0.0036363636363636364,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 3,
+        "notAnswered": 140,
+        "openTruth": 154
+      },
+      "no offers": {
+        "n": 275,
+        "answered": 0.9927272727272727,
+        "open": 0.9745454545454545,
+        "state": 0.9709090909090909,
+        "link": 0.8727272727272727,
+        "linkN": 110,
+        "found": 0.8648648648648649,
+        "unknown": 0.0036363636363636364,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 3,
+        "notAnswered": 140,
+        "openTruth": 154
+      }
+    },
+    "B glance": {
+      "all": {
+        "n": 275,
+        "answered": 0.9418181818181818,
+        "open": 0.9090909090909091,
+        "state": 0.9018181818181819,
+        "link": 0.990990990990991,
+        "linkN": 111,
+        "found": 0.990990990990991,
+        "unknown": 0.05090909090909091,
+        "falseAnswered": 2,
+        "falseDone": 11,
+        "falseOpen": 0,
+        "notAnswered": 138,
+        "openTruth": 154
+      },
+      "end": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.94,
+        "state": 0.94,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 275,
+        "answered": 0.9418181818181818,
+        "open": 0.9090909090909091,
+        "state": 0.9018181818181819,
+        "link": 0.990990990990991,
+        "linkN": 111,
+        "found": 0.990990990990991,
+        "unknown": 0.05090909090909091,
+        "falseAnswered": 2,
+        "falseDone": 11,
+        "falseOpen": 0,
+        "notAnswered": 138,
+        "openTruth": 154
+      },
+      "no offers": {
+        "n": 265,
+        "answered": 0.939622641509434,
+        "open": 0.9358490566037736,
+        "state": 0.9283018867924528,
+        "link": 0.990990990990991,
+        "linkN": 111,
+        "found": 0.990990990990991,
+        "unknown": 0.052830188679245285,
+        "falseAnswered": 2,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 138,
+        "openTruth": 144
+      }
+    },
+    "B full read": {
+      "all": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.94,
+        "state": 0.94,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "end": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.94,
+        "state": 0.94,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.94,
+        "state": 0.94,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "no offers": {
+        "n": 48,
+        "answered": 1,
+        "open": 0.9791666666666666,
+        "state": 0.9791666666666666,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      }
+    },
+    "A full read": {
+      "all": {
+        "n": 50,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "end": {
+        "n": 50,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "hard": {
+        "n": 50,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "no offers": {
+        "n": 50,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      }
+    }
+  },
+  "comparisons": {
+    "A glance vs B glance (all)": {
+      "answered": {
+        "diff": 0.050909090909091015,
+        "p": 0.12917416516696661
+      },
+      "open": {
+        "diff": 0.06545454545454543,
+        "p": 0.1201759648070386
+      },
+      "state": {
+        "diff": 0.0690909090909092,
+        "p": 0.10157968406318736
+      },
+      "link": {
+        "diff": -0.12060041407867494,
+        "p": 0.007798440311937612
+      },
+      "found": {
+        "diff": -0.12857142857142845,
+        "p": 0.007798440311937612
+      },
+      "unknown": {
+        "diff": -0.047272727272727265,
+        "p": 0.16956608678264348
+      },
+      "falseAnswered": {
+        "diff": -0.4,
+        "p": 0.44211157768446313
+      },
+      "falseDone": {
+        "diff": -1.6,
+        "p": 0.2505498900219956
+      },
+      "falseOpen": {
+        "diff": 0.6,
+        "p": 0.4375124975004999
+      }
+    },
+    "A glance vs B glance (end)": {
+      "answered": {
+        "diff": -0.019999999999999907,
+        "p": 1
+      },
+      "open": {
+        "diff": -0.02000000000000013,
+        "p": 1
+      },
+      "state": {
+        "diff": -0.02000000000000013,
+        "p": 1
+      },
+      "link": {
+        "diff": -0.24444444444444446,
+        "p": 0.046990601879624075
+      },
+      "found": {
+        "diff": -0.2666666666666667,
+        "p": 0.007798440311937612
+      },
+      "unknown": {
+        "diff": 0.02,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": -0.19999999999999996,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0.2,
+        "p": 1
+      }
+    },
+    "A glance vs B glance (hard)": {
+      "answered": {
+        "diff": 0.050909090909091015,
+        "p": 0.12917416516696661
+      },
+      "open": {
+        "diff": 0.06545454545454543,
+        "p": 0.1201759648070386
+      },
+      "state": {
+        "diff": 0.0690909090909092,
+        "p": 0.10157968406318736
+      },
+      "link": {
+        "diff": -0.12060041407867494,
+        "p": 0.007798440311937612
+      },
+      "found": {
+        "diff": -0.12857142857142845,
+        "p": 0.007798440311937612
+      },
+      "unknown": {
+        "diff": -0.047272727272727265,
+        "p": 0.16956608678264348
+      },
+      "falseAnswered": {
+        "diff": -0.4,
+        "p": 0.44211157768446313
+      },
+      "falseDone": {
+        "diff": -1.6,
+        "p": 0.2505498900219956
+      },
+      "falseOpen": {
+        "diff": 0.6,
+        "p": 0.4375124975004999
+      }
+    },
+    "A glance vs B glance (no offers)": {
+      "answered": {
+        "diff": 0.05388552188552187,
+        "p": 0.0631873625274945
+      },
+      "open": {
+        "diff": 0.03890909090909078,
+        "p": 0.2663467306538692
+      },
+      "state": {
+        "diff": 0.04297643097643089,
+        "p": 0.20975804839032194
+      },
+      "link": {
+        "diff": -0.12060041407867494,
+        "p": 0.007798440311937612
+      },
+      "found": {
+        "diff": -0.12857142857142845,
+        "p": 0.007798440311937612
+      },
+      "unknown": {
+        "diff": -0.049818181818181824,
+        "p": 0.16956608678264348
+      },
+      "falseAnswered": {
+        "diff": -0.4,
+        "p": 0.44211157768446313
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0.6,
+        "p": 0.4375124975004999
+      }
+    },
+    "A panel vs B glance (all)": {
+      "answered": {
+        "diff": 0.05818181818181822,
+        "p": 0.04839032193561288
+      },
+      "open": {
+        "diff": 0.08000000000000007,
+        "p": 0.05438912217556489
+      },
+      "state": {
+        "diff": 0.08727272727272728,
+        "p": 0.02439512097580484
+      },
+      "link": {
+        "diff": 0.008333333333333415,
+        "p": 1
+      },
+      "found": {
+        "diff": 0.008333333333333415,
+        "p": 1
+      },
+      "unknown": {
+        "diff": -0.050909090909090904,
+        "p": 0.16956608678264348
+      },
+      "falseAnswered": {
+        "diff": -0.4,
+        "p": 0.44211157768446313
+      },
+      "falseDone": {
+        "diff": -1.6,
+        "p": 0.2505498900219956
+      },
+      "falseOpen": {
+        "diff": 0,
+        "p": 1
+      }
+    },
+    "A panel vs B glance (end)": {
+      "answered": {
+        "diff": 0,
+        "p": 1
+      },
+      "open": {
+        "diff": 0.019999999999999907,
+        "p": 1
+      },
+      "state": {
+        "diff": 0.019999999999999907,
+        "p": 1
+      },
+      "link": {
+        "diff": 0,
+        "p": 1
+      },
+      "found": {
+        "diff": 0,
+        "p": 1
+      },
+      "unknown": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": -0.19999999999999996,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0,
+        "p": 1
+      }
+    },
+    "A panel vs B glance (hard)": {
+      "answered": {
+        "diff": 0.05818181818181822,
+        "p": 0.04839032193561288
+      },
+      "open": {
+        "diff": 0.08000000000000007,
+        "p": 0.05438912217556489
+      },
+      "state": {
+        "diff": 0.08727272727272728,
+        "p": 0.02439512097580484
+      },
+      "link": {
+        "diff": 0.008333333333333415,
+        "p": 1
+      },
+      "found": {
+        "diff": 0.008333333333333415,
+        "p": 1
+      },
+      "unknown": {
+        "diff": -0.050909090909090904,
+        "p": 0.16956608678264348
+      },
+      "falseAnswered": {
+        "diff": -0.4,
+        "p": 0.44211157768446313
+      },
+      "falseDone": {
+        "diff": -1.6,
+        "p": 0.2505498900219956
+      },
+      "falseOpen": {
+        "diff": 0,
+        "p": 1
+      }
+    },
+    "A panel vs B glance (no offers)": {
+      "answered": {
+        "diff": 0.06115824915824908,
+        "p": 0.04839032193561288
+      },
+      "open": {
+        "diff": 0.05345454545454542,
+        "p": 0.16956608678264348
+      },
+      "state": {
+        "diff": 0.06115824915824897,
+        "p": 0.08978204359128174
+      },
+      "link": {
+        "diff": 0.008333333333333415,
+        "p": 1
+      },
+      "found": {
+        "diff": 0.008333333333333415,
+        "p": 1
+      },
+      "unknown": {
+        "diff": -0.05345454545454546,
+        "p": 0.16956608678264348
+      },
+      "falseAnswered": {
+        "diff": -0.4,
+        "p": 0.44211157768446313
+      },
+      "falseDone": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0,
+        "p": 1
+      }
+    },
+    "A full read vs B full read (end)": {
+      "answered": {
+        "diff": 0,
+        "p": 1
+      },
+      "open": {
+        "diff": 0.05999999999999994,
+        "p": 0.16876624675064986
+      },
+      "state": {
+        "diff": 0.05999999999999994,
+        "p": 0.16876624675064986
+      },
+      "link": {
+        "diff": -0.022222222222222143,
+        "p": 1
+      },
+      "found": {
+        "diff": -0.022222222222222143,
+        "p": 1
+      },
+      "unknown": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": -0.6,
+        "p": 0.16876624675064986
+      },
+      "falseOpen": {
+        "diff": 0,
+        "p": 1
+      }
+    },
+    "A glance vs B full read (end)": {
+      "answered": {
+        "diff": -0.019999999999999907,
+        "p": 1
+      },
+      "open": {
+        "diff": -0.02000000000000013,
+        "p": 1
+      },
+      "state": {
+        "diff": -0.02000000000000013,
+        "p": 1
+      },
+      "link": {
+        "diff": -0.24444444444444446,
+        "p": 0.046990601879624075
+      },
+      "found": {
+        "diff": -0.2666666666666667,
+        "p": 0.007798440311937612
+      },
+      "unknown": {
+        "diff": 0.02,
+        "p": 1
+      },
+      "falseAnswered": {
+        "diff": 0,
+        "p": 1
+      },
+      "falseDone": {
+        "diff": -0.19999999999999996,
+        "p": 1
+      },
+      "falseOpen": {
+        "diff": 0.2,
+        "p": 1
+      }
+    }
+  },
+  "perScenario": {
+    "burst": {
+      "A panel": {
+        "n": 275,
+        "answered": 1,
+        "open": 0.9890909090909091,
+        "state": 0.9890909090909091,
+        "link": 1,
+        "linkN": 111,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 140,
+        "openTruth": 154
+      },
+      "A glance": {
+        "n": 275,
+        "answered": 0.9927272727272727,
+        "open": 0.9745454545454545,
+        "state": 0.9709090909090909,
+        "link": 0.8727272727272727,
+        "linkN": 110,
+        "found": 0.8648648648648649,
+        "unknown": 0.0036363636363636364,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 3,
+        "notAnswered": 140,
+        "openTruth": 154
+      },
+      "B glance": {
+        "n": 275,
+        "answered": 0.9418181818181818,
+        "open": 0.9090909090909091,
+        "state": 0.9018181818181819,
+        "link": 0.990990990990991,
+        "linkN": 111,
+        "found": 0.990990990990991,
+        "unknown": 0.05090909090909091,
+        "falseAnswered": 2,
+        "falseDone": 11,
+        "falseOpen": 0,
+        "notAnswered": 138,
+        "openTruth": 154
+      },
+      "B full read": {
+        "n": 50,
+        "answered": 1,
+        "open": 0.94,
+        "state": 0.94,
+        "link": 1,
+        "linkN": 42,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      },
+      "A full read": {
+        "n": 50,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.9761904761904762,
+        "linkN": 42,
+        "found": 0.9761904761904762,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 3
+      }
+    }
+  },
+  "waitingSplit": {
+    "A panel": {
+      "direct": {
+        "n": 14,
+        "seenOpen": 11,
+        "lookedDone": 3
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    },
+    "A glance": {
+      "direct": {
+        "n": 14,
+        "seenOpen": 11,
+        "lookedDone": 3
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    },
+    "B glance": {
+      "direct": {
+        "n": 6,
+        "seenOpen": 3,
+        "lookedDone": 3
+      },
+      "offer": {
+        "n": 10,
+        "seenOpen": 2,
+        "lookedDone": 8
+      }
+    },
+    "B full read": {
+      "direct": {
+        "n": 1,
+        "seenOpen": 0,
+        "lookedDone": 1
+      },
+      "offer": {
+        "n": 2,
+        "seenOpen": 0,
+        "lookedDone": 2
+      }
+    },
+    "A full read": {
+      "direct": {
+        "n": 3,
+        "seenOpen": 3,
+        "lookedDone": 0
+      },
+      "offer": {
+        "n": 0,
+        "seenOpen": 0,
+        "lookedDone": 0
+      }
+    }
+  },
+  "perRun": {
+    "A panel": {
+      "burst-A-r1": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9818181818181818,
+        "state": 0.9818181818181818,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-A-r2": {
+        "n": 55,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 24,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-A-r3": {
+        "n": 55,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 24,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-A-r4": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9636363636363636,
+        "state": 0.9636363636363636,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-A-r5": {
+        "n": 55,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      }
+    },
+    "A glance": {
+      "burst-A-r1": {
+        "n": 55,
+        "answered": 0.9818181818181818,
+        "open": 0.9454545454545454,
+        "state": 0.9272727272727272,
+        "link": 0.8095238095238095,
+        "linkN": 21,
+        "found": 0.8095238095238095,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 2,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-A-r2": {
+        "n": 55,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.875,
+        "linkN": 24,
+        "found": 0.875,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-A-r3": {
+        "n": 55,
+        "answered": 0.9818181818181818,
+        "open": 0.9818181818181818,
+        "state": 0.9818181818181818,
+        "link": 0.9565217391304348,
+        "linkN": 23,
+        "found": 0.9166666666666666,
+        "unknown": 0.01818181818181818,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-A-r4": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9636363636363636,
+        "state": 0.9636363636363636,
+        "link": 0.8571428571428571,
+        "linkN": 21,
+        "found": 0.8571428571428571,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 2,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-A-r5": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9818181818181818,
+        "state": 0.9818181818181818,
+        "link": 0.8571428571428571,
+        "linkN": 21,
+        "found": 0.8571428571428571,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 1,
+        "notAnswered": 28,
+        "openTruth": 32
+      }
+    },
+    "B glance": {
+      "burst-B-r1": {
+        "n": 55,
+        "answered": 0.9636363636363636,
+        "open": 0.9090909090909091,
+        "state": 0.9090909090909091,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0.03636363636363636,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-B-r2": {
+        "n": 55,
+        "answered": 0.8545454545454545,
+        "open": 0.7818181818181819,
+        "state": 0.7636363636363637,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0.12727272727272726,
+        "falseAnswered": 1,
+        "falseDone": 5,
+        "falseOpen": 0,
+        "notAnswered": 26,
+        "openTruth": 32
+      },
+      "burst-B-r3": {
+        "n": 55,
+        "answered": 1,
+        "open": 0.9454545454545454,
+        "state": 0.9454545454545454,
+        "link": 1,
+        "linkN": 21,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 3,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 32
+      },
+      "burst-B-r4": {
+        "n": 55,
+        "answered": 0.9090909090909091,
+        "open": 0.9090909090909091,
+        "state": 0.9090909090909091,
+        "link": 1,
+        "linkN": 24,
+        "found": 1,
+        "unknown": 0.09090909090909091,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      },
+      "burst-B-r5": {
+        "n": 55,
+        "answered": 0.9818181818181818,
+        "open": 1,
+        "state": 0.9818181818181818,
+        "link": 0.9583333333333334,
+        "linkN": 24,
+        "found": 0.9583333333333334,
+        "unknown": 0,
+        "falseAnswered": 1,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 28,
+        "openTruth": 29
+      }
+    },
+    "B full read": {
+      "burst-B-r1": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-B-r2": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-B-r3": {
+        "n": 10,
+        "answered": 1,
+        "open": 0.9,
+        "state": 0.9,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 1,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-B-r4": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-B-r5": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      }
+    },
+    "A full read": {
+      "burst-A-r1": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-A-r2": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 0.8888888888888888,
+        "linkN": 9,
+        "found": 0.8888888888888888,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-A-r3": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 9,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 0
+      },
+      "burst-A-r4": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      },
+      "burst-A-r5": {
+        "n": 10,
+        "answered": 1,
+        "open": 1,
+        "state": 1,
+        "link": 1,
+        "linkN": 8,
+        "found": 1,
+        "unknown": 0,
+        "falseAnswered": 0,
+        "falseDone": 0,
+        "falseOpen": 0,
+        "notAnswered": 0,
+        "openTruth": 1
+      }
+    }
+  },
+  "truth": {
+    "burst-A-r1": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "asksIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C2",
+        "asksIn": "C1",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C3",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r1": [
+      {
+        "id": "m1",
+        "answeredIn": "C2",
+        "asksIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r2": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C2",
+        "asksIn": "C1",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C3",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r2": [
+      {
+        "id": "m1",
+        "answeredIn": "C2",
+        "asksIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r3": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C2",
+        "asksIn": "C1",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C3",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r3": [
+      {
+        "id": "m1",
+        "answeredIn": "C3",
+        "asksIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C4",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C4",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C5",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r4": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "asksIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C2",
+        "asksIn": "C1",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C3",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r4": [
+      {
+        "id": "m1",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ],
+    "burst-A-r5": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "asksIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C2",
+        "asksIn": "C1",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C3",
+        "source": "judge"
+      }
+    ],
+    "burst-B-r5": [
+      {
+        "id": "m1",
+        "answeredIn": "C1",
+        "source": "judge"
+      },
+      {
+        "id": "m2",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m3",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m4",
+        "answeredIn": "C3",
+        "asksIn": "C2",
+        "resolvedBy": "U9",
+        "source": "judge"
+      },
+      {
+        "id": "m5",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m6",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m7",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m8",
+        "answeredIn": "C2",
+        "source": "judge"
+      },
+      {
+        "id": "m9",
+        "answeredIn": "C3",
+        "source": "judge"
+      },
+      {
+        "id": "m10",
+        "answeredIn": "C4",
+        "source": "judge"
+      }
+    ]
+  },
+  "panel": {
+    "burst-A-r1": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:me m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:me m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r2": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:done m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r3": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:done m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r4": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:me m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:done m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    },
+    "burst-A-r5": {
+      "before m2": "m1:claude",
+      "before m3": "m1:claude m2:claude",
+      "before m4": "m1:claude m2:claude m3:claude",
+      "before m5": "m1:claude m2:claude m3:claude m4:claude",
+      "before m6": "m1:claude m2:claude m3:claude m4:claude m5:claude",
+      "before m7": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude",
+      "before m8": "m1:claude m2:claude m3:claude m4:claude m5:claude m6:claude m7:claude",
+      "before m9": "m1:me m2:done m3:done m4:me m5:done m6:done m7:done m8:done",
+      "before m10": "m1:me m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done",
+      "end": "m1:me m2:done m3:done m4:done m5:done m6:done m7:done m8:done m9:done m10:done"
+    }
+  },
+  "misses": [
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r3",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r3",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "before m10",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A panel",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m4",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "working"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m5",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r1",
+      "frame": "end",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m5",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r3",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r3",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "done",
+      "claim": "unknown"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "before m10",
+      "msg": "m7",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m7",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r4",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "before m10",
+      "msg": "m9",
+      "truth": "done",
+      "claim": "waiting"
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m5",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "A glance",
+      "run": "burst-A-r5",
+      "frame": "end",
+      "msg": "m8",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m3",
+      "msg": "m1",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m3",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r1",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m3",
+      "msg": "m1",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m3",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m4",
+      "msg": "m1",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m4",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m4",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m5",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m5",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m7",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m7",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "waiting"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m8",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r2",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m9",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "before m10",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r3",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m5",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m5",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m5",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m6",
+      "msg": "m2",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r4",
+      "frame": "before m6",
+      "msg": "m3",
+      "truth": "working",
+      "claim": "unknown"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m7",
+      "msg": "m4",
+      "truth": "working",
+      "claim": "waiting"
+    },
+    {
+      "reader": "B glance",
+      "run": "burst-B-r5",
+      "frame": "before m10",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    },
+    {
+      "reader": "B full read",
+      "run": "burst-B-r1",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B full read",
+      "run": "burst-B-r2",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "B full read",
+      "run": "burst-B-r3",
+      "frame": "end",
+      "msg": "m1",
+      "truth": "waiting",
+      "claim": "done"
+    },
+    {
+      "reader": "A full read",
+      "run": "burst-A-r2",
+      "frame": "end",
+      "msg": "m2",
+      "truth": "done",
+      "claim": "done",
+      "link": false
+    }
+  ]
+}

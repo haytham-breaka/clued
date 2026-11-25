@@ -157,6 +157,31 @@
         { "name": "other stock unchanged", "msg": "m10", "file": "stock.csv", "re": "^bolts,3\\s*$" },
         { "name": "customers unchanged", "py": "import json\nassert len(json.load(open('customers.json'))) == 7" }
       ]
+    },
+    {
+      "id": "burst",
+      "about": "Eight messages about 1 s apart before Claude's first reply: questions, two edits, one decision for the user, a correction of an earlier edit and a reference to 'the third thing I sent'; then the user's decision and a follow-up.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "What's the tax rate in pricing.py?", "about": "tax", "expect": [{ "name": "0.19", "re": "0\\.19|19\\s?%" }] },
+        { "id": "m2", "send": "after", "delayMs": 900, "text": "Set workers in server.toml to 8.", "about": "worker", "expect": [{ "name": "workers", "re": "workers" }] },
+        { "id": "m3", "send": "after", "delayMs": 900, "text": "How many customers are in customers.json?", "about": "customer", "expect": [{ "name": "7", "re": "\\b7\\b|\\bseven\\b" }] },
+        { "id": "m4", "send": "after", "delayMs": 900, "text": "Add a FREE_SHIPPING_OVER constant to pricing.py, but ask me which amount first.", "about": "free.?shipping|shipping|amount|threshold", "expect": [{ "name": "asks for the amount", "re": "\\?" }] },
+        { "id": "m5", "send": "after", "delayMs": 900, "text": "Who is the maintainer named in the README?", "about": "maintain", "expect": [{ "name": "Rana Okafor", "re": "okafor" }] },
+        { "id": "m6", "send": "after", "delayMs": 900, "text": "In stock.csv, set nails to 100.", "about": "nails|stock", "expect": [{ "name": "nails 100", "re": "\\b100\\b" }] },
+        { "id": "m7", "send": "after", "delayMs": 900, "text": "Sorry, workers should be 6, not 8.", "about": "worker", "expect": [{ "name": "6 workers", "re": "\\b6\\b" }] },
+        { "id": "m8", "send": "after", "delayMs": 900, "text": "For the third thing I sent you: how many of them are from Germany?", "about": "german|germany|DE|customer", "expect": [{ "name": "2", "re": "\\b2\\b|\\btwo\\b" }] },
+        { "id": "m9", "send": "idle", "text": "50.", "about": "free.?shipping|shipping|threshold", "expect": [{ "name": "FREE_SHIPPING_OVER 50", "re": "\\b50\\b" }] },
+        { "id": "m10", "send": "idle", "text": "And what would 100 cost with that tax rate?", "about": "tax|cost|100", "expect": [{ "name": "119", "re": "\\b119\\b" }] }
+      ],
+      "checks": [
+        { "name": "workers = 6", "msg": "m7", "file": "server.toml", "re": "^workers\\s*=\\s*6\\s*$" },
+        { "name": "nails,100", "msg": "m6", "file": "stock.csv", "re": "^nails,100\\s*$" },
+        { "name": "other stock unchanged", "msg": "m6", "file": "stock.csv", "re": "^screws,75\\s*$" },
+        { "name": "FREE_SHIPPING_OVER = 50", "msg": "m9", "py": "from pricing import FREE_SHIPPING_OVER\nassert float(FREE_SHIPPING_OVER) == 50, FREE_SHIPPING_OVER" },
+        { "name": "TAX_RATE unchanged", "file": "pricing.py", "re": "^TAX_RATE = 0\\.19$" },
+        { "name": "port and host unchanged", "file": "server.toml", "re": "^host = \"127\\.0\\.0\\.1\"\\s*\\nport = 8137$" },
+        { "name": "customers unchanged", "py": "import json\nassert len(json.load(open('customers.json'))) == 7" }
+      ]
     }
   ]
 }

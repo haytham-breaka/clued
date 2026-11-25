@@ -133,6 +133,82 @@ The first pass ran up to 6 model calls at a time, which overloaded the machine. 
 - Prompts, model answers and the spend ledger stay in `visibility/raw/`, which is never committed.
 - `eval/visibility.ts` re-scores everything from that cache at no cost.
 
+### A burst of messages before the first reply (2026-11-25)
+
+You send many messages and requests before Claude has replied once. Which screen lets you keep track of them?
+
+**Short answer.**
+- **Answered or not: clued is a little better, but not clearly.** From one screen, a reader tells it right for 273 of 275 messages with clued, and 259 of 275 without (+5 pt, p = 0.13). The panel itself is right for all 275 (+6 pt against the plain glance, p = 0.048). The plain gap isn't messages scrolling off. While Claude is still on the burst, the plain screen shows only your prompts, and the reader said "can't tell" for 14 of them, not "not answered yet". At the end, both readers get all 50 right.
+- **Which reply: plain Claude Code wins.** From one screen, a reader finds the answer itself for 86% of answered messages with clued, and 99% without (−13 pt, p = 0.008). At the end it's 74% against 100% (p = 0.008). The panel links every message to a reply that answers it (111 of 111), but you have to click to see it.
+- **What is still open: no clear difference.** 97% with clued against 91% (+7 pt, p = 0.12). Leave out offers ("I can fix that if you like") and it's +4 pt (p = 0.27).
+- **An unanswered message that looked answered:** 0 of 140 for clued, on the panel and at a glance, and 2 of 138 for plain (p = 0.44).
+
+These are 5 runs per arm of one scenario. Only the "which reply" result is beyond noise, and it goes against clued.
+
+**The scenario (`burst` in `scenarios-hard.json`, on `fixture-hard/`).** 8 messages, 0.9 s apart:
+1. "What's the tax rate in pricing.py?"
+2. "Set workers in server.toml to 8."
+3. "How many customers are in customers.json?"
+4. "Add a FREE_SHIPPING_OVER constant to pricing.py, but ask me which amount first." (a decision for you)
+5. "Who is the maintainer named in the README?"
+6. "In stock.csv, set nails to 100."
+7. "Sorry, workers should be 6, not 8." (corrects message 2)
+8. "For the third thing I sent you: how many of them are from Germany?" (refers to message 3)
+
+Then, after Claude's reply, "50." (your decision) and "And what would 100 cost with that tax rate?".
+
+**What happened.** In all 10 runs, the 7 later messages arrived while Claude was working, and Claude answered the whole burst in one reply: at 13.4 s on average for clued and 16.6 s for plain. The last message went out at 6.3 s. Both arms got everything right: 100% project checks, the judge found every message answered and correct, every correction followed (workers 6, never 8), and "the third thing" read as the customers question every time. clued cost $0.075 a run and plain $0.073 (p = 0.64).
+
+**How each arm laid out the reply.**
+- **clued** split the reply into 6 bubbles: tax, workers (messages 2 and 7 together), customers (3 and 8 together), the free-shipping question, maintainer and nails. On one screen, the chat shows the last bubbles, and the panel's Unread list shows each bubble as a cut preview ("The maintainer named in the REA…", "customers.json has 7 customers,…"). So the panel says ✓ for the maintainer and the Germany count, but the answer itself isn't on the screen.
+- **plain** wrote one bulleted list, about 10 lines, that stays on the screen until the follow-ups.
+
+**Per arm (275 message-moments each; 50 at the end):**
+
+| measure | A panel (no model) | A glance | B glance | A − B, glance | p |
+|---|---|---|---|---|---|
+| answered or not | 275/275 | 273/275 | 259/275 | +5 pt | 0.13 |
+| … at the end | 50/50 | 49/50 | 50/50 | −2 pt | 1.0 |
+| can't tell | 0 | 1 | 14 | | |
+| answer found | 111/111 | 96/111 | 110/111 | −13 pt | 0.008 |
+| … at the end | 42/42 | 31/42 | 42/42 | −27 pt | 0.008 |
+| still open (offers count as waiting) | 272/275 | 268/275 | 250/275 | +7 pt | 0.12 |
+| still open, offers left out | 272/275 | 268/275 | 248/265 | +4 pt | 0.27 |
+| not answered, but looked answered | 0/140 | 0/140 | 2/138 | −0.4 per run | 0.44 |
+| open, but looked done | 3/154 | 3/154 | 11/154 | −1.6 per run | 0.25 |
+
+The full read at the end: answered or not 50/50 in both arms, answer found 41/42 (clued) and 42/42 (plain), still open 50/50 and 47/50 (p = 0.17).
+
+**What was waiting on you.** Two things. One was the free-shipping amount (message 4). The other was a bug Claude found on its own: `member_price` adds the discount instead of subtracting it. The truth counts that bug as a question on the tax message in 3 clued runs and 3 plain runs.
+- **The amount.** clued asked in a bubble with a question mark, and the panel showed ✋ until you answered "50.". In plain, Claude called the AskUserQuestion tool in 4 of 5 runs. The headless harness can't answer it, so the tool returned "The user did not answer the questions" at once. Claude then asked again in its reply (2 runs) or wrote "Tell me the amount and I'll add it" (2 runs).
+- **The bug, in clued.** Claude asked "Should I fix it?" in the tax bubble, and the panel showed ✋ on the tax message. It then wrongly turned to ✓ in 3 of 9 open moments, for two reasons:
+  - In r4, the reply to "50." listed the tax topic as still waiting on you, but had no question mark. `settleTurn()` marks a topic waiting only when the reply asks something, so it marked it done.
+  - In r1, the tag put "what would 100 cost" into the tax topic (`same_as`) with status done, and that closed the bug question too.
+- **The bug, in plain.** Claude offered the fix ("I can if you like"). From one screen, the reader took it as done in all 11 open moments, and in all 3 when reading the whole chat.
+
+**What this cannot show.**
+- **5 runs per arm, one scenario.** A difference of one or two messages moves the rates by several points.
+- **clued ran on the bigger run's frozen APP_GUIDE.** Today's guide tells Claude to write each answer as soon as it's ready, even mid-turn, and to ask with AskUserQuestion. Neither was tested here. The screens, though, were drawn by today's app code.
+- **AskUserQuestion in plain Claude Code** opens a dialog that waits for you. Here it returned at once, unanswered, so the plain arm's question handling isn't what you would see in the terminal.
+- The other caveats of this section apply: the reader is a model, the plain screen is drawn by this script, and clicks aren't modelled.
+
+**Spend: $1.09 of the $2.50 cap.**
+
+| item | calls | $ |
+|---|---|---|
+| 10 sessions | 10 | 0.7410 |
+| blind judge, one per run | 10 | 0.1251 |
+| ground truth, Sonnet, one per run | 10 | 0.1260 |
+| one-screen glance, Haiku | 100 | 0.0791 |
+| full read, Haiku, at the end | 10 | 0.0160 |
+
+At most 2 Claude processes ran at once.
+
+**Files.**
+- `results/burst/summary.md` holds the session tables.
+- `results/burst/visibility/` holds the visibility results and tables (ids, states, counts and scores only).
+- These stay local and are never committed: `results/burst/results.json`, which holds Claude's reply text; the streams in `results/burst/raw/`; and the prompts, answers and ledger in `results/burst/visibility/raw/`.
+
 ## The bigger run (2026-11-25)
 
 **Setup.**

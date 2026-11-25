@@ -164,6 +164,7 @@ clued and plain Claude Code were given the same 13 scripted conversations, with 
 | Project checks passed | 100% | 99% |
 | Judge: correct, and answers given to the wrong message | 100%, none | 100%, none |
 | From one screen, messages you can tell are answered or not | 99.7% | 86% |
+| [After 8 messages sent before the first reply](eval/RESULTS.md#a-burst-of-messages-before-the-first-reply-2026-11-25), answers you can find on one screen (5 runs) | 86% | 99% |
 
 - **What clued adds:** you can see, for each message, whether it was answered and where.
 - **What it doesn't add:** Claude's answers aren't better.

@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { preview } from '../app/inbox.ts'
 import { blocksOf, compare, factsOf, hits, judgeTranscript, loadScenarios, needsJudge, norm, panelClaim, rates, readRaw, replayA, framesB, ruleTruth, SCREEN, stateAt, sum, mean, TRUTH_SYSTEM } from './visibility-core.ts'
@@ -413,7 +413,7 @@ async function main() {
   const truthSources = { judged: prepared.filter(p => p.truth[0]?.source === 'judge').map(p => keyOf(p.run)), why: Object.fromEntries(prepared.filter(p => p.flags.length).map(p => [keyOf(p.run), p.flags])), rulesVsJudge: agree }
   const out = {
     about: 'Can you see what was answered? Ids, states, counts and scores only: no transcript text (that stays in raw/, which is never committed).',
-    input: { results: 'eval/results/hard/results.json', runs: prepared.length }, screen: SCREEN, models: { glance: glanceModel, truth: truthModel },
+    input: { results: relative(join(HERE, '..'), join(inDir, 'results.json')), runs: prepared.length }, screen: SCREEN, models: { glance: glanceModel, truth: truthModel },
     spentUsd: Number(budget.spent.toFixed(4)), cap: budget.cap, spend, stopped: caller.stopped, truthSources, truthCounts, reading,
     scores, comparisons, perScenario, waitingSplit,
     perRun: Object.fromEntries(readers.map(n => [n, Object.fromEntries([...perRun(n).entries()].map(([k, v]) => [k, v.r]))])),
