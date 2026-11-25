@@ -95,13 +95,23 @@ export function submit(S: AppState, text: string, now: number, quote?: { who: 'm
 export function finishTurn(S: AppState, resultText: string, isError: boolean, durationMs: number, now: number) {
   const open = S.turns.filter(t => !t.isDone)
   const last = open.at(-1)
+  // app/main.ts: a turn that ends on a part already shown has it as its answer.
+  const tail = S.turns.findLast(x => x.tail != null)
+  let shown = false
+  if (tail && !last?.pending && (!resultText.trim() || stripTag(resultText).trim() === stripTag(tail.tail!).trim())) {
+    if (tail === last) {
+      last.early = last.early!.slice(0, -1)
+      last.pending = tail.tail!
+    } else shown = true
+    delete tail.tail
+  } else keepTail(S)
   const raw = last?.pending || resultText
   for (const t of open) {
     t.isDone = true
     t.live = ''
     t.durationMs = now - t.at
   }
-  if (last && raw) {
+  if (last && raw && !shown) {
     last.answer = stripTag(raw)
     last.pending = ''
     if (isError) last.error = raw.slice(0, 200)
@@ -140,6 +150,23 @@ export function finishTurn(S: AppState, resultText: string, isError: boolean, du
 }
 
 /** app/main.ts onEvent(), for what these sessions hold (no agents ran in them). */
+const TAG = /<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/
+/** app/main.ts earlyPart(): a reply written early, shown now (`tail`: nothing after it yet). */
+function earlyPart(S: AppState, t: Turn, now: number, tail: boolean) {
+  if (TAG.test(t.pending)) {
+    const was = S.kept.board.turnTopics
+    S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, now, { flat: true, partial: true }).board, turnTopics: was }
+  }
+  t.early = [...(t.early ?? []), stripTag(t.pending)]
+  if (tail) t.tail = t.pending
+  t.pending = ''
+  assignParts(S.turns, S.kept.board)
+}
+const keepTail = (S: AppState) => {
+  const t = S.turns.findLast(x => x.tail != null)
+  if (t) delete t.tail
+}
+
 export function onEvent(S: AppState, ev: ClaudeEvent, now: number) {
   let t = S.turns.findLast(x => !x.isDone)
   if (!t && (ev.kind === 'text' || ev.kind === 'tool')) {
@@ -153,21 +180,16 @@ export function onEvent(S: AppState, ev: ClaudeEvent, now: number) {
   switch (ev.kind) {
     case 'text':
       if (t) {
+        keepTail(S)
         t.pending = t.pending ? `${t.pending}\n\n${ev.text}` : ev.text
         t.live = ''
+        if (hasMarks(t.pending) && TAG.test(t.pending)) earlyPart(S, t, now, true)
       }
       return
     case 'tool':
       if (!t) return
-      if (hasMarks(t.pending)) {
-        if (/<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/.test(t.pending)) {
-          const was = S.kept.board.turnTopics
-          S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, now, { flat: true, partial: true }).board, turnTopics: was }
-        }
-        t.early = [...(t.early ?? []), stripTag(t.pending)]
-        t.pending = ''
-        assignParts(S.turns, S.kept.board)
-      }
+      keepTail(S)
+      if (hasMarks(t.pending)) earlyPart(S, t, now, false)
       t.steps.push({ tool: ev.tool, ...(t.pending ? { said: stripMarks(stripTag(t.pending)) } : {}) })
       t.pending = ''
       t.live = ''

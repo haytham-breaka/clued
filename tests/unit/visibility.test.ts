@@ -95,6 +95,30 @@ describe('arm A: the app asks again for a reply that never arrived', () => {
   })
 })
 
+describe('arm A: a reply part shows as soon as Claude finishes writing it', () => {
+  const PART = '<<reply T1>>\nThe port is 8137.\n<clued>{"topics":[{"id":"T1","status":"done"}]}</clued>'
+  const END = '<<reply T2>>\nworkers is now 6.\n<clued>{"topics":[{"id":"T2","status":"done"}]}</clued>'
+  const evs: Ev[] = [
+    { t: 1000, e: { type: 'assistant', message: { content: [{ type: 'text', text: PART }] } } },
+    { t: 2000, e: { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'true' } }] } } },
+    { t: 2100, e: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: '' }] } } },
+    { t: 3000, e: { type: 'assistant', message: { content: [{ type: 'text', text: END }] } } },
+    result(3010, END),
+  ]
+  // m2 goes out after the part and before Claude's next step.
+  const run = { ...runOf('A'), sent: [runOf('A').sent[0]!, { ...runOf('A').sent[1]!, t: 1500 }] }
+  test('answered before the next step; each part once, and the last one is the answer', () => {
+    const frames = replayA(run, evs)
+    const before = frames.find(f => f.label === 'before m2')!.panel!
+    assert.deepEqual(before.map(p => [p.id, p.state]), [['m1', 'done']])
+    assert.match(before[0]!.replyText!, /8137/)
+    const end = frames.at(-1)!
+    assert.deepEqual(end.panel!.map(p => [p.id, p.state]), [['m1', 'done'], ['m2', 'done']])
+    assert.equal(end.full!.split('The port is 8137.').length - 1, 2, 'once in the chat, once in the panel')
+    assert.equal(end.full!.split('workers is now 6.').length - 1, 2, 'once in the chat, once in the panel')
+  })
+})
+
 describe('arm B: the same stream as Claude Code shows it', () => {
   const frames = framesB(runOf('B'), events)
   test('prompts, tool lines with their result, and text; nothing from after the moment', () => {

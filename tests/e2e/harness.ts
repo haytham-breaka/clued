@@ -326,3 +326,8 @@ export async function withApp(opts: LaunchOpts & { unfocused?: boolean; ready?: 
 
 /** The screen's row holding `text`, as a string (for checking what sits on the same line). */
 export const rowOf = (screen: string, text: string) => screen.split('\n').find(l => l.includes(text)) ?? ''
+/** How many rows of the chat (right of the panel) show `text`. */
+export const chatRowsWith = (screen: string, text: string) => {
+  const edge = screen.split('\n')[0]!.indexOf('│') // the panel's edge, on its first row
+  return screen.split('\n').filter(l => [...l].slice(edge + 1).join('').includes(text)).length
+}

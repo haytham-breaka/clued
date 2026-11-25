@@ -341,6 +341,23 @@ async function scenario(m: Msg) {
     say(tag([{ id: m.topic, status: 'done' }]))
     return result()
   }
+  // The last text is a reply part with its tag, and the result repeats it (as Claude Code's does).
+  if (t.includes('end on a part')) {
+    const text = `<<reply ${m.topic}>>\nThe only part.\n${tag([{ id: m.topic, status: 'done' }])}`
+    say(text)
+    return result({ result: text })
+  }
+  // A reply part finished while a message waits in queue, and a while before the next step.
+  if (t.includes('part then pause')) {
+    tool('pause-1', 'Bash', { command: 'true', description: 'First step' })
+    toolResult('pause-1', '')
+    await release('part')
+    say(`<<reply ${m.topic}>>\nThe part written before the pause.\n${tag([{ id: m.topic, status: 'done' }])}`)
+    await release('pause')
+    tool('pause-2', 'Bash', { command: 'true', description: 'Next step' })
+    toolResult('pause-2', '')
+    return finish(m, 'Finished after the pause.')
+  }
   if (t.includes('hold on')) {
     say('Starting the slow work.')
     tool('slow-1', 'Bash', { command: 'sleep 100', description: 'Slow work' })

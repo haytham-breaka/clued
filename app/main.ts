@@ -836,9 +836,12 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'text':
       if (t) {
+        keepTail()
         t.pending = t.pending ? `${t.pending}\n\n${e.text}` : e.text
         // The whole block is here: what streamed of it, on any open turn, is done with.
         for (const x of S.turns) if (!x.isDone) x.live = ''
+        // A reply part with its own tag is finished: it shows now, not at Claude's next step.
+        if (hasMarks(t.pending) && TAG.test(t.pending)) earlyPart(t, true)
       }
       break
     case 'fired':
@@ -886,22 +889,9 @@ function onEvent(e: ClaudeEvent) {
           for (const x of streamed) x.live = ''
           t.pending = t.pending ? `${t.pending}\n\n${text}` : text
         }
+        keepTail()
         // Text with reply marks before more work is a reply written early: shown now, kept as parts.
-        if (hasMarks(t.pending)) {
-          // Its own tag, if it has one, settles those messages now rather than at the end of the turn.
-          if (/<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/.test(t.pending)) {
-            // Only the topics it lists: the messages it leaves out are still being worked on.
-            const was = S.kept.board.turnTopics
-            S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, Date.now(), { flat: true, partial: true }).board, turnTopics: was }
-          }
-          t.early = [...(t.early ?? []), stripTag(t.pending)]
-          // Kept by the app too: the transcript may lose it.
-          const kept = { ...S.kept.early, [t.key]: t.early }
-          S.kept.early = Object.fromEntries(Object.entries(kept).slice(-300))
-          t.pending = ''
-          assignParts(S.turns, S.kept.board)
-          keep()
-        }
+        if (hasMarks(t.pending)) earlyPart(t, false)
         t.steps.push({ tool: e.tool, ...(t.pending ? { said: stripMarks(stripTag(t.pending)) } : {}) })
         t.pending = ''
         t.live = ''
@@ -1045,16 +1035,65 @@ function onEvent(e: ClaudeEvent) {
   draw()
 }
 
+const TAG = /<(?:clued|threadline)>[\s\S]*?<\/(?:clued|threadline)>/
+
+/**
+ * Text with reply marks, written before more work: a reply written early, shown now and kept as parts.
+ * `tail`: nothing has come after it yet (see Turn.tail).
+ */
+function earlyPart(t: Turn, tail: boolean) {
+  // Its own tag, if it has one, settles those messages now rather than at the end of the turn.
+  if (TAG.test(t.pending)) {
+    // Only the topics it lists: the messages it leaves out are still being worked on.
+    const was = S.kept.board.turnTopics
+    S.kept.board = { ...settleTurn({ ...S.kept.board, turnTopics: [] }, t.pending, Date.now(), { flat: true, partial: true }).board, turnTopics: was }
+  }
+  t.early = [...(t.early ?? []), stripTag(t.pending)]
+  if (tail) t.tail = t.pending
+  else keepEarly(t)
+  t.pending = ''
+  assignParts(S.turns, S.kept.board)
+}
+
+/** Kept by the app too: the transcript may lose an early part. */
+function keepEarly(t: Turn) {
+  const kept = { ...S.kept.early, [t.key]: t.early ?? [] }
+  S.kept.early = Object.fromEntries(Object.entries(kept).slice(-300))
+  keep()
+}
+
+/** More came after a part shown as soon as it was written: it is an early part for good. */
+function keepTail() {
+  const t = S.turns.findLast(x => x.tail != null)
+  if (!t) return
+  delete t.tail
+  keepEarly(t)
+}
+
 function finishTurn(resultText: string, isError: boolean, durationMs: number) {
   const open = S.turns.filter(t => !t.isDone)
   const last = open.at(-1)
+  // The turn ended on a part already shown: that part is the final answer (where it is, so it keeps its id).
+  const tail = S.turns.findLast(x => x.tail != null)
+  let shown = false
+  if (tail && !last?.pending && (!resultText.trim() || stripTag(resultText).trim() === stripTag(tail.tail!).trim())) {
+    if (tail === last) {
+      last.early = last.early!.slice(0, -1)
+      last.pending = tail.tail!
+    } else {
+      // A message sent since: the part stays with the turn it was written in; its tag still settles.
+      keepEarly(tail)
+      shown = true
+    }
+    delete tail.tail
+  } else keepTail()
   const raw = last?.pending || resultText
   for (const t of open) {
     t.isDone = true
     t.live = ''
     t.durationMs = Date.now() - t.at
   }
-  if (last && raw) {
+  if (last && raw && !shown) {
     last.answer = stripTag(raw)
     last.pending = ''
     if (isError) last.error = firstLine(raw, 200)

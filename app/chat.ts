@@ -380,7 +380,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       const chain = ctx.chainOf(turn)
       if (chain > 0) foot.push({ text: `⛓ chain · ${chain}  `, style: { fg: C.cyan }, action: () => ctx.openChain(turn) })
       // Sent while Claude worked, and Claude hasn't got to it yet.
-      if (turn.queued && turn.delivery && !turn.isDone && !turn.steps.length && !turn.live) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
+      if (turn.queued && turn.delivery && !turn.isDone && !turn.steps.length && !turn.live && !turn.pending && !turn.early?.length) foot.push({ text: '⏸ queued: Claude reads it at its next step  ', style: { fg: C.faint, italic: true } })
       // Where it is on its way, last: the app has it, it went to Claude Code, Claude Code took it in.
       if (!turn.text.startsWith('/')) foot.push(delivered(turn))
       while (foot.length && foot.at(-1)!.text.trim() === '') foot.pop()
@@ -411,13 +411,14 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     const below = nextTurn ? () => ctx.jump(`work:${nextTurn.key}`) : undefined
     // Its step still running: the work is here until Claude gets to the queued message.
     const stillHere = goesOn && !!turn.steps.length && turn.steps.at(-1)!.result == null
-    // Queued and not reached yet: nothing of Claude's under it until it is.
-    const notYet = !!turn.queued && working && !turn.steps.length && !turn.live && !hasParts
+    // Queued and not reached yet: nothing of Claude's under it until it is. Words Claude finished
+    // writing (a reply part, before its next step) count as reaching it.
+    const notYet = !!turn.queued && working && !turn.steps.length && !turn.live && !turn.pending && !hasParts
     if (!notYet && (showSteps || working || text || hasParts || carried)) {
       owned = out.length
       const doneAt = new Date(turn.at + (turn.durationMs ?? 0))
       const time = `${String(doneAt.getHours()).padStart(2, '0')}:${String(doneAt.getMinutes()).padStart(2, '0')}`
-      const doing = carried ? (stillHere ? ' is working… your next message is queued ↓' : goesOn ? ' is still on it, with your next message ↓' : ' · went on with your next message ↓') : !working ? ` · ${time}${turn.followUp ? ' · followed up' : ''}` : turn.followUp ? ' is following up…' : turn.live ? ' is typing…' : turn.steps.length ? ' is working…' : ` is thinking… ${secs(ctx.now - turn.at)}`
+      const doing = carried ? (stillHere ? ' is working… your next message is queued ↓' : goesOn ? ' is still on it, with your next message ↓' : ' · went on with your next message ↓') : !working ? ` · ${time}${turn.followUp ? ' · followed up' : ''}` : turn.followUp ? ' is following up…' : turn.live || turn.pending ? ' is typing…' : turn.steps.length ? ' is working…' : ` is thinking… ${secs(ctx.now - turn.at)}`
       out.push([])
       anchors[`work:${turn.key}`] = out.length
       out.push([

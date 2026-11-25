@@ -60,6 +60,12 @@ export type Turn = {
   answer?: string
   /** Reply parts Claude wrote mid-turn, before more work: shown at once, ahead of the final answer. */
   early?: string[]
+  /**
+   * The last of them with its tag, while nothing has come after it: a reply part shows as soon as
+   * Claude finishes writing it. Its next step leaves it an early part; if the turn ends there, it is
+   * the final answer after all.
+   */
+  tail?: string
   /** The answer as replies to your messages (app/inbox.ts). */
   parts?: Part[]
   /** A turn Claude started on its own (an agent came back): the messages (turn keys) it follows up on. */

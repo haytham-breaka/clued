@@ -2,7 +2,7 @@
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { rowOf, withApp } from './harness.ts'
+import { chatRowsWith, rowOf, withApp } from './harness.ts'
 
 describe('chat', () => {
   test('sends a message and shows the reply, quoting it', () =>
@@ -172,6 +172,33 @@ describe('chat', () => {
       const last = lines.findIndex(l => l.includes('All finished after the early answer.'))
       assert.ok(early > 0 && last > early)
       assert.match(s, /⚙ 1 step · ran 1 command/)
+    }))
+
+  test('a reply part Claude finished shows at once, also while your next message waits in queue', () =>
+    withApp({}, async app => {
+      await app.send('part then pause')
+      await app.waitFor('First step  1 step')
+      await app.send('A second message.')
+      await app.waitFor('queued: Claude reads it at its next step')
+      // The part is written, the next step hasn't started: the part shows, under its own message.
+      app.release('part')
+      const s = await app.waitFor('The part written before the pause.')
+      assert.match(s, /↩ “part then pause”/)
+      assert.ok(!s.includes('queued: Claude reads it'), 'Claude has read the queued message')
+      // Its tag settled it: answered in the panel too, with the answer under it.
+      assert.match(s, /✓ part then pause/)
+      assert.match(rowOf(s, '✓ part then pause'), /↩/)
+      app.release('pause')
+      const end = await app.waitFor('Finished after the pause.')
+      assert.equal(chatRowsWith(end, 'The part written before the pause.'), 1, 'shown once')
+    }))
+
+  test('a turn that ends on a part already shown: it is the answer, shown once', () =>
+    withApp({}, async app => {
+      await app.send('end on a part')
+      const s = await app.waitFor(s => s.includes('The only part.') && s.includes('○ idle'))
+      assert.equal(chatRowsWith(s, 'The only part.'), 1, 'shown once')
+      assert.match(s, /✓ end on a part/)
     }))
 
   test('an early reply that only streamed is kept as its own reply, and its message is answered', () =>
