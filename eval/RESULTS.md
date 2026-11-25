@@ -207,7 +207,7 @@ At most 2 Claude processes ran at once.
 **Files.**
 - `results/burst/summary.md` holds the session tables.
 - `results/burst/visibility/` holds the visibility results and tables (ids, states, counts and scores only).
-- These stay local and are never committed: `results/burst/results.json`, which holds Claude's reply text; the streams in `results/burst/raw/`; and the prompts, answers and ledger in `results/burst/visibility/raw/`.
+- Not committed, and no longer kept: `results/burst/results.json` (Claude's reply text), the streams in `results/burst/raw/`, and the prompts, answers and ledger in `results/burst/visibility/raw/`. They were deleted by mistake when the worktree was cleaned up, so these 10 runs can't be re-scored without running the sessions again (about $1.10).
 
 ## The bigger run (2026-11-25)
 

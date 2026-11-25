@@ -1,0 +1,23 @@
+# clued takes contributions as issues (CONTRIBUTING.md). A pull request from anyone who isn't a
+# collaborator is closed with a note pointing there. This never checks out or runs the PR's code:
+# pull_request_target runs this file as it is on main, with a token that can only comment and close.
+name: Close outside pull requests
+on:
+  pull_request_target:
+    types: [opened, reopened]
+permissions:
+  pull-requests: write
+jobs:
+  close:
+    if: >-
+      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close with a note
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr close "$PR" --repo "$REPO" --comment "Thanks for taking the time! clued takes contributions as issues rather than pull requests, so this one is closed. Please open an issue with what you found, and paste the change there if you have one: see [CONTRIBUTING.md](https://github.com/$REPO/blob/main/CONTRIBUTING.md). You'll be credited when it lands."
