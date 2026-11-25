@@ -30,8 +30,14 @@ export type App = Awaited<ReturnType<typeof launch>>
 type Find = { nth?: number; area?: 'chat' | 'panel'; dx?: number }
 
 
+/**
+ * Where each app's temp dir goes. macOS's own temp dir is /var/folders/…/T/ (/private/var/… once its
+ * symlink is resolved, as the app's cwd is): a path that long doesn't fit in the screen's rows.
+ */
+const TMP = process.platform === 'darwin' ? '/tmp' : tmpdir()
+
 export async function launch(opts: LaunchOpts = {}) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'clued-e2e-')))
+  const dir = realpathSync(mkdtempSync(join(TMP, 'clued-e2e-')))
   const bin = join(dir, 'bin')
   const home = join(dir, 'home')
   const work = join(dir, 'work')
@@ -42,9 +48,12 @@ export async function launch(opts: LaunchOpts = {}) {
   }
   // The fake Claude Code; its own process writes no coverage.
   script('claude', `unset NODE_V8_COVERAGE\nexec node --no-warnings ${q(FAKE)} "$@"`)
-  // Windows toasts and clipboard (WSL), Linux notifications and clipboard: logged, never real.
-  for (const name of ['powershell.exe', 'notify-send', 'osascript'])
+  // Windows toasts and clipboard (WSL), Linux and macOS notifications and clipboard: logged, never real.
+  for (const name of ['powershell.exe', 'notify-send'])
     script(name, `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\ncase "$*" in *GetImage*) [ -f ${q(join(dir, 'clip.png'))} ] && echo 'C:\\fake\\clip.png' ;; esac\nexit 0`)
+  // macOS: the clipboard's PNG (clip.png, when there is one) written to the file in the script's
+  // \`POSIX file "…"\`, as AppleScript would; anything else is a notification.
+  script('osascript', `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\ncase "$*" in *PNGf*) [ -f ${q(join(dir, 'clip.png'))} ] || exit 1; a="$*"; f="\${a#*POSIX file \\\"}"; cp ${q(join(dir, 'clip.png'))} "\${f%%\\\"*}" ;; esac\nexit 0`)
   // -w: a Windows path to the file, as WSL gives one (\\wsl.localhost\<distro>\…).
   script('wslpath', `[ "$1" = -w ] && { printf '%s%s\\n' '\\\\wsl.localhost\\Fake' "$(printf %s "$2" | tr / '\\\\')"; exit 0; }\n[ "$1" = -u ] && shift; case "$1" in 'C:\\fake\\clip.png') echo ${q(join(dir, 'clip.png'))} ;; *) echo "$1" ;; esac`)
   script('wl-paste', `[ -f ${q(join(dir, 'clip.png'))} ] && cat ${q(join(dir, 'clip.png'))} || exit 1`)

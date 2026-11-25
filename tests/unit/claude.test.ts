@@ -1,13 +1,14 @@
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Claude } from '../../app/claude.ts'
 import type { ClaudeEvent } from '../../app/claude.ts'
 
 // A `claude` on PATH that prints these events (with junk between), logs what it reads, and exits 2.
-const dir = mkdtempSync(join(tmpdir(), 'clued-claude-'))
+// Resolved (macOS's temp dir is under a symlink), as the cwd claude reports is.
+const dir = realpathSync(mkdtempSync(join(tmpdir(), 'clued-claude-')))
 after(() => rmSync(dir, { recursive: true, force: true }))
 const events = [
   { type: 'system', subtype: 'init', session_id: 's9', model: 'm', cwd: '/tmp/w', slash_commands: ['compact', 7], permissionMode: 'plan' },

@@ -4,17 +4,25 @@
 #   clued --resume [id]   pick or open one     any other flag     passed to claude
 # /reload inside the app restarts it on the same session (the app exits 75; this loop starts it again).
 # The older tmux layout (Claude Code's own screen with a threads panel beside it): clued-classic
+# Runs on macOS's own bash 3.2 too: there an empty array expanded under set -u is an "unbound
+# variable", so each array that can be empty goes through ${a[@]+"${a[@]}"}.
 set -uo pipefail
-here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+# This file's real place, through any symlinks (readlink -f is GNU, or macOS 12.3 and later).
+self="$0"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+here="$(cd "$(dirname "$self")/.." && pwd)"
 args=("$@")
 while true; do
-  node --no-warnings "$here/app/main.ts" "${args[@]}"
+  node --no-warnings "$here/app/main.ts" ${args[@]+"${args[@]}"}
   code=$?
   [ "$code" -eq 75 ] && [ -s "$HOME/.clued/reload" ] || exit "$code"
   # Same session, same other flags.
   keep=()
   skip=0
-  for a in "${args[@]}"; do
+  for a in ${args[@]+"${args[@]}"}; do
     if [ "$skip" -eq 1 ]; then skip=0; continue; fi
     case "$a" in
       -c|--continue) ;;
@@ -22,6 +30,6 @@ while true; do
       *) keep+=("$a") ;;
     esac
   done
-  args=("${keep[@]}" --resume "$(cat "$HOME/.clued/reload")")
+  args=(${keep[@]+"${keep[@]}"} --resume "$(cat "$HOME/.clued/reload")")
   rm -f "$HOME/.clued/reload"
 done

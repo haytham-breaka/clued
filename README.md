@@ -30,7 +30,7 @@ Underneath it's the same Claude Code, run headless: the same account, tools, per
 
 ## Quick start
 
-You need [Claude Code](https://claude.com/claude-code), installed and logged in (`claude` on your PATH), **Node 22.18 or later**, git and bash. It runs on macOS, Linux and Windows through WSL, and is tested in iTerm2 and in Windows Terminal with WSL.
+You need [Claude Code](https://claude.com/claude-code), installed and logged in (`claude` on your PATH), **Node 22.18 or later**, git and bash (macOS's own bash 3.2 will do). It runs on Linux and macOS, both tested in CI, and on Windows through WSL.
 
 ```bash
 git clone https://github.com/haytham-breaka/clued.git ~/src/clued

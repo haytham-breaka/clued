@@ -19,9 +19,9 @@ const isWsl = (env: Record<string, string> = {}) => !!env.WSL_DISTRO_NAME || /mi
 const opened = (app: App) =>
   [...app.read('notify.log').split('\n').filter(l => l.includes('Start-Process')), ...app.read('open.log').split('\n').filter(Boolean)].map(l => l.replace(`${app.dir}/bin/`, ''))
 
-/** The line that opens `path` on this machine: Start-Process with its Windows path (the fake wslpath's), else xdg-open. */
+/** The line that opens `path` on this machine: Start-Process with its Windows path (the fake wslpath's), else open (macOS) or xdg-open. */
 const opener = (path: string, wsl: boolean) =>
-  wsl ? `powershell.exe -NoProfile -Command Start-Process -FilePath '\\\\wsl.localhost\\Fake${path.replace(/\//g, '\\').replace(/'/g, "''")}'` : `xdg-open ${path}`
+  wsl ? `powershell.exe -NoProfile -Command Start-Process -FilePath '\\\\wsl.localhost\\Fake${path.replace(/\//g, '\\').replace(/'/g, "''")}'` : `${process.platform === 'darwin' ? 'open' : 'xdg-open'} ${path}`
 
 /** Waits until the app has asked to open files `n` times; returns those requests. */
 async function waitOpened(app: App, n: number): Promise<string[]> {
@@ -43,7 +43,8 @@ async function attach(app: App, path: string) {
 describe('images', () => {
   test('on WSL a click on [image 1] opens it on Windows (its wslpath -w path), from the bubble, the panel and the request; a gone one says so', () => {
     const env = { WSL_DISTRO_NAME: 'Fake' }
-    return withApp({ env, unfocused: true }, async app => {
+    // Wide enough for the gone file's toast, its temp path and all (macOS's is /private/tmp/…).
+    return withApp({ env, unfocused: true, width: 130 }, async app => {
       // A quote in the name: PowerShell gets it doubled, inside its single quotes.
       const pic = join(app.work, "it's here.png")
       writeFileSync(pic, PNG)
@@ -76,7 +77,7 @@ describe('images', () => {
     })
   })
 
-  test('after a resume, and on a held message, [image N] opens with the system viewer (xdg-open off WSL)', () => {
+  test('after a resume, and on a held message, [image N] opens with the system viewer (open or xdg-open off WSL)', () => {
     const text = '[image 1] what was this'
     let old = ''
     return withApp({

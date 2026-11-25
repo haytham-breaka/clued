@@ -6,15 +6,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 now=$(date +%s)
+# GNU stat, else BSD's (macOS).
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 for f in hooks/model.ts app/inbox.ts app/main.ts; do
-  age=$(( now - $(stat -c %Y "$f") ))
+  age=$(( now - $(mtime "$f") ))
   if [ "$age" -lt 60 ]; then echo "freeze: $f changed ${age}s ago; try again in a minute" >&2; exit 1; fi
 done
 mkdir -p eval/frozen
 cp hooks/model.ts eval/frozen/model.ts
 cp app/inbox.ts eval/frozen/inbox.ts
-sed -i "s|from '../types'|from '../../types/index.d.ts'|; s|from '../types/index.d.ts'|from '../../types/index.d.ts'|" eval/frozen/model.ts
-sed -i "s|from '../hooks/model.ts'|from './model.ts'|; s|from '../types/index.d.ts'|from '../../types/index.d.ts'|; s|from './session.ts'|from '../../app/session.ts'|; s|from './text.ts'|from '../../app/text.ts'|" eval/frozen/inbox.ts
+# sed -i with a suffix works with both GNU and BSD sed.
+sed -i.orig "s|from '../types'|from '../../types/index.d.ts'|; s|from '../types/index.d.ts'|from '../../types/index.d.ts'|" eval/frozen/model.ts
+sed -i.orig "s|from '../hooks/model.ts'|from './model.ts'|; s|from '../types/index.d.ts'|from '../../types/index.d.ts'|; s|from './session.ts'|from '../../app/session.ts'|; s|from './text.ts'|from '../../app/text.ts'|" eval/frozen/inbox.ts
+rm -f eval/frozen/model.ts.orig eval/frozen/inbox.ts.orig
 # The guide lines in main.ts must be the ones guide.ts holds.
 start=$(grep -n '^const APP_GUIDE = \[' app/main.ts | cut -d: -f1)
 sed -n "$((start + 3)),$((start + 8))p" app/main.ts > /tmp/tl-freeze-main.txt

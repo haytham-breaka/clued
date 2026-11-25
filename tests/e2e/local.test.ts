@@ -94,7 +94,8 @@ describe('clued\'s own commands', () => {
     }))
 
   test('/export writes the chat as Markdown to a file, or offers the clipboard', () =>
-    withApp({}, async app => {
+    // Wide enough for its toasts, the temp path and all (macOS's is /private/tmp/…).
+    withApp({ width: 130 }, async app => {
       await app.send('/export')
       await app.waitFor('Nothing to export yet')
       await app.send('first message here')

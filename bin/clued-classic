@@ -3,7 +3,13 @@
 # Every claude flag passes through: clued-classic -c, --resume, --model opus, ...
 # CLUED_PLAIN=1 (or no tmux) runs Claude Code alone, with the mod's own panel.
 set -euo pipefail
-here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# This file's real place, through any symlinks (readlink -f is GNU, or macOS 12.3 and later).
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+done
+here="$(cd "$(dirname "$self")/.." && pwd)"
 
 if [ -n "${CLUED_PLAIN:-}" ] || ! command -v tmux >/dev/null; then
   exec claude --plugin-dir "$here" "$@"

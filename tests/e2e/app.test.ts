@@ -4,7 +4,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { keyOf } from '../../hooks/model.ts'
 import { withApp, writeSession } from './harness.ts'
@@ -40,7 +40,8 @@ function sessions({ home, work }: { home: string; work: string }) {
   ])
   // The older one is older on disk too.
   const old = join(home, '.claude', 'projects', work.replace(/[^a-zA-Z0-9]/g, '-'), 'old-1.jsonl')
-  spawnSync('touch', ['-d', '2 hours ago', old])
+  const twoHoursAgo = (Date.now() - 2 * 3600_000) / 1000
+  utimesSync(old, twoHoursAgo, twoHoursAgo)
   // What the app kept for new-2: a mid-turn reply the transcript lost, and your reaction.
   mkdirSync(join(home, '.clued', 'sessions'), { recursive: true })
   const key = keyOf('fix the login page')
