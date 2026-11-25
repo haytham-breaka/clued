@@ -2132,11 +2132,12 @@ function key(k: string) {
       wordOn()
       break
     case '\x16':
-    case '\x1bv': {
+    case '\x1bv':
+    case '\x1bV': {
       // Ctrl+V or Alt+V: an image on the clipboard (text pastes come through the terminal's own paste).
       const img = clipboardImage()
       if (img) attachImage(img)
-      else toast('No image on the clipboard. Text pastes with your terminal\'s paste key.')
+      else toast('No image on the clipboard. Text pastes with your terminal\'s paste key; in Windows Terminal, add an image with Alt+V.')
       break
     }
     case '\x06':
@@ -2338,7 +2339,8 @@ function input(data: string) {
       s = s.slice(m[0].length)
       continue
     }
-    const seq = s.match(/^\x1b\[[0-9;]*[A-Za-z~]|^\x1bO[A-Za-z]|^\x1b[\r\x7fbf]|^\x1b(?!\[)/)
+    // Alt+letter keys the app uses come as ESC and the letter: read them as one key (Alt+V would otherwise be Esc, then v).
+    const seq = s.match(/^\x1b\[[0-9;]*[A-Za-z~]|^\x1bO[A-Za-z]|^\x1b[\r\x7fbfvV]|^\x1b(?!\[)/)
     if (seq) {
       key(seq[0] === '\x1bOA' ? '\x1b[A' : seq[0] === '\x1bOB' ? '\x1b[B' : seq[0] === '\x1bOC' ? '\x1b[C' : seq[0] === '\x1bOD' ? '\x1b[D' : seq[0] === '\x1bOH' ? '\x1b[H' : seq[0] === '\x1bOF' ? '\x1b[F' : seq[0])
       s = s.slice(seq[0].length)
