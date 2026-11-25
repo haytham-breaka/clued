@@ -271,6 +271,21 @@ async function scenario(m: Msg) {
     say(`<<reply ${m.topic}>>\nThe background job is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
     return result()
   }
+  // A background agent that ends on release-bg-end; Claude follows up on release-gap, a moment later
+  // (as Claude Code hands the result to Claude in a turn of its own).
+  if (t.includes('hand back')) {
+    tool('hb-1', 'Agent', { description: 'Short job', subagent_type: 'general-purpose', prompt: 'Do the short job.', run_in_background: true })
+    toolResult('hb-1', 'Async agent launched successfully. agentId: hb-7')
+    finish(m, 'Started it in the background.', 'claude')
+    const file = `${process.env.HOME}/.claude/projects/${process.cwd().replace(/[^a-zA-Z0-9]/g, '-')}/${sessionId}/subagents/agent-hb-7.jsonl`
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, JSON.stringify({ type: 'user', isSidechain: true, message: { content: 'Do the short job.' } }) + '\n')
+    await release('bg-end', 20_000)
+    out({ type: 'system', subtype: 'task_notification', task_id: 'hb-7', status: 'completed', summary: 'Short job finished' })
+    if (!(await release('gap', 20_000))) return
+    say(`<<reply ${m.topic}>>\nThe short job is done.\n${tag([{ id: m.topic, status: 'done' }])}`)
+    return result()
+  }
   // A background agent that runs a long tool (its result comes on release-tool), then goes quiet;
   // asked to check on it, Claude says so.
   if (t.includes('quiet agent')) {

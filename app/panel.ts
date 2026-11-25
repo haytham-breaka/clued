@@ -115,6 +115,7 @@ const pulseText = (pulse: Pulse | undefined, now: number, plain?: string, short 
   // Claude's own quick steps would flicker by: its tool shows once it has run a while.
   : pulse.kind === 'tool' && plain && now - pulse.since < 10_000 ? plain
   : pulse.kind === 'tool' ? `${short ? '' : 'running '}${pulse.tool} ${ago(now - pulse.since)}`
+  : pulse.kind === 'you' ? 'waiting on you'
   : pulse.kind === 'quiet' ? `quiet ${ago(now - pulse.since)}`
   : plain ?? (short ? ago(now - pulse.since) : `last step ${ago(now - pulse.since)} ago`)
 
@@ -427,7 +428,7 @@ export function panelLines(p: PanelCtx, width: number): { lines: Line[]; head: n
       { text: ' (lead)', style: { fg: C.faint }, action: open },
       // While it works: how many of your messages its turn is on.
       { text: p.main?.for.length ? ` · on ${p.main.for.length} message${p.main.for.length > 1 ? 's' : ''}` : '', style: { fg: C.magenta }, action: open },
-    ], [{ text: !p.main ? 'idle' : pulseText(p.main.pulse, now, 'working'), style: { fg: p.main?.pulse?.kind === 'quiet' ? C.yellow : p.main ? C.cyan : C.faint }, action: open }]))
+    ], [{ text: !p.main ? 'idle' : pulseText(p.main.pulse, now, 'working'), style: { fg: p.main?.pulse?.kind === 'quiet' || p.main?.pulse?.kind === 'you' ? C.yellow : p.main ? C.cyan : C.faint }, action: open }]))
     if (p.main) about(rows, p.main.for, p.main.last, false, open)
     const running = shownAgents.filter(a => a.state === 'running').length + (p.main ? 1 : 0)
     for (const a of shownAgents) {

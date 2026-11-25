@@ -44,7 +44,7 @@ import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
 import type { Pulse } from './tasks.ts'
-import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, isQuiet, nudgeText, pulseOf, QUIET_MS, resume as resumeRun, sendFailed, sendTask, taskArrived, touch, workingFor } from './tasks.ts'
+import { agentFor, agentIdOf, agentsFromTurns, canContinue, continueText, endRun, firstTask, handingBack, isQuiet, nudgeText, pulseOf, QUIET_MS, resume as resumeRun, sendFailed, sendTask, taskArrived, touch, workingFor } from './tasks.ts'
 import { firedKey, followKey, lastCwd, lastUsage, readAgentFile, listSessions, loadHistory, loadKept, newTurn, saveKept, toggleSaved } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
@@ -848,7 +848,13 @@ function followUpTurn(): Turn {
 let leadAt = 0
 
 /** Claude itself while it works: the tool it waits on, else the time since it last did anything. */
+/** When Claude began asking you (a permission, or its questions): it waits on you, not working. */
+let askedAt = 0
+/** When Claude's current turn began (its first words or step), and when the last turn that ended began. */
+let turnFrom = 0
+let settledFrom = 0
 function leadPulse(now: number): Pulse {
+  if (S.asks.length || S.permissions.length) return { kind: 'you', since: askedAt }
   const t = openTurn()
   const since = Math.max(leadAt, t?.at ?? 0)
   const s = t?.steps.at(-1)
@@ -858,6 +864,8 @@ function leadPulse(now: number): Pulse {
 
 function onEvent(e: ClaudeEvent) {
   if (e.kind !== 'usage' && e.kind !== 'output-tokens') leadAt = Date.now()
+  if (!turnFrom && (e.kind === 'text-delta' || e.kind === 'text' || e.kind === 'tool')) turnFrom = Date.now()
+  if ((e.kind === 'permission' || e.kind === 'ask') && !S.asks.length && !S.permissions.length) askedAt = Date.now()
   let t = openTurn()
   if (!t && !quitting && (e.kind === 'text-delta' || e.kind === 'text' || e.kind === 'tool')) t = followUpTurn()
   switch (e.kind) {
@@ -1137,6 +1145,8 @@ function keepTail() {
 }
 
 function finishTurn(resultText: string, isError: boolean, durationMs: number) {
+  settledFrom = turnFrom || Date.now()
+  turnFrom = 0
   // A message Claude Code hasn't taken in stays open: it runs next, as a turn of its own.
   const open = S.turns.filter(t => !t.isDone && !waiting(t))
   const last = open.at(-1)
@@ -1210,7 +1220,8 @@ const askedAgain = new Set<string>()
 function askForLost() {
   if (S.isWorking) return
   const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
-  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running').flatMap(workingFor))
+  // Agents at work, and ones that just ended (Claude follows up on their results next).
+  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running' || handingBack(a, Date.now(), settledFrom)).flatMap(workingFor))
   const box = inbox(S.turns, S.kept.board, S.read, { isWorking: false, busy, now: Date.now(), reacted })
   // Not a message that itself asked again (↻ ask again): its reply names the message it asked about.
   const lost = box.messages.filter(m => m.state === 'lost' && m.topicId && !askedAgain.has(m.turn.key) && !m.turn.text.includes('never reached the app'))
@@ -2064,7 +2075,8 @@ function paint() {
   const cw = W - cx
 
   if (S.picker) return paintPicker(W, H)
-  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running').flatMap(workingFor))
+  // Agents at work, and ones that just ended (Claude follows up on their results next).
+  const busy = new Set([...S.agents.values()].filter(a => a.state === 'running' || handingBack(a, Date.now(), settledFrom)).flatMap(workingFor))
   const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
   S.box = inbox(S.turns, S.kept.board, S.read, { isWorking: S.isWorking, busy, now: Date.now(), reacted })
   notifyNewQuestions()

@@ -198,6 +198,55 @@ describe('not started', () => {
       app.release('later-agent')
     }))
 
+  test('an agent just ended: its request is not "Not started" while Claude follows up on its result', () =>
+    withApp({ setup: widePanel, width: 160, height: 44 }, async app => {
+      await app.send('hand back please')
+      await app.waitFor(/◐ James \(implementer\) · Short job bg/)
+      app.release('bg-end')
+      // Ended, Claude idle, its follow-up not written yet: still worked on, no ▶ start.
+      let s = await app.waitFor(/✓ James \(implementer\) · Short job bg +done/)
+      await new Promise(r => setTimeout(r, 1500))
+      s = app.screen()
+      assert.ok(!s.includes('Not started'), 'not "Not started" in the gap')
+      assert.ok(!s.includes('▶ start'))
+      app.release('gap')
+      s = await app.waitFor('The short job is done.')
+      assert.ok(!s.includes('Not started'))
+      // The follow-up ended: the grace ends with it, and its tag settles the request.
+      await app.waitFor(/✓ hand back please/)
+    }))
+
+  test('an agent ended and no follow-up came: past the grace, its request is Not started again', () =>
+    withApp({ setup: widePanel, width: 160, height: 44, env: { CLUED_HANDBACK_MS: '2000' } }, async app => {
+      await app.send('hand back please')
+      await app.waitFor(/◐ James \(implementer\) · Short job bg/)
+      app.release('bg-end')
+      await app.waitFor(/✓ James \(implementer\) · Short job bg +done/)
+      assert.ok(!app.screen().includes('Not started'))
+      const s = await app.waitFor(/▷ Topic T1 +▶ start/)
+      assert.match(s, /Not started/)
+    }))
+
+  test('Claude asking you (its questions, or a permission) is "waiting on you", never working or quiet', () =>
+    withApp({ setup: widePanel, width: 160, height: 44, env: { CLUED_QUIET_MS: '1500' } }, async app => {
+      await app.send('offer choices')
+      let s = await app.waitFor(/✻ Claude \(lead\).* +waiting on you│/)
+      // Past the quiet time, and past when a tool's name would show: still waiting on you.
+      await new Promise(r => setTimeout(r, 2500))
+      s = app.screen()
+      assert.match(rowOf(s, '✻ Claude (lead)'), /waiting on you│/)
+      assert.doesNotMatch(s, /quiet \d|running AskUserQuestion/)
+      app.keys('Escape')
+      await app.waitFor('No answer:')
+      await app.send('need permission')
+      s = await app.waitFor(/✻ Claude \(lead\).* +waiting on you│/)
+      await new Promise(r => setTimeout(r, 2500))
+      assert.doesNotMatch(app.screen(), /quiet \d/)
+      app.keys('y')
+      s = await app.waitFor('Permission was allowed.')
+      assert.doesNotMatch(s, /waiting on you│/)
+    }))
+
   test('a running agent: the tool it waits on, then quiet once nothing comes; ▶ continue asks Claude to check on it', () =>
     withApp({ setup: ({ home }) => {
       mkdirSync(join(home, '.clued'), { recursive: true })

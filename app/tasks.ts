@@ -129,13 +129,22 @@ export function touch(a: Agent, at: number) {
  * How a running agent is doing: a tool it is waiting on (a long test run is not stuck), or the time
  * since its last step; past QUIET_MS with nothing running, quiet.
  */
-export type Pulse = { kind: 'tool'; tool: string; since: number } | { kind: 'step' | 'quiet'; since: number }
+export type Pulse = { kind: 'tool'; tool: string; since: number } | { kind: 'step' | 'quiet'; since: number } | { kind: 'you'; since: number }
 export function pulseOf(a: Agent, now: number): Pulse {
   const since = Math.max(a.lastStepAt ?? 0, a.startedAt)
   const newest = a.log.findLast(x => 'step' in x)
   if (newest && 'step' in newest && newest.step.result == null) return { kind: 'tool', tool: newest.step.tool.name, since: newest.step.at ?? since }
   return { kind: now - since >= QUIET_MS ? 'quiet' : 'step', since }
 }
+
+/**
+ * A background agent just ended: Claude Code hands its result to Claude, which follows up on it in a
+ * turn of its own. Until that turn ends (one that began after the agent ended, or in the same millisecond; `settledFrom` the start
+ * of the last turn that ended), or for HANDBACK_MS, its messages are still being worked on.
+ */
+export const HANDBACK_MS = Number(process.env.CLUED_HANDBACK_MS) || 60_000
+export const handingBack = (a: Agent, now: number, settledFrom: number) =>
+  a.isBackground && (a.state === 'done' || a.state === 'failed') && !!a.endedAt && now - a.endedAt < HANDBACK_MS && a.endedAt > settledFrom
 
 /** A running background agent that has gone quiet: Claude can check on it and send it a message. */
 export const isQuiet = (a: Agent, now: number) => a.state === 'running' && a.isBackground && !!a.taskId && pulseOf(a, now).kind === 'quiet'

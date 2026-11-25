@@ -10,7 +10,9 @@ describe('chat', () => {
       // The empty chat says hello.
       assert.match(app.screen(), /clued {2}on Claude Code/)
       await app.send('hello there')
-      const s = await app.waitFor('Echo: hello there')
+      // Settled: the answer in its bubble, and the message answered in the panel (a slow runner can
+      // paint the streamed words a frame before).
+      const s = await app.waitFor(s => s.includes('Echo: hello there') && /✓ hello there +↩/.test(s))
       assert.ok(rowOf(s, '╭─ ● new  ↩ “hello there”'), 'the reply quotes the message and is new')
       assert.match(rowOf(s, 'Your recent messages'), /\?  ⌕  1/)
       assert.match(s, /✓ hello there +↩ \d\d:\d\d/)
