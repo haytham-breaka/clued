@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in clued doesn't work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks for reporting. Before pasting logs or session lines, remove anything private: paths, email addresses, code you don't want public."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw. A screenshot of the terminal helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: "1. Start clued in an empty folder\n2. Send a message while Claude is working\n3. …"
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: OS, terminal, `node --version`, `claude --version`, and the clued commit (`git rev-parse --short HEAD`).
+      placeholder: "WSL Ubuntu 24.04, Windows Terminal, node 24.14, Claude Code 2.x, clued 6abe682"
+    validations:
+      required: true
+  - type: dropdown
+    id: plain
+    attributes:
+      label: Does it also happen in plain `claude`?
+      options: ["No, only in clued", "Yes, in both", "I haven't checked"]

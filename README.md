@@ -1,71 +1,162 @@
 # clued
 
-A different interface on top of a real Claude Code session. It is a Claude Code mod, not a separate client: it makes no API calls of its own. Claude Code still runs the harness, slash commands, the status line, `--resume`/`-c`, permissions and colours. clued adds:
+**Never lose track of what you asked Claude.** clued is a chat app for the terminal that runs on top of a real Claude Code session. Every message you send is tracked until it's answered, every reply says which of your messages it answers, and a side panel shows what Claude is working on and what is waiting on you. Send five things while Claude is busy, and you can still see, for each one, whether it was answered and where.
 
-- **Topics and threads.** Each message you send becomes a topic, marked ⏳ waiting on Claude, ✋ waiting on you, or ✓ done. Claude ends each reply with a small tag that names topics and sets their status, and the mod hides the tag from view. A thread holds 3 topics; a 4th forks a child thread, drawn under its parent.
-- **Main** shows every message. A message you send to Main is sorted by Claude into a thread active in the last 3 days, or into a new one. Threads are kept per project across sessions for 30 days.
-- **Side panel** shows the thread tree with ⏳/✋/✓ counts, topics in progress and notifications. Press a thread to view only it.
-- `/thread 2` shows only thread 2 and sends new messages there. `/thread main` shows everything again.
-- **Click to reply:** hover over any message and click `↩ reply`; your next message replies to it, in its thread, with that message quoted to Claude. Claude's messages also get 👍 👎 ❓ 👀 on hover (a second click takes a reaction back). A band above the prompt shows what you're replying to, with `✕ cancel`. Clicks and hover need Claude Code's fullscreen layout and mouse reporting in iTerm2.
-- `/reply 2 text` replies in thread 2 from the keyboard. `/reply 2` makes your next message the reply. Claude also gets the thread's name, its topics and its last message.
-- `/results` hides Claude's actions (tool calls and the narration between them) and keeps the results. Run it again to show them.
-- **Reply markers:** "↳ you replied in #2 …" above your replies, and "↳ Claude in #2 …" plus topic statuses above Claude's answers.
-- **Your reactions talk to Claude only when they mean something.**
-  - 👍 on a message that asked you something is a go-ahead, and Claude proceeds.
-  - 👎 makes Claude ask what to change; ❓ makes it explain again, more simply.
-  - Anything else (👍 on finished work, 🎉, 👀) starts no turn. Claude reads it with your next message and mentions it only if it matters.
-  - Use `/react 👍 [n]` from the keyboard, or the hover bar.
-- **Claude's reactions are rare**, with one meaning each: 👀 seen (a message you sent while it was busy), 👍 noted, ✅ done with nothing to add, 🎉 good news. It never reacts to a question or request, and the tool refuses other emoji, a second reaction on one message, or more than one reaction in your last 4 messages (👀 on a message sent mid-turn is exempt).
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node ≥ 22.18](https://img.shields.io/badge/node-%E2%89%A5%2022.18-brightgreen.svg)](#install)
+[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-informational.svg)](.claude-plugin/plugin.json)
+[![Runs on Claude Code](https://img.shields.io/badge/runs%20on-Claude%20Code-d97757.svg)](https://claude.com/claude-code)
 
-## The app (`clued`)
+clued makes no API calls of its own. Claude Code runs underneath, headless, with your own login: its tools, permissions, plugins, MCP servers, hooks, slash commands, status line and sessions are all still Claude Code's. clued draws the screen and keeps track of the conversation.
 
-`clued` is a chat app of its own, drawn entirely by clued, on top of a real Claude Code session that runs headless underneath (`claude -p --input-format stream-json --output-format stream-json`). Claude Code still runs the harness: tools, permissions, plugins, MCP, hooks, the session file and `--resume`. The app makes no API calls of its own.
+## Contents
 
-- Your messages in bubbles on the right; Claude's answers on the left, with Markdown drawn properly.
-- Every reply of Claude's quotes the message it answers (`↩ "…"`, click to go there). When it answers several messages at once, each gets its own bubble (Claude marks the parts with `<<reply T4>>` lines, which the app hides).
-- **Unread:** a reply you haven't seen has a magenta border and `● new`; it counts as read after 3 seconds on screen with the window focused. Ctrl+N, or `● N unread · next ▸`, goes through unread replies oldest first.
-- Claude's work between them folds into one line (`⚙ 8 steps · edited 3 files · ran 4 commands ▸ show`); click it, or Ctrl+O, to see each step. The `work` setting (panel, or `/work folded|edits|all`, kept per chat) shows file edits as diffs, or every step with its command and output. Click a step to open just that one.
-- `↩ reply` and 👍 👎 ❓ 👀 under every message (on hover); a reply bar on the input with ✕; quotes link both ways.
-- The panel on the left: **Unread** (a ✓ on each marks it read), **Waiting on you** (Claude's open questions), **Working** (Claude while it works; a click opens its live view), **Agents** (each agent Claude started, running or just finished, with the message it is on; a click opens its own view), **Your recent messages** (⏳ Claude on it, ✋ waiting on you, ✓ done; latest activity on top, ↩ replied or ↻ status changed at that time, and they hold still while the pointer is on the panel). A click on one of your messages jumps to it (its ⏳/✓ mark opens its whole chain); Alt+↑/↓ goes up and down the list, Alt+→ goes to the reply, Ctrl+F (or ⌕) searches them. Drag the divider to resize it, click `☰` to fold it to icons. The app has no threads: each message is a topic, which is all the inbox needs.
-- Your own status line command runs at the bottom, fed what Claude Code would feed it.
-- Keys: Enter sends, Alt+Enter new line, Esc cancels a reply or interrupts Claude, Ctrl+C clears or interrupts (twice to quit), PgUp/PgDn scroll, ↑/↓ move between the rows of a long message (from the top row, ↑ goes to your earlier messages), Ctrl+←/→ or Alt+←/→ jump words, Ctrl+V or Alt+V adds the image on the clipboard (dropping or pasting an image file's path adds that image), `/` opens the command menu.
-- `/clear` new session, `/resume` pick one, `/model <name>` switch model, `/results` hide steps, `/work` how much work to show, `/panel` fold the panel, `/exit`. Other slash commands go to Claude Code.
-- iTerm2: hold ⌥ (Option) while dragging to select text, since the app takes the mouse.
+- [Why clued](#why-clued)
+- [Install](#install)
+- [Usage](#usage)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Does it help? The evaluation](#does-it-help-the-evaluation)
+- [Contributing](#contributing)
+- [Licence](#licence)
 
-`clued-classic` is the earlier layout: Claude Code's own screen in tmux, with the threads panel beside it and the mod in `hooks/`.
+## Why clued
 
-## Run
+- **Nothing you ask gets lost.** In a plain terminal session, a question you typed while Claude was busy can be answered in the middle of a tool run, or not at all. clued gives every message a mark: ⏳ Claude is on it, ✋ waiting on you, ✓ done. A message whose reply never arrived says so, with a button to ask again.
+- **Every reply says what it answers.** A reply quotes the message, or each of the several messages, it answers. Click a quote to jump to it. From any message you can open its whole chain: the follow-ups, the corrections and every reply that touched it.
+- **You can type while Claude works.** Messages sent mid-task are delivered to the running turn, the way Claude Code does it, and each one is still tracked on its own.
+- **It's still Claude Code.** No second client, no API key, no separate bill. Your `CLAUDE.md`, settings, permissions and plugins apply as they always do, and every session can also be opened in `claude` itself.
+- **The overhead is measured.** About 9% more cost per session, for the instructions and the small tag on each reply. The numbers are [below](#does-it-help-the-evaluation).
 
-```sh
-ln -s "$PWD/bin/clued" ~/.local/bin/clued   # once, from the repo: any folder on your PATH works
+## Install
 
-clued              # new session in this folder
-clued -c           # continue this folder's last session
-clued --resume     # pick a session
-clued --model opus # any other flag goes to claude
+Requires:
+- [Claude Code](https://claude.com/claude-code), installed and logged in. `claude` must be on your PATH.
+- **Node 22.18 or later.** clued runs its TypeScript directly, with no build step and no dependencies.
+- macOS, Linux or Windows through WSL. The launcher is a bash script. It's tested in iTerm2 and in Windows Terminal with WSL.
+
+```bash
+git clone https://github.com/haytham-breaka/clued.git ~/src/clued
+ln -s ~/src/clued/bin/clued ~/.local/bin/clued   # or any folder on your PATH
 ```
 
-Like `claude`, it works on the folder you start it in: sessions are Claude Code's own, per folder. The app keeps its own small state (read marks, links, panel width, pasted images) in `~/.clued/`.
+There is nothing to `npm install`. To update, run `git pull`.
 
-### The classic layout
+## Usage
 
-`bin/clued-classic` opens Claude Code's own screen in tmux, with the threads panel on the left and the real Claude Code on the right, with its status line, commands, colours and resume unchanged. Every flag passes through to `claude`.
-
-- Click `☰ Threads` (top left) to fold the panel to a narrow strip with ⏳/✋ counts, and click `☰` to open it again.
-- Click a thread to show only it; new messages go there. Click `↩` on a thread to reply in it. Click `all activity` / `results only` to hide Claude's actions.
-- After a click, the keyboard goes back to Claude Code.
-
-The window is tmux (its own server, `-L clued`, with every bar hidden; `bin/tmux.conf`). The two sides talk through files in `~/.clued/run/<id>/`: the mod in Claude Code writes `state.json`, and the panel (`panel/main.ts`, plain Node, no dependencies) appends clicks to `commands.jsonl`. `CLUED_PLAIN=1 clued-classic` runs Claude Code alone, with the mod's own panel on the right.
-
-## Develop
-
-```sh
-claude plugin validate .   # what the engine would load or refuse
-claude plugin test .       # tests/*.test.tsx
+```bash
+cd ~/code/my-project
+clued                  # new session in this folder
+clued -c               # continue this folder's last session
+clued --resume         # pick a session
+clued --model opus     # any other flag goes to claude
 ```
 
-Before your first commit, turn on the privacy check: `git config core.hooksPath .githooks`. It stops a commit or push that holds an email address, a home-folder path, a token or key, a log or a raw eval transcript (`scripts/check-private.sh`, or `--all` for every tracked file).
+Like `claude`, it works on the folder you start it in, and sessions are Claude Code's own, kept per folder. `/reload` restarts the app on the same session, for example after a `git pull`.
 
-The engine reloads the mod when you save `hooks/register.tsx` during a `clued-classic` session. The API types are written to `.claude-plugin/types/` the first time the mod loads.
+### The screen
 
-Spec and open questions: [docs/SPEC.md](docs/SPEC.md).
+Your messages are on the right and Claude's replies on the left, with Markdown drawn properly. Claude's work between replies folds into one line (`⚙ 8 steps · edited 3 files · ran 4 commands ▸ show`); click it, or press Ctrl+O, to see each step.
+
+The panel on the left has these sections:
+- **Unread / Read:** replies you haven't seen yet, and the ones you have. A reply counts as read after 3 seconds on screen with the window focused.
+- **Waiting on you:** Claude's open questions to you.
+- **Working:** Claude, while it works. Click it to open a live view of its stream.
+- **Agents:** each agent Claude started, running or just finished, with the message it is working on. Click one to open its own view.
+- **Your recent messages:** each with its mark, latest activity first. Press `?` for what the marks mean and `⌕` to search.
+
+Drag the divider to resize the panel, and click `☰` to fold it to icons. Your own status line command runs at the bottom, fed what Claude Code would feed it.
+
+### Keys
+
+| Key | Does |
+|---|---|
+| Enter / Alt+Enter | send / new line |
+| Esc | cancel a reply, or interrupt Claude |
+| Ctrl+C | clear the input or interrupt; twice to quit |
+| Alt+↑ / Alt+↓ | go through your recent messages; the chat scrolls to each |
+| Alt+→ / Alt+← | from a message to its reply, and back |
+| Ctrl+F | search your messages |
+| Ctrl+N | next unread reply |
+| Ctrl+O | show or hide Claude's steps |
+| ↑ / ↓ | move between rows of a long message; from the top row, earlier messages |
+| Ctrl+← / Ctrl+→ | jump words |
+| Ctrl+V or Alt+V | add the image on the clipboard |
+| PgUp / PgDn | scroll |
+
+On iTerm2, hold ⌥ (Option) while dragging to select text, since the app takes the mouse.
+
+### Commands
+
+`/clear` new session · `/resume` pick one · `/model <name>` switch model · `/results` hide Claude's steps and keep its results · `/work folded|edits|all` how much of Claude's work to show · `/panel` fold the panel · `/reload` restart on this session · `/exit`. Every other slash command goes to Claude Code as usual.
+
+## Features
+
+### Replies that say what they answer
+
+When one reply answers several messages, it splits into one bubble per message, each quoting what it answers. When a message asks several things, each question can be answered on its own: the quote reads `↩ 2 questions`. If you send a follow-up without clicking reply, it's linked to the earlier message automatically, shown as `↩ about: …`.
+
+### Reply to anything, react to anything
+
+Hover over a message for `↩ reply`, `copy` and 👍 👎 ❓ 👀. A reply quotes the message to Claude. A 👍 on a question is a go-ahead, so Claude proceeds. 👎 asks Claude what to change, and ❓ asks it to explain again, more simply. Other reactions start no turn.
+
+Claude reacts too, only where it means something: 👀 seen (for a message sent while it was busy), 👍 noted, ✅ done with nothing to add, 🎉 good news.
+
+### Chains
+
+The `⛓` button on a message opens everything connected to it: the replies, your follow-ups, the corrections, and the replies to those.
+
+### Live views of Claude and its agents
+
+Click **Working** or any agent in the panel for its own view: each step as it happens, with commands, output and diffs. Press Esc to go back to the chat.
+
+### Messages that never got an answer
+
+Sometimes a reply never arrives, for example when it was written between tool calls and Claude Code didn't keep it. Such a message is marked `⚠ reply lost` instead of looking answered, and `↻ ask again` sends it again.
+
+### Images
+
+Ctrl+V adds the image on the clipboard. This works with the Windows clipboard from WSL, with macOS, and with Wayland or X11. Pasting or dropping an image file's path attaches that image.
+
+### Permissions
+
+When Claude Code needs permission for a tool, clued asks you in the app, the way `claude` would. Your allow and deny rules apply as usual.
+
+## How it works
+
+clued starts `claude -p --input-format stream-json --output-format stream-json` and talks to it over stdin and stdout:
+
+- **The guide:** a short instruction, appended to Claude Code's system prompt, asks Claude to end each reply with one hidden tag line. The tag says which of your messages the reply is about and what their status is now: on Claude, on you, or done.
+- **The note:** each message you send carries a one-line hidden note with its id (`T12`), the messages still open, and the questions it asks when there are several.
+- **Splitting:** when a reply answers several messages, Claude marks each part with `<<reply T12>>` lines. The app hides these and draws one bubble per part.
+- **History:** comes from Claude Code's own session file, so `--resume` and `-c` work the same way they do in `claude`.
+- **What clued keeps:** read marks, links, panel width, a send log and pasted images, in `~/.clued/`.
+
+Everything else, the model, tools, permissions, billing and the session itself, is Claude Code's.
+
+The older layout, Claude Code's own screen in tmux with a threads panel beside it, is still in the repo as `bin/clued-classic`: see [docs/classic.md](docs/classic.md).
+
+## Does it help? The evaluation
+
+clued and plain Claude Code were given the same 13 scripted conversations, with Sonnet and 5 runs each, 130 runs in all. The conversations included many messages sent mid-task, corrections, numbered questions, and references like "the second thing I asked". A blind judge scored every reply.
+
+| per session | clued | plain Claude Code |
+|---|---|---|
+| Cost | $0.080 | $0.073 (clued +9%) |
+| Messages sent mid-task that were answered | 56 of 56 | 56 of 58 |
+| Project checks passed | 100% | 99% |
+| Judge: correct, and answers given to the wrong message | 100%, none | 100%, none |
+
+- **What clued adds:** you can see, for each message, whether it was answered and where.
+- **What it doesn't add:** Claude's answers aren't better.
+- **What it costs:** about 1,100 tokens of instructions per session, plus a short tag on each reply.
+
+The full method and results are in [eval/RESULTS.md](eval/RESULTS.md), and the runner is in [eval/](eval/). In the eval files, clued appears under its earlier name, threadline.
+
+## Contributing
+
+clued takes contributions through **issues only**: bug reports, ideas and questions are all welcome. Pull requests from outside the project aren't accepted. [CONTRIBUTING.md](CONTRIBUTING.md) explains why, what makes a useful bug report, and how to run it from a clone.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE). clued has no dependencies beyond Node and Claude Code.

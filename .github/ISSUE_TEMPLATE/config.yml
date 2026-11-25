@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A problem in Claude Code itself
+    url: https://github.com/anthropics/claude-code/issues
+    about: If the same thing happens in plain `claude`, it belongs to Claude Code.

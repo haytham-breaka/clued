@@ -1,0 +1,16 @@
+name: Idea
+description: Something clued should do, or do differently.
+labels: [idea]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's in the way
+      description: What you were trying to do, and what made it harder than it should be.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you imagine it working. A rough description is fine, and so is "I don't know, but this is annoying".
