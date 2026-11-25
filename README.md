@@ -18,7 +18,7 @@ Underneath it's the same Claude Code, run headless: the same account, tools, per
 
 <p align="center"><img src="docs/demo.gif" width="600" alt="clued in a real session: a message sent while Claude works waits in queue, then gets its own answer; Claude asks with a card you click; the Overview lists unread replies and jumps to them; a request's chain; ☆ save a reply and come back to it from ★ Saved; a background agent's live steps"></p>
 
-**[▶ Watch the 82-second narrated walkthrough](docs/demo.mp4)**
+<p align="center"><b><a href="docs/demo.mp4">▶ Watch the 82-second narrated walkthrough</a></b></p>
 
 ## Why clued
 
