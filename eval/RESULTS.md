@@ -230,7 +230,7 @@ The goal: clued at least ties plain Claude Code on every measure, and is clearly
 
 **What changed in the app, one PR each, in this order.**
 1. **#21, panel.** The panel trusts the tag's "me" (waiting on you), even without a question mark. A `same_as` follow-up marked done no longer closes the question of the topic it merged into. A made-up id such as `T1-discount` maps to its real topic. A message the app guessed was your answer goes back to waiting if Claude's next tag ignores it. ✋ shows only on the message whose reply asked.
-2. **#25, chat.** In a reply of several parts, a short part (one or two lines, answering one message) has no box. It is one `↩ “Which port…”` line with the answer under it, so a burst of answers fits on one screen.
+2. **#25, chat.** In a reply of several parts, a short part (one or two lines, answering one message) has no box. It is one `↩ “Which port…”` line with the answer under it, so a burst of answers fits on one screen. *Undone later (#37): the owner found the boxless parts read as random text, so every part has its bubble again. The scores above were measured with it.*
 3. **#29, panel.** Under each answered message in Your recent messages, a dim `→` row gives the answer's gist, room allowing. For a question, the words that restate it go (`→ 8137.`). For a request, the thing it changed stays as a label (`→ workers: now 6, per your correction.`).
 4. **#30, app.** Replies Claude's tag settled but never wrote are asked for again at once, in one message. See "Why the burst set was losing" below.
 5. **#31, app.** A reply part shows, and answers its message, as soon as its text block is complete. Before, it waited for Claude's next tool call. While one of your messages waited in queue, the chat hid the part too.
