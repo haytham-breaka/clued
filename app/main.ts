@@ -10,7 +10,7 @@
 // plugins, MCP and the session file are all Claude Code's. This file only draws and takes input.
 
 import './migrate.ts'
-import { execFile, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import {
@@ -40,7 +40,7 @@ import { listSessions, loadHistory, loadKept, newTurn, saveKept } from './sessio
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
-import { C, cells, charCells, clip, clipLine, lineCells, pad, sgr } from './text.ts'
+import { C, cellText, cells, charCells, clip, clipLine, lineCells, markCells, pad, sgr } from './text.ts'
 import type { Line, Span } from './text.ts'
 
 // ---- Options ---------------------------------------------------------------------
@@ -156,6 +156,13 @@ const S = {
   chatLeft: 0,
   chatTop: 0,
   chatRows: 0,
+  /** The chat's lines as last drawn, and where the input box's text rows sit on screen: for selecting text. */
+  chatLines: [] as Line[],
+  inputGeo: null as { row: number; col: number; first: number; count: number; inner: number } | null,
+  /** Text selected with the mouse (copied when you let go), and the press that may start one. */
+  sel: null as Sel | null,
+  press: null as { x: number; y: number; area: 'chat' | 'input'; isMoved: boolean } | null,
+  lastClick: { x: 0, y: 0, at: 0 },
   /** Reply parts read, when each unread part on screen came into view, and whether the window has focus. */
   read: new Set<string>(),
   /**
@@ -1059,6 +1066,144 @@ const panelW = () => (!panelShown() ? 0 : S.isFolded ? FOLDED : Math.min(S.panel
 const chatWidth = () => width() - (panelShown() ? panelW() + 1 : 0)
 
 type Region = { row: number; x0: number; x1: number; action: () => void }
+
+// ---- Selecting text ------------------------------------------------------------------
+// A drag in the chat or the input box selects text, and letting go copies it. A press that
+// doesn't move stays a click; a double-click selects a word.
+
+type ChatPos = { line: number; col: number }
+type Sel = { area: 'chat'; a: ChatPos; b: ChatPos } | { area: 'input'; a: number; b: number }
+
+const IS_WSL = !!process.env.WSL_DISTRO_NAME || /microsoft/i.test((() => { try { return readFileSync('/proc/version', 'utf8') } catch { return '' } })())
+
+/** The chat line and cell under the pointer; with `clamp`, the nearest one (while dragging past an edge). */
+function chatPos(x: number, y: number, clamp = false): ChatPos | undefined {
+  const top = S.chatTop + 1
+  const bottom = S.chatTop + S.chatRows
+  if (!clamp && (y < top || y > bottom || x <= S.chatLeft || !S.chatLines.length)) return undefined
+  const row = Math.max(top, Math.min(bottom, y))
+  const line = Math.max(0, Math.min(S.chatLines.length - 1, S.chatOrigin + (row - 1 - S.chatTop)))
+  return { line, col: Math.max(0, x - (S.chatLeft + 2)) }
+}
+
+/** The place in the input text under the pointer; with `clamp`, the nearest one. */
+function inputPos(x: number, y: number, clamp = false): number | undefined {
+  const g = S.inputGeo
+  if (!g || !S.text) return undefined
+  if (!clamp && (y < g.row || y >= g.row + g.count || x < g.col - 1 || x > g.col + g.inner)) return undefined
+  const span = rowSpans(g.inner)[g.first + Math.max(0, Math.min(g.count - 1, y - g.row))]
+  if (!span) return undefined
+  const col = x - g.col
+  let i = span.start
+  let cw = 0
+  for (const ch of span.chars) {
+    const c = charCells(ch)
+    if (cw + c > col) break
+    cw += c
+    i += ch.length
+  }
+  return i
+}
+
+const ordered = (a: ChatPos, b: ChatPos): [ChatPos, ChatPos] => (a.line < b.line || (a.line === b.line && a.col <= b.col) ? [a, b] : [b, a])
+
+/** The cells a chat line has selected, as [from, to). */
+function selCells(line: number): [number, number] | undefined {
+  if (S.sel?.area !== 'chat') return undefined
+  const [p, q] = ordered(S.sel.a, S.sel.b)
+  if (line < p.line || line > q.line) return undefined
+  return [line === p.line ? p.col : 0, line === q.line ? q.col + 1 : Infinity]
+}
+
+/** The selected text. From the chat, without bubble borders and with the common indent removed. */
+function selectedText(): string {
+  const sel = S.sel
+  if (!sel) return ''
+  if (sel.area === 'input') return S.text.slice(Math.min(sel.a, sel.b), Math.max(sel.a, sel.b))
+  const [p, q] = ordered(sel.a, sel.b)
+  let lines: string[] = []
+  for (let i = p.line; i <= q.line; i++) {
+    const [from, to] = selCells(i)!
+    lines.push(cellText(S.chatLines[i] ?? [], from, to))
+  }
+  if (lines.length > 1 || /[│┃▎╭╮╰╯]/.test(lines[0] ?? '')) {
+    lines = lines
+      .map(l => l.replace(/^\s*[│┃▎]\s?/, '').replace(/\s?[│┃]\s*$/, '').replace(/\s+$/, ''))
+      .filter(l => !l || !(/^[\s─╭╮╰╯]*$/.test(l) || /^\s*[╭╰]─/.test(l)))
+    // The common indent, not counting a first line that starts mid-row.
+    const rest = p.col > 0 ? lines.slice(1) : lines
+    const indent = Math.min(...rest.filter(l => l.trim()).map(l => l.match(/^ */)![0].length))
+    if (Number.isFinite(indent)) lines = lines.map((l, i) => (i === 0 && p.col > 0 ? l : l.slice(indent)))
+  }
+  while (lines.length && !lines[0]!.trim()) lines.shift()
+  while (lines.length && !lines.at(-1)!.trim()) lines.pop()
+  return lines.join('\n')
+}
+
+/** Selects the word (or path, or URL) under the pointer. */
+function selectWord(area: 'chat' | 'input', x: number, y: number) {
+  const isWord = (ch: string) => /[\p{L}\p{N}_\-./:@~#%+=?&]/u.test(ch)
+  if (area === 'input') {
+    const i = inputPos(x, y)
+    if (i == null) return
+    let a = i
+    let b = i
+    while (a > 0 && isWord(S.text[a - 1]!)) a--
+    while (b < S.text.length && isWord(S.text[b]!)) b++
+    if (b > a) S.sel = { area: 'input', a, b }
+    return
+  }
+  const at = chatPos(x, y)
+  if (!at) return
+  const chars: { ch: string; col: number }[] = []
+  let col = 0
+  for (const sp of S.chatLines[at.line] ?? []) for (const ch of sp.text) { chars.push({ ch, col }); col += charCells(ch) }
+  let k = chars.findIndex((c, j) => c.col <= at.col && (chars[j + 1]?.col ?? Infinity) > at.col)
+  if (k < 0 || !isWord(chars[k]!.ch)) return
+  let a = k
+  while (a > 0 && isWord(chars[a - 1]!.ch)) a--
+  while (k + 1 < chars.length && isWord(chars[k + 1]!.ch)) k++
+  S.sel = { area: 'chat', a: { line: at.line, col: chars[a]!.col }, b: { line: at.line, col: chars[k]!.col + charCells(chars[k]!.ch) - 1 } }
+}
+
+/** Removes the selected input text; true when there was some. */
+function cutSelection(): boolean {
+  if (S.sel?.area !== 'input') return false
+  const lo = Math.min(S.sel.a, S.sel.b)
+  S.text = S.text.slice(0, lo) + S.text.slice(Math.max(S.sel.a, S.sel.b))
+  S.cursor = lo
+  S.sel = null
+  return true
+}
+
+/**
+ * Puts text on the system clipboard. OSC 52 asks the terminal (Windows Terminal, kitty, WezTerm; iTerm2 only
+ * when allowed in its settings), and the system's own tool does it too: PowerShell from WSL, pbcopy, wl-copy or xclip.
+ */
+function copyText(text: string, note = 'Copied.') {
+  if (!text) return
+  const b64 = Buffer.from(text, 'utf8').toString('base64')
+  out.write(`\x1b]52;c;${b64}\x07`)
+  const pipe = (cmd: string, args: string[]) => {
+    try {
+      const p = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'] })
+      p.on('error', () => {})
+      p.stdin.on('error', () => {})
+      p.stdin.end(text)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // CLUED_CLIPBOARD=osc52 leaves it to the terminal alone.
+  if (process.env.CLUED_CLIPBOARD === 'osc52') {
+  } else if (IS_WSL) {
+    if (b64.length < 24000) execFile('powershell.exe', ['-NoProfile', '-Command', `Set-Clipboard -Value ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}')))`], () => {})
+  } else if (process.platform === 'darwin') pipe('pbcopy', [])
+  else if (process.env.WAYLAND_DISPLAY) pipe('wl-copy', [])
+  else if (process.env.DISPLAY) pipe('xclip', ['-selection', 'clipboard'])
+  toast(note)
+}
 let regions: Region[] = []
 
 /** Input lines: the text cut into rows of `w` cells, and where the cursor sits. */
@@ -1158,7 +1303,7 @@ function clipboardImage(): string | undefined {
   mkdirSync(dir, { recursive: true })
   const file = `${dir}/${Date.now()}.png`
   const run = (cmd: string, args: string[], opts: { input?: string } = {}) => spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000, ...opts })
-  const isWsl = !!process.env.WSL_DISTRO_NAME || /microsoft/i.test((() => { try { return readFileSync('/proc/version', 'utf8') } catch { return '' } })())
+  const isWsl = IS_WSL
   if (isWsl || process.platform === 'win32') {
     const ps = 'Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $i=[Windows.Forms.Clipboard]::GetImage(); if ($i) { $p=[IO.Path]::Combine([IO.Path]::GetTempPath(), "clued-clip.png"); $i.Save($p, [Drawing.Imaging.ImageFormat]::Png); Write-Output $p }'
     const r = run(isWsl ? 'powershell.exe' : 'powershell', ['-NoProfile', '-STA', '-Command', ps])
@@ -1209,7 +1354,7 @@ function menuItems(): string[] {
   return all.filter(c => c.startsWith(m[1]!)).sort((a, b) => a.length - b.length).slice(0, 8)
 }
 
-function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: number } } {
+function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: number }; textRow?: number; first?: number; count?: number; inner?: number } {
   const L: Line[] = []
   // Permission prompt
   const perm = S.permissions[0]
@@ -1262,13 +1407,34 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search ? C.yellow : req ? C.blue : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
   const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const spans = S.sel?.area === 'input' ? rowSpans(inner) : []
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
-    L.push([{ text: '│ ', style: border }, { text, style: !S.text ? { fg: C.faint } : {} }, pad(inner - cells(text)), { text: ' │', style: border }])
+    let body: Line = [{ text, style: !S.text ? { fg: C.faint } : {} }]
+    // The selected part of this row, in cells.
+    const span = spans[first + i]
+    if (span && S.sel?.area === 'input') {
+      const lo = Math.min(S.sel.a, S.sel.b)
+      const hi = Math.max(S.sel.a, S.sel.b)
+      let idx = span.start
+      let at = 0
+      let from = -1
+      let to = -1
+      for (const ch of span.chars) {
+        if (idx >= lo && idx < hi) {
+          if (from < 0) from = at
+          to = at + charCells(ch)
+        }
+        at += charCells(ch)
+        idx += ch.length
+      }
+      if (from >= 0) body = markCells(body, from, to)
+    }
+    L.push([{ text: '│ ', style: border }, ...body, pad(inner - cells(text)), { text: ' │', style: border }])
   })
   L.push([{ text: '╰' + '─'.repeat(w - 2) + '╯', style: border }])
   const cursor = { row: top + (row - first), col: 2 + col }
-  return { lines: L, cursor }
+  return { lines: L, cursor, textRow: top, first, count: shown.length, inner }
 }
 
 // ---- Drawing -----------------------------------------------------------------------
@@ -1414,11 +1580,7 @@ function paint() {
       replying: new Set((S.replyTo?.quotes ?? []).map(q => q.anchor ?? '')),
       react,
       jump,
-      copy: text => {
-        // OSC 52: the terminal puts it on the system clipboard (iTerm2, Windows Terminal, kitty, WezTerm...).
-        out.write(`\x1b]52;c;${Buffer.from(text, 'utf8').toString('base64')}\x07`)
-        toast('Copied.')
-      },
+      copy: text => copyText(text),
       hover: S.hover,
       unread: new Set(S.box.unread.map(p => p.id)),
       waiting: new Set(S.box.waiting.map(p => p.id)),
@@ -1449,6 +1611,7 @@ function paint() {
     : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2)
   S.anchors = anchors
   S.owners = owners
+  S.chatLines = chat
   S.chatLeft = cx
   S.chatTotal = chat.length
   S.chatRows = chatRows
@@ -1487,7 +1650,11 @@ function paint() {
     hello.forEach((l, i) => (frame[i + 1 + top] += ' ' + lineText(l, cw - 1, i + 2 + top, cx + 1)))
     for (let r = 0; r < chatRows; r++) if (r < 1 || r > 3) frame[r + top] += ' '.repeat(cw)
   } else
-    for (let r = 0; r < chatRows; r++) frame[r + top] += ' ' + lineText(r >= lead ? view[r - lead]! : [], cw - 1, r + top + 1, cx + 1)
+    for (let r = 0; r < chatRows; r++) {
+      const line = r >= lead ? view[r - lead]! : []
+      const marked = r >= lead ? selCells(viewStart + r - lead) : undefined
+      frame[r + top] += ' ' + lineText(marked ? markCells(line, marked[0], marked[1]) : line, cw - 1, r + top + 1, cx + 1)
+    }
   // A scrolled-up chat says so.
   if (S.chatScroll > 0) {
     const tag = ` ↓ ${S.chatScroll} more lines `
@@ -1495,6 +1662,7 @@ function paint() {
     overlays.push({ row: chatRows + top, col: cx + cw - cells(tag) + 1, text: `${sgr({ inverse: true, fg: C.cyan })}${tag}${sgr()}` })
   }
   bottom.lines.forEach((l, i) => (frame[top + chatRows + i] += ' ' + lineText(l, cw - 1, top + chatRows + i + 1, cx + 1)))
+  S.inputGeo = bottom.textRow == null ? null : { row: top + chatRows + bottom.textRow + 1, col: cx + 4, first: bottom.first!, count: bottom.count!, inner: bottom.inner! }
   status.forEach((s, i) => (frame[top + chatRows + bottom.lines.length + i] += `${s}${sgr()}\x1b[K`))
 
   let buf = '\x1b[?2026h\x1b[?25l\x1b[H'
@@ -1549,6 +1717,7 @@ function answerPermission(allow: boolean) {
 }
 
 function insert(s: string) {
+  cutSelection()
   S.text = S.text.slice(0, S.cursor) + s + S.text.slice(S.cursor)
   S.cursor += s.length
   S.historyAt = -1
@@ -1641,6 +1810,22 @@ function key(k: string) {
     return
   }
   S.quitArmed = k === '\x03' ? S.quitArmed : false
+  // With text selected: Ctrl+C copies it, Esc drops it, typing or Backspace replaces it in the input box.
+  if (S.sel) {
+    if (k === '\x03') {
+      copyText(selectedText())
+      S.sel = null
+      return draw()
+    }
+    if (k === '\x1b') {
+      S.sel = null
+      return draw()
+    }
+    if (k === '\x7f' || k === '\b' || k === '\x1b[3~') {
+      if (cutSelection()) return draw()
+    }
+    if (S.sel?.area !== 'input' || k.startsWith('\x1b') || k < ' ') S.sel = null
+  }
   if (S.picker) {
     const p = S.picker
     if (k === '\x1b[A') p.at = Math.max(0, p.at - 1)
@@ -1897,6 +2082,63 @@ function mouse(b: number, x: number, y: number, isPress: boolean) {
   }
   if (b === 67 || b === 69) {
     S.hscroll += 4
+    return draw()
+  }
+  // In the chat or the input box a press may start a selection, so its click happens on release.
+  if (b === 0 && isPress) {
+    const area = chatPos(x, y) ? 'chat' : inputPos(x, y) != null ? 'input' : undefined
+    if (area) {
+      S.press = { x, y, area, isMoved: false }
+      if (S.sel) {
+        S.sel = null
+        draw()
+      }
+      return
+    }
+  }
+  if (S.press && b === 32) {
+    const p = S.press
+    if (!p.isMoved && x === p.x && y === p.y) return
+    p.isMoved = true
+    if (p.area === 'chat') {
+      // Dragging past the top or bottom scrolls the chat.
+      if (y <= S.chatTop) S.chatScroll = Math.min(S.chatScroll + 1, Math.max(0, S.chatLines.length - S.chatRows))
+      else if (y > S.chatTop + S.chatRows) S.chatScroll = Math.max(0, S.chatScroll - 1)
+      const a = S.sel?.area === 'chat' ? S.sel.a : chatPos(p.x, p.y, true)!
+      S.sel = { area: 'chat', a, b: chatPos(x, y, true)! }
+    } else {
+      const a = S.sel?.area === 'input' ? S.sel.a : inputPos(p.x, p.y, true)
+      let c = inputPos(x, y, true)
+      // Like the chat, the character under the pointer is included.
+      if (a != null && c != null && c >= a && c < S.text.length) c += (S.text.codePointAt(c) ?? 0) > 0xffff ? 2 : 1
+      if (a != null && c != null) S.sel = { area: 'input', a, b: c }
+    }
+    return draw()
+  }
+  if (S.press && b === 0 && !isPress) {
+    const p = S.press
+    S.press = null
+    if (p.isMoved) {
+      const text = selectedText()
+      if (text) copyText(text, `Copied ${[...text].length} characters.`)
+      else S.sel = null
+      return draw()
+    }
+    const now = Date.now()
+    const isDouble = now - S.lastClick.at < 400 && Math.abs(S.lastClick.x - x) <= 1 && S.lastClick.y === y
+    S.lastClick = { x, y, at: isDouble ? 0 : now }
+    if (isDouble) {
+      selectWord(p.area, x, y)
+      const text = selectedText()
+      if (text) copyText(text, `Copied “${preview(text, 30)}”.`)
+      return draw()
+    }
+    if (p.area === 'input') {
+      const i = inputPos(x, y)
+      if (i != null) S.cursor = i
+    }
+    const hit = regions.find(r => r.row === y && x >= r.x0 && x <= r.x1)
+    if (hit) hit.action()
     return draw()
   }
   if (b !== 0 || !isPress) return

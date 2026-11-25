@@ -3,7 +3,7 @@
 
 import { firstLine, stripTag } from '../hooks/model.ts'
 import { markdown } from './markdown.ts'
-import { preview, questionsOf, stripMarks } from './inbox.ts'
+import { preview, questionsOf, splitAnswer, stripMarks } from './inbox.ts'
 import { lineDiff } from './diff.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
 import type { Agent } from './panel.ts'
@@ -514,8 +514,27 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     }
     // ---- While working: Claude's latest words, kept on screen as a soft note (never a bubble that
     // vanishes when a tool call turns out to follow them).
-    if (working && !notYet) {
-      const note = stripMarks(stripTag(turn.live || turn.pending || turn.steps.at(-1)?.said || ''))
+    // Its words since the last step are the reply it is writing (unless another step follows):
+    // drawn as it streams, one bubble per part, each quoting the message it answers.
+    const writing = working && !notYet ? [turn.pending, turn.live].filter(Boolean).join('\n\n').replace(/\n?<<[^>\n]*$/, '') : ''
+    const liveParts = stripTag(writing).trim() ? splitAnswer(writing, turn.topicId ? [turn.topicId] : []) : []
+    if (liveParts.length) {
+      liveParts.forEach((part, i) => {
+        if (i) out.push([])
+        const body = markdown(part.text, claudeMax, ctx.copy)
+        // A caret at the end of the part being written.
+        if (i === liveParts.length - 1) {
+          const last = body.at(-1)
+          if (last && lineCells(last) < claudeMax) last.push({ text: '▍', style: { fg: C.cyan } })
+          else body.push([{ text: '▍', style: { fg: C.cyan } }])
+        }
+        const m = part.to.map(id => ctx.messageOf(id, turn)).find((x): x is Turn => !!x)
+        const tag: Span | undefined = m ? { text: clip(`↩ “${preview(m.text, 40)}”`, claudeMax - 4), style: { fg: C.cyan }, action: () => ctx.jump(`me:${m.key}`) } : undefined
+        const inner = Math.min(claudeMax, Math.max(snug(body, claudeMax), tag ? cells(tag.text) + 1 : 0))
+        out.push(...bubble(body, inner, IN, { fg: C.faint }, undefined, undefined, tag))
+      })
+    } else if (working && !notYet) {
+      const note = stripMarks(stripTag(turn.steps.at(-1)?.said || ''))
       if (note) {
         const rows = wrap([{ text: note.replace(/\s+/g, ' '), style: { fg: C.gray, italic: true } }], Math.min(claudeMax, width - IN - 4))
         for (const l of rows.slice(-3)) out.push([pad(IN), { text: '▎ ', style: { fg: C.faint } }, ...l])

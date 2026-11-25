@@ -171,3 +171,39 @@ export function wrap(spans: Span[], width: number, indent: Span[] = []): Line[] 
   if (line.length > indent.length || lines.length === 0) flush()
   return lines
 }
+
+/** The line with its cells from `from` up to (not including) `to` drawn in reverse: a selection. */
+export function markCells(line: Line, from: number, to: number): Line {
+  if (to <= from) return line
+  const out: Line = []
+  let at = 0
+  for (const sp of line) {
+    let cur = ''
+    let isCur: boolean | undefined
+    const flush = () => {
+      if (cur) out.push({ ...sp, text: cur, style: isCur ? { ...sp.style, inverse: !sp.style?.inverse } : sp.style })
+      cur = ''
+    }
+    for (const ch of sp.text) {
+      const isSel = at >= from && at < to
+      if (isCur !== undefined && isSel !== isCur) flush()
+      isCur = isSel
+      cur += ch
+      at += charCells(ch)
+    }
+    flush()
+  }
+  return out
+}
+
+/** The characters in a line's cells from `from` up to (not including) `to`. */
+export function cellText(line: Line, from: number, to: number): string {
+  let s = ''
+  let at = 0
+  for (const sp of line)
+    for (const ch of sp.text) {
+      if (at >= from && at < to) s += ch
+      at += charCells(ch)
+    }
+  return s
+}

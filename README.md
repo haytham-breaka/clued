@@ -56,7 +56,7 @@ Like `claude`, it works on the folder you start it in, and sessions are Claude C
 
 ### The screen
 
-Your messages are on the right and Claude's replies on the left, with Markdown drawn properly. Claude's work between replies folds into one line (`⚙ 8 steps · edited 3 files · ran 4 commands ▸ show`); click it, or press Ctrl+O, to see each step.
+Your messages are on the right and Claude's replies on the left, with Markdown drawn properly. A reply streams into its bubble as Claude writes it, and each part shows which message it answers from its first words. Claude's work between replies folds into one line (`⚙ 8 steps · edited 3 files · ran 4 commands ▸ show`); click it, or press Ctrl+O, to see each step.
 
 The panel on the left has these sections:
 - **Unread / Read:** replies you haven't seen yet, and the ones you have. A reply counts as read after 3 seconds on screen with the window focused.
@@ -84,7 +84,7 @@ Drag the divider to resize the panel, and click `☰` to fold it to icons. Your 
 | Ctrl+V or Alt+V | add the image on the clipboard |
 | PgUp / PgDn | scroll |
 
-On iTerm2, hold ⌥ (Option) while dragging to select text, since the app takes the mouse.
+**Selecting text:** drag over the chat or the input box to select text; it's copied when you let go. A double-click selects a word, a path or a URL. With text selected, Ctrl+C copies it again and Esc drops it. In the input box, typing or Backspace replaces the selection. To select across the panel too, hold ⌥ (Option) in iTerm2 or Shift in Windows Terminal: the terminal then selects instead of the app.
 
 ### Commands
 
