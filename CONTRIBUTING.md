@@ -16,7 +16,7 @@ You're free to fork it. The [MIT licence](LICENSE) allows that, and you can chan
 - **Where:** your OS, your terminal (iTerm2, Windows Terminal with WSL, …), `node --version`, `claude --version`, and the clued commit (`git -C <clone> rev-parse --short HEAD`).
 - **Whether it's clued or Claude Code:** does the same thing happen in plain `claude`? If it does, it belongs to [Claude Code's issues](https://github.com/anthropics/claude-code/issues).
 
-**Check what you paste.** Session files and logs can hold your file paths, your email address, project code and anything you or Claude typed. Paste the few lines that matter, not whole files, and remove anything private. `~/.clued/sent.log` records what the app sent and when, which is often the quickest way to show a timing problem.
+**Check what you paste.** Session files and logs can hold your file paths, your email address, project code and anything you or Claude typed. Paste the few lines that matter, not whole files, and remove anything private. `~/.clued/sent.log` records what the app sent and when (the last 7 days), which is often the quickest way to show a timing problem.
 
 ## Running it from a clone
 

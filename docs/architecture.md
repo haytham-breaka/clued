@@ -28,11 +28,17 @@ The chat comes from Claude Code's own session file (under `~/.claude/projects/`)
 
 - `sessions/<session id>.json`, one per session: which reply answers which message, reactions, read marks, saved messages (with their words), replies Claude wrote mid-turn, messages still in queue when the app closed, the folders `/add-dir` added, and which images each message was sent with.
 - `panel.json`: the panel's width and whether it's folded, and the `/notify`, `/hold` and `/queue` settings.
-- `sent.log`: every message you send, with its hidden note and the time, one line each, plus edits, deletions and answers to Claude's questions. It's there to debug timing problems. clued only appends to it and never trims it.
-- `images/`: images you pasted from the clipboard, saved as PNG files. An image you attach by its path stays where it is.
+- `sent.log`: every message you send, with its hidden note and the time, one line each, plus edits, deletions and answers to Claude's questions. It's there to debug timing problems; the app never reads it back. When the app starts, and every hour after, it drops the entries older than 7 days and keeps the file to its newest 5 MB.
+- `images/`: images you pasted from the clipboard, saved as PNG files. One a message was sent with stays as long as that session's file names it, so a click on its `[image N]` still opens it. One that no session's file names (pasted and never sent, or its message deleted while held) is deleted once it is 30 days old. An image you attach by its path stays where it is, and clued never deletes it.
 - `reload`: the session id, for a moment during `/reload`.
 
-clued never deletes any of these itself. To remove everything clued keeps, delete `~/.clued`; your sessions stay in Claude Code.
+Apart from that trimming (and `reload`, gone once the app is back), clued never deletes any of these itself. To change the limits, set these before you start clued (0 turns a limit off):
+
+- `CLUED_LOG_DAYS`: how many days of `sent.log` to keep (7).
+- `CLUED_LOG_MB`: the most `sent.log` may hold, in MB (5).
+- `CLUED_IMAGE_DAYS`: how old an unsent pasted image gets before it is deleted (30).
+
+To remove everything clued keeps, delete `~/.clued`; your sessions stay in Claude Code.
 
 ## Processes
 

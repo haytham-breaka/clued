@@ -42,6 +42,7 @@ import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import { imageSpans, openerFor } from './images.ts'
+import { cleanImages, limits, trimLogFile } from './retention.ts'
 import { Btw } from './btw.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
 import type { Card, Ctx as LocalCtx } from './local.ts'
@@ -108,7 +109,8 @@ type Held = { id: string; text: string; from: From; at: number; until: number; t
 
 const PREFS = `${homedir()}/.clued/panel.json`
 /** Every Enter you press and every message the app sends, one line each: to tell later whether two
- * messages were sent as one, and by whom. */
+ * messages were sent as one, and by whom. Only for debugging: the app never reads it back, and keeps
+ * its last 7 days, at most 5 MB (tidy, retention.ts). */
 const SEND_LOG = `${homedir()}/.clued/sent.log`
 function logSend(what: string, fields: Record<string, unknown>) {
   try {
@@ -3492,6 +3494,18 @@ setInterval(() => {
   }
 }, 120)
 setInterval(refreshStatus, 15000)
+/**
+ * sent.log trimmed to its last days, and old pasted images no message is kept with deleted
+ * (retention.ts): when the app starts, then every hour. The images in the box or held are spared.
+ */
+function tidy() {
+  const lim = limits()
+  trimLogFile(SEND_LOG, lim)
+  const inUse = [...S.images, ...S.held.flatMap(h => h.from.images)].map(i => i.path)
+  cleanImages(`${homedir()}/.clued/images`, `${homedir()}/.clued/sessions`, lim.imageMs, Date.now(), inUse)
+}
+tidy()
+setInterval(tidy, 3_600_000)
 /** Time to read a reply: about 4 words a second, at least 3 seconds, at most a minute. */
 const readMs = (words: number) => Math.min(60_000, Math.max(3000, (words / 4) * 1000))
 
