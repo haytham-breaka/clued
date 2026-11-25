@@ -153,6 +153,20 @@ async function scenario(m: Msg) {
     toolResult('early-1', '')
     return finish(m, 'All finished after the early answer.')
   }
+  // A reply written early that only streams: its words come as deltas, but its whole text block never
+  // does (Claude Code sometimes drops a text block written just before a tool call).
+  if (t.includes('deltas only')) {
+    const text = `<<reply ${m.topic}>>\nAn early part that only streamed.\n${tag([{ id: m.topic, status: 'claude' }])}`
+    for (let i = 0; i < text.length; i += 12) {
+      out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: text.slice(i, i + 12) } } })
+      await sleep(10)
+    }
+    tool('streamed-1', 'Bash', { command: 'sleep 1', description: 'Wait a bit' })
+    toolResult('streamed-1', '')
+    // The end settles the message but has no reply of its own: the streamed part is the only one.
+    say(tag([{ id: m.topic, status: 'done' }]))
+    return result()
+  }
   if (t.includes('hold on')) {
     say('Starting the slow work.')
     tool('slow-1', 'Bash', { command: 'sleep 100', description: 'Slow work' })

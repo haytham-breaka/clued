@@ -131,6 +131,20 @@ describe('chat', () => {
       assert.match(s, /⚙ 1 step · ran 1 command/)
     }))
 
+  test('an early reply that only streamed is kept as its own reply, and its message is answered', () =>
+    withApp({}, async app => {
+      // Its <<reply>> text and tag come only as deltas, then a tool runs, then the turn ends with a tag
+      // and no reply of its own.
+      await app.send('a reply in deltas only')
+      const s = await app.waitFor(s => /✓ a reply in deltas only/.test(s) && s.includes('○ idle'))
+      const lines = s.split('\n')
+      const head = lines.findIndex(l => l.includes('╭─') && l.includes('↩ “a reply in deltas only”'))
+      const early = lines.findIndex(l => l.includes('An early part that only streamed.'))
+      assert.ok(head > 0 && early === head + 1, 'the streamed part is a reply to the message')
+      assert.ok(!s.includes('<clued>') && !s.includes('<<reply'), 'its marks are not shown')
+      assert.ok(!s.includes('reply lost') && !s.includes('no reply arrived'), 'not marked reply lost')
+    }))
+
   test('Markdown in a reply: headings, lists, quotes, code with copy, tables', () =>
     withApp({ height: 50 }, async app => {
       await app.send('long answer')

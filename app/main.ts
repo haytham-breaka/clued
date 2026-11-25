@@ -675,7 +675,8 @@ function onEvent(e: ClaudeEvent) {
     case 'text':
       if (t) {
         t.pending = t.pending ? `${t.pending}\n\n${e.text}` : e.text
-        t.live = ''
+        // The whole block is here: what streamed of it, on any open turn, is done with.
+        for (const x of S.turns) if (!x.isDone) x.live = ''
       }
       break
     case 'tool':
@@ -707,6 +708,16 @@ function onEvent(e: ClaudeEvent) {
         })
       }
       if (t) {
+        // Text that streamed in but whose whole block never came (Claude Code sometimes drops a text
+        // block written just before a tool call, from the stream and from the transcript): what
+        // streamed is all there is, so it is the text. A message sent mid-stream splits the deltas
+        // over two open turns: older first.
+        const streamed = S.turns.filter(x => !x.isDone && x.live.trim())
+        if (streamed.length) {
+          const text = streamed.map(x => x.live).join('')
+          for (const x of streamed) x.live = ''
+          t.pending = t.pending ? `${t.pending}\n\n${text}` : text
+        }
         // Text with reply marks before more work is a reply written early: shown now, kept as parts.
         if (hasMarks(t.pending)) {
           // Its own tag, if it has one, settles those messages now rather than at the end of the turn.
