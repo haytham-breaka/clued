@@ -42,6 +42,7 @@ import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import { imageSpans, openerFor } from './images.ts'
+import { InlineImages } from './inline-images.ts'
 import { cleanImages, limits, trimLogFile } from './retention.ts'
 import { Btw } from './btw.ts'
 import { ACTIVE_MS, focusUri, linuxCommands, macCommand, NOTIFY_MODES, oscNotification, shouldNotify, tabId, tabTag, targetOf, toastScript, uninstallScript, Waits } from './notify.ts'
@@ -95,6 +96,8 @@ const APP_GUIDE = [
   '"✅" a small request you finished with nothing more to say: the reaction is the whole reply, no "Done" text;',
   '"👍" noted: an FYI, a decision, or a go-ahead you act on; "👀" seen, on it: a message sent while you were busy;',
   '"🎉" good news. A reaction may also come with a reply when the reply adds something. None on praise alone.',
+  'To show an image, chart or diagram, write a PNG and put ![what it is](/absolute/path.png) on its own line: the app',
+  'draws it (render charts to PNG, e.g. with matplotlib if available); a ```mermaid block is drawn as a diagram.',
 ].join(' ')
 
 // ---- State -----------------------------------------------------------------------
@@ -2478,21 +2481,24 @@ function attachImage(path: string) {
   toast('Image added: it goes with your next message.')
 }
 
-/** Opens an image you sent in the system's image viewer (on WSL, Windows' own), or says it is gone. */
-function openImage(path: string, n: number) {
-  if (!existsSync(path)) return toast(`Image ${n} is gone: ${path.replace(homedir(), '~')} isn't there anymore.`)
+/** Opens an image (`image 2`, `the image`) in the system's image viewer (on WSL, Windows' own), or says it is gone. */
+function openImage(path: string, name: string) {
+  if (!existsSync(path)) return toast(`${name[0]!.toUpperCase()}${name.slice(1)} is gone: ${path.replace(homedir(), '~')} isn't there anymore.`)
   const win = IS_WSL ? spawnSync('wslpath', ['-w', path], { encoding: 'utf8', timeout: 5000 }).stdout?.trim() || undefined : undefined
   const [cmd, args] = openerFor(path, process.platform, IS_WSL, win)
   execFile(cmd, args, { timeout: 30000 }, err => {
-    if (err) toast(`Couldn't open image ${n} with ${cmd}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'it isn\'t installed' : err.message.split('\n')[0]}.`)
+    if (err) toast(`Couldn't open ${name} with ${cmd}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'it isn\'t installed' : err.message.split('\n')[0]}.`)
   })
-  toast(`Opening image ${n}…`)
+  toast(`Opening ${name}…`)
 }
+
+/** Images and diagrams in Claude's replies, drawn in the chat (inline-images.ts); a click opens one. */
+const inlineImages = new InlineImages({ onChange: () => draw(), open: path => openImage(path, 'the image'), size: () => ({ cols: width(), rows: height() }) })
 
 /** The click on `[image N]` in a message sent with these images (paths), when it has an Nth. */
 const imageClick = (paths: readonly string[] | undefined) => (n: number) => {
   const path = paths?.[n - 1]
-  return path ? () => openImage(path, n) : undefined
+  return path ? () => openImage(path, `image ${n}`) : undefined
 }
 
 /** A message's words as a link to it (a view's header), its [image N] links to its images. */
@@ -2640,7 +2646,8 @@ function lineText(line: Line, w: number, row: number, x: number): string {
   for (const sp of clipLine(line, w).map(bidiSpan)) {
     const cw = cells(sp.text)
     if (sp.action && cw) regions.push({ row, x0: x + used + 1, x1: x + used + cw, action: sp.action })
-    s += sgr(sp.style) + sp.text
+    // An image's cells it is already drawn in: stepped over, not wiped.
+    s += sgr(sp.style) + (sp.image?.skip ? `\x1b[${cw}C` : sp.text)
     used += cw
   }
   return s + sgr() + ' '.repeat(Math.max(0, w - used))
@@ -2657,7 +2664,11 @@ function paint() {
   const cx = panelShown() ? pw + 1 : 0
   const cw = W - cx
 
-  if (S.picker) return paintPicker(W, H)
+  if (S.picker) {
+    const off = inlineImages.hide()
+    if (off) out.write(off)
+    return paintPicker(W, H)
+  }
   // Agents at work, and ones that just ended (Claude follows up on their results next).
   const busy = new Set([...S.agents.values()].filter(a => a.state === 'running' || handingBack(a, Date.now(), settledFrom)).flatMap(workingFor))
   const reacted = new Set(Object.entries(S.kept.reactions).filter(([, l]) => l.some(r => r.by === 'claude')).map(([k]) => k))
@@ -2843,6 +2854,7 @@ function paint() {
       // Only once Claude Code echoes messages: before that, "sent" can't tell taken in from not.
       ...(echoes ? { unsend } : {}),
       heldBelow: S.held.some(waitsForClaude),
+      media: inlineImages.media(),
       firedBy: t => {
         const j = t.fired?.job ? S.jobs.list.find(x => x.toolId === t.fired!.job) : undefined
         return j ? { label: `${jobMark(j)} scheduled job ran: “${jobName(j, 50)}”`, open: () => openJob(j.toolId) } : t.fired ? { label: `⏰ a scheduled job ran${t.fired.prompt ? `: “${preview(t.fired.prompt, 50)}”` : ''}` } : undefined
@@ -2937,6 +2949,10 @@ function paint() {
     S.inView.add(p.id)
   }
   if (banner) frame[0] += ' ' + lineText(banner, cw - 1, 1, cx + 1)
+  const moreTag = S.chatScroll > 0 ? ` ↓ ${S.chatScroll} more lines ` : ''
+  // Images in view, drawn after the text (not under the ↓ tag); one already there isn't wiped.
+  let picsOut = ''
+  let picsBefore = ''
   if (!S.turns.length && !btw.asides.length && !local.cards.list.length && !S.held.length) {
     const hello = [
       [{ text: 'clued', style: { bold: true, fg: C.cyan } }, { text: `  on Claude Code · ${cwd.replace(homedir(), '~')}`, style: { fg: C.gray } }],
@@ -2945,17 +2961,24 @@ function paint() {
     ] as Line[]
     hello.forEach((l, i) => (frame[i + 1 + top] += ' ' + lineText(l, cw - 1, i + 2 + top, cx + 1)))
     for (let r = 0; r < chatRows; r++) if (r < 1 || r > 3) frame[r + top] += ' '.repeat(cw)
-  } else
+    const none = inlineImages.frame([], 0)
+    picsOut = none.out
+    picsBefore = none.before
+  } else {
+    const pics = inlineImages.frame(view.map((line, i) => ({ line, row: top + lead + i + 1 })), cx + 2, moreTag ? [{ row: chatRows + top, col0: cx + cw - cells(moreTag) + 1, col1: cx + cw }] : [])
+    picsOut = pics.out
+    picsBefore = pics.before
     for (let r = 0; r < chatRows; r++) {
-      const raw = r >= lead ? view[r - lead]! : []
+      const raw = r >= lead ? pics.lines.get(r - lead) ?? view[r - lead]! : []
       // A reused layout has last frame's spinners: turned to this frame's.
       const line = reuse && raw.some(sp => SPIN_SPAN.test(sp.text)) ? raw.map(sp => (SPIN_SPAN.test(sp.text) ? { ...sp, text: ctx.spin + sp.text.slice(1) } : sp)) : raw
       const marked = r >= lead ? selCells(viewStart + r - lead) : undefined
       frame[r + top] += ' ' + lineText(marked ? markCells(line, marked[0], marked[1]) : line, cw - 1, r + top + 1, cx + 1)
     }
+  }
   // A scrolled-up chat says so.
-  if (S.chatScroll > 0) {
-    const tag = ` ↓ ${S.chatScroll} more lines `
+  if (moreTag) {
+    const tag = moreTag
     regions.unshift({ row: chatRows + top, x0: cx + cw - cells(tag), x1: cx + cw, action: () => { S.chatScroll = 0; draw() } })
     overlays.push({ row: chatRows + top, col: cx + cw - cells(tag) + 1, text: `${sgr({ inverse: true, fg: C.cyan })}${tag}${sgr()}` })
   }
@@ -2963,10 +2986,11 @@ function paint() {
   S.inputGeo = bottom.textRow == null ? null : { row: top + chatRows + bottom.textRow + 1, col: cx + 4, first: bottom.first!, count: bottom.count!, inner: bottom.inner! }
   status.forEach((s, i) => (frame[top + chatRows + bottom.lines.length + i] += `${s}${sgr()}\x1b[K`))
 
-  let buf = '\x1b[?2026h\x1b[?25l\x1b[H'
+  let buf = '\x1b[?2026h\x1b[?25l\x1b[H' + picsBefore
   for (let r = 0; r < H; r++) buf += `\x1b[${r + 1};1H` + frame[r] + (frame[r]!.includes('\x1b[K') ? '' : '\x1b[K')
   for (const o of overlays) buf += `\x1b[${o.row};${o.col}H${o.text}`
   overlays.length = 0
+  buf += picsOut
   if (bottom.cursor && !S.permissions.length) {
     const cr = top + chatRows + bottom.cursor.row + 1
     const cc = cx + 1 + bottom.cursor.col + 1
@@ -3664,6 +3688,12 @@ function input(data: string) {
       draw()
       continue
     }
+    // The terminal's answers to the app's questions (inline-images.ts): no keys.
+    const answer = inlineImages.reply(s)
+    if (answer) {
+      s = s.slice(answer)
+      continue
+    }
     if (s.startsWith('\x1b[200~')) {
       pasting = true
       s = s.slice(6)
@@ -3707,7 +3737,7 @@ function quit(code = 0) {
   S.claude?.close()
   btw.close()
   if (IS_WT && tabMark.startsWith('✋')) out.write('\x1b]9;4;0;0\x07')
-  out.write(BIDI_SEQ.end + '\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
+  out.write(inlineImages.hide(true) + BIDI_SEQ.end + '\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   if (process.stdin.isTTY) process.stdin.setRawMode(false)
   if (S.sessionId) {
     // Agents still running go with this Claude Code: on resume they say they were stopped, and how.
@@ -3729,8 +3759,11 @@ if (!process.stdin.isTTY) {
 process.stdin.setRawMode(true)
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (d: string) => input(d))
-out.write('\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[2J' + BIDI_SEQ.start)
+out.write('\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[2J' + BIDI_SEQ.start + inlineImages.queries())
+// A terminal that doesn't answer whether it draws Sixel in 2 s: no images.
+setTimeout(() => inlineImages.giveUp(), 2000).unref()
 out.on('resize', () => {
+  out.write(inlineImages.resized())
   refreshStatus()
   draw()
 })
@@ -3739,7 +3772,7 @@ process.on('SIGTERM', () => quit())
 process.on('SIGHUP', () => quit())
 process.on('uncaughtException', err => {
   quitting = true
-  out.write(BIDI_SEQ.end + '\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
+  out.write(inlineImages.hide(true) + BIDI_SEQ.end + '\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')
   console.error(err)
   process.exit(1)
 })

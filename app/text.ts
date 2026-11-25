@@ -17,9 +17,10 @@ export type Style = {
  * `noCopy`: drawn but left out of a copied selection (a code block's line numbers, a diff's + and −).
  * `ltr`: kept left to right inside right-to-left text (inline code). `units`: the span is drawn
  * reordered (bidi.ts), and these are its cells' characters as written; `rtl`: its paragraph reads
- * right to left, so its line goes on the right.
+ * right to left, so its line goes on the right. `image`: the span's cells are row `row` of an image
+ * (inline-images.ts); `skip`: it is on screen already, so the frame steps over its cells.
  */
-export type Span = { text: string; style?: Style; action?: () => void; noCopy?: boolean; ltr?: boolean; units?: Unit[]; rtl?: boolean }
+export type Span = { text: string; style?: Style; action?: () => void; noCopy?: boolean; ltr?: boolean; units?: Unit[]; rtl?: boolean; image?: { id: string; row: number; skip?: boolean } }
 export type Line = Span[]
 
 export const C = {

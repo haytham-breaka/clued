@@ -4,6 +4,7 @@
 import { firstLine, stripTag } from '../hooks/model.ts'
 import { imageSpans } from './images.ts'
 import { markdown } from './markdown.ts'
+import type { Media } from './markdown.ts'
 import { preview, questionsOf, splitAnswer, stripMarks } from './inbox.ts'
 import { block, codeRows, diffHead, diffRows, hunkGap, K, langOf, readRows, shellRows } from './code.ts'
 import type { Lang, Row } from './code.ts'
@@ -83,7 +84,12 @@ export type ChatCtx = {
   unsend?: (t: Turn) => void
   /** A message you sent waits in the app for Claude's turn to end (drawn below the chat). */
   heldBelow?: boolean
+  /** Images and diagrams in Claude's replies, drawn in them (inline-images.ts). */
+  media?: Media
 }
+
+/** Elsewhere (a reply still being written, an agent's view) an image is a link that opens it. */
+const links = (ctx: ChatCtx): Media | undefined => (ctx.media?.open ? { key: 'links', open: ctx.media.open } : undefined)
 
 export const QUICK = ['👍', '👎', '❓', '👀']
 
@@ -608,7 +614,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
         const id = part.id ?? `${turn.key}:${i}`
         const isUnread = ctx.unread.has(id)
         const asks = ctx.waiting.has(id)
-        const body = markdown(part.text, claudeMax, ctx.copy)
+        const body = markdown(part.text, claudeMax, ctx.copy, ctx.media)
         let inner = snug(body, claudeMax)
         // The tag: which of your messages this answers (a click goes to it); ● when unread.
         const replied = part.to.map(t => ctx.messageOf(t, turn)).filter((m): m is Turn => !!m)
@@ -722,7 +728,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     if (liveParts.length) {
       liveParts.forEach((part, i) => {
         if (i) out.push([])
-        const body = markdown(part.text, claudeMax, ctx.copy)
+        const body = markdown(part.text, claudeMax, ctx.copy, links(ctx))
         // A caret at the end of the part being written.
         if (i === liveParts.length - 1) {
           const last = body.at(-1)
@@ -874,7 +880,7 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   for (const [k, e] of a.log.entries()) {
     for (const n of startsAt.get(k) ?? []) sent(n)
     if ('text' in e) {
-      const body = markdown(e.text, max, ctx.copy)
+      const body = markdown(e.text, max, ctx.copy, links(ctx))
       out.push(...bubble(body, snug(body, max), IN, { fg: C.faint }))
       continue
     }
@@ -904,7 +910,7 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   // What it handed back to Claude.
   if (a.result) {
     out.push([])
-    const body = markdown(a.result, max, ctx.copy)
+    const body = markdown(a.result, max, ctx.copy, links(ctx))
     const ok = a.state !== 'failed'
     const tag: Span = { text: ok ? (a.resultLabel ?? '✓ handed back to Claude') : '✕ failed', style: { fg: ok ? C.green : C.red, bold: true } }
     out.push(...bubble(body, Math.max(snug(body, max), cells(tag.text) + 1), IN, { fg: ok ? C.green : C.red }, undefined, undefined, tag))

@@ -74,6 +74,7 @@ describe('questions', () => {
   })
   test('preview makes one plain line', () => {
     assert.equal(preview('# Title\n- **bold** and `code` [link](https://example.com)\n```\ncode\n```\n<clued>{}</clued>'), 'Title bold and code link')
+    assert.equal(preview('Here: ![sales](/tmp/s.png) and ![](/tmp/x.png)'), 'Here: [image: sales] and [image: image]')
     assert.equal(preview('x'.repeat(100), 10), 'xxxxxxxxx…')
     // Inside code, and within words, the marks are the text: a home path, a snake_case name.
     assert.equal(preview('The list is in `~/tinytodo.json`, set by `load_file`.'), 'The list is in ~/tinytodo.json, set by load_file.')

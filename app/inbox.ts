@@ -241,6 +241,7 @@ function previewOnce(text: string, max: number): string {
     .split(/`+([^`]*)`+/)
     .map((x, i) => (i % 2 ? x : x.replace(/\*+|~~|(^|[^\p{L}\p{N}_])_+|_+(?=[^\p{L}\p{N}_]|$)/gu, '$1')))
     .join('')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, (_, alt: string) => `[image: ${alt.trim() || 'image'}]`)
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()

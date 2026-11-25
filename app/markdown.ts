@@ -5,6 +5,22 @@ import { C, cells, clipLine, lineCells, pad, remember, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
 import { clean, hardWrap, highlight, K, langOf } from './code.ts'
 import { bidiLine, bidiMode, isRtl } from './bidi.ts'
+import { localPath } from './inline-images.ts'
+
+/**
+ * Images in markdown (inline-images.ts gives these): `image` lays out `![alt](src)` under its
+ * paragraph, `diagram` a ```mermaid block; either gives undefined to leave it as it is. Without
+ * them an image is a `[image: alt]` link that `open` opens. `key` changes whenever what they give can.
+ */
+export type Media = {
+  key: string
+  open?: (path: string) => void
+  image?: (alt: string, src: string, width: number) => Line[] | undefined
+  diagram?: (code: string, width: number) => { lines: Line[]; replace: boolean } | undefined
+}
+
+/** `![alt](src)`, and `![alt](src "title")`. */
+const IMAGE = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g
 
 /**
  * Whether a block is worth a copy button: a labelled code block always is; an unlabelled one or a
@@ -17,13 +33,18 @@ export function isCopyable(text: string, lang = ''): boolean {
 
 /** The copy action of the markdown() call in progress: inline code copies itself on a click. */
 let copyNow: ((text: string) => void) | undefined
+/** And its opener: a click on `[image: alt]` opens the file. */
+let openNow: ((path: string) => void) | undefined
+
+const INLINE = /(`+)([^`]+?)\1|\*\*([^*]+)\*\*|__([^_]+)__|(?<![\w*])\*([^*\s][^*]*?)\*(?!\w)|(?<!\w)_([^_\s][^_]*?)_(?!\w)|\[([^\]]+)\]\(([^)\s]+)\)|~~([^~]+)~~/
+/** Inline markdown, an image last (`!` before a link). */
+const INLINE_ALL = new RegExp(`${INLINE.source}|${IMAGE.source}`, 'g')
 
 /** Inline markdown in one paragraph to spans. */
 export function inline(text: string, base: Style = {}): Span[] {
   const out: Span[] = []
-  const re = /(`+)([^`]+?)\1|\*\*([^*]+)\*\*|__([^_]+)__|(?<![\w*])\*([^*\s][^*]*?)\*(?!\w)|(?<!\w)_([^_\s][^_]*?)_(?!\w)|\[([^\]]+)\]\(([^)\s]+)\)|~~([^~]+)~~/g
   let at = 0
-  for (const m of text.matchAll(re)) {
+  for (const m of text.matchAll(INLINE_ALL)) {
     if (m.index! > at) out.push({ text: text.slice(at, m.index), style: base })
     if (m[2] != null) {
       const code = m[2]
@@ -37,10 +58,22 @@ export function inline(text: string, base: Style = {}): Span[] {
       out.push({ text: m[7], style: { ...base, fg: C.blue, underline: true } })
       if (m[8] !== m[7] && !/^#/.test(m[8]!)) out.push({ text: ` (${m[8]})`, style: { ...base, fg: C.gray } })
     } else if (m[9] != null) out.push({ text: m[9], style: { ...base, dim: true } })
+    else if (m[11] != null) out.push(...imageLink(m[10]!, m[11], base))
     at = m.index! + m[0].length
   }
   if (at < text.length) out.push({ text: text.slice(at), style: base })
   return out
+}
+
+/**
+ * An image not drawn: a local file is `[image: alt]`, a click opens it; a remote one stays a link,
+ * never fetched.
+ */
+function imageLink(alt: string, src: string, base: Style): Span[] {
+  const path = localPath(src)
+  const open = openNow
+  if (path) return [{ text: `[image: ${alt.trim() || path.split('/').pop()}]`, style: { ...base, fg: C.blue, underline: true }, ...(open ? { action: () => open(path) } : {}) }]
+  return [{ text: alt.trim() || 'image', style: { ...base, fg: C.blue, underline: true } }, { text: ` (${src})`, style: { ...base, fg: C.gray } }]
 }
 
 const isTableRow = (l: string) => /^\s*\|.*\|\s*$/.test(l)
@@ -73,25 +106,27 @@ function table(rows: string[], width: number): Line[] {
 /** Renders markdown into lines of at most `width` cells. */
 const rendered = new Map<string, Line[]>()
 
-export function markdown(src: string, width: number, copy?: (text: string) => void): Line[] {
+export function markdown(src: string, width: number, copy?: (text: string) => void, media?: Media): Line[] {
   // The chat draws every reply on every frame: each text is rendered once per width. (A cached line's
   // copy action holds an earlier frame's copy function, which does the same.)
-  const key = `${width}${copy ? 'c' : ''}${bidiMode()}\0${src}`
+  const key = `${width}${copy ? 'c' : ''}${bidiMode()}${media ? `|${media.key}` : ''}\0${src}`
   // Callers add to the lines they get (the caret while a reply streams): each gets its own copy,
   // or the final reply, the same words, would keep the caret.
   const known = rendered.get(key)
   if (known) return known.map(l => [...l])
   copyNow = copy
+  openNow = media?.open
   try {
-    const lines = render(src, width, copy)
+    const lines = render(src, width, copy, media)
     remember(rendered, key, lines)
     return lines.map(l => [...l])
   } finally {
     copyNow = undefined
+    openNow = undefined
   }
 }
 
-function render(src: string, width: number, copy?: (text: string) => void): Line[] {
+function render(src: string, width: number, copy?: (text: string) => void, media?: Media): Line[] {
   const lines = src.replace(/\r/g, '').split('\n')
   const out: Line[] = []
   let para: string[] = []
@@ -102,7 +137,18 @@ function render(src: string, width: number, copy?: (text: string) => void): Line
   }
   const flushPara = () => {
     if (!para.length) return
-    out.push(...wrap(inline(para.join(' ')), width))
+    // Its images drawn under it, each with its caption (the words without them above).
+    const pics: Line[] = []
+    const text = !media?.image ? para.join(' ') : para.join(' ').replace(IMAGE, (all, alt: string, at: string) => {
+      const rows = media.image!(alt, at, width)
+      if (!rows) return all
+      if (pics.length) pics.push([])
+      pics.push(...rows)
+      return ''
+    })
+    const words = pics.length ? text.replace(/ {2,}/g, ' ').trim() : text.trim()
+    if (words) out.push(...wrap(inline(words), width))
+    out.push(...pics)
     para = []
     blank = false
   }
@@ -121,6 +167,17 @@ function render(src: string, width: number, copy?: (text: string) => void): Line
       // The block's header: its language, and ⧉ copy on the right.
       const lang = fence[2] ? ` ${fence[2]}` : ''
       const whole = code.join('\n')
+      // A Mermaid block: its diagram in its place once drawn, or a note under the code.
+      const drawn = /^mermaid$/i.test(fence[2] ?? '') ? media?.diagram?.(whole, width) : undefined
+      if (drawn?.replace) {
+        out.push(...drawn.lines)
+        // Its source can still be copied, beside its caption.
+        const last = out.at(-1)
+        if (copy && last && lineCells(last) + 8 <= width) last.push({ text: '  ⧉ copy', style: { fg: C.cyan }, action: () => copy(whole) })
+        blank = false
+        gap()
+        continue
+      }
       const canCopy = !!copy && isCopyable(whole, fence[2])
       const btn = canCopy ? '⧉ copy ' : ''
       out.push([
@@ -137,6 +194,7 @@ function render(src: string, width: number, copy?: (text: string) => void): Line
           out.push([{ text: ' ', style: { bg: C.codeBg } }, ...piece.map(sp => ({ ...sp, style: { fg: C.white, ...sp.style, bg: C.codeBg } })), pad(w - 1 - pw, { bg: C.codeBg })])
         }
       })
+      if (drawn) out.push(...drawn.lines)
       blank = false
       gap()
       continue

@@ -67,6 +67,29 @@ Sometimes a reply never arrives: Claude's tag settles a message, but no reply pa
 
 Ctrl+V adds the image on the clipboard. This works with the Windows clipboard from WSL, with macOS, and with Wayland or X11. Pasting or dropping an image file's path attaches that image. Once sent, a click on `[image N]` in your message (in the chat, the panel or a request's view) opens that image in your image viewer: Windows' own from WSL, `open` on macOS, `xdg-open` on Linux.
 
+## Images and diagrams in replies
+
+Claude can show you an image, a chart or a diagram right in its reply. It writes a PNG file and puts `![what it is](/absolute/path.png)` on its own line (the app's guide tells it how; for a chart it renders a PNG, for example with matplotlib if it's installed). The image is drawn in the reply, under its paragraph, as wide as the bubble allows and at most 20 rows high, its shape kept. Under it is `[image: what it is]` with the file's path: a click on either opens it in your image viewer, full size. A ```` ```mermaid ```` block is drawn as a diagram in place of its code, with `⧉ copy` for its source.
+
+What your terminal can draw, and how clued draws there:
+
+- **iTerm2** (macOS) and **WezTerm**: iTerm2's inline images. PNG, JPEG, GIF and WebP.
+- **kitty** and **Ghostty**: the kitty graphics protocol.
+- **Windows Terminal 1.22 or later** (also from WSL), **foot**, **mlterm**, **xterm -ti vt340** and other terminals that say they draw Sixel: Sixel, at most 256 colours an image.
+- **Anything else, and inside tmux or screen** (they don't pass images through): no image. It stays a `[image: what it is]` link that opens the file in your viewer, and nothing else is sent to the terminal.
+
+To choose, set `CLUED_IMAGES` before you start clued: `iterm`, `kitty`, `sixel` or `off` (`auto`, the default, picks from the terminal). clued asks the terminal for its cell size in pixels, to keep an image's shape; if images come out squashed, set it yourself, for example `CLUED_IMAGE_CELL=10x20` (width × height in pixels).
+
+**Diagrams** need the Mermaid CLI, `mmdc`, on your PATH: `npm i -g @mermaid-js/mermaid-cli` (it brings a headless Chrome the first time). Each diagram is drawn once, in a dark theme on a clear background, and kept under `~/.clued/cache/mermaid/` by its source; until it is ready the code shows with `◌ drawing the diagram…` under it. Without `mmdc` the code shows as before, with a line saying how to get diagrams; if `mmdc` fails, the line says why.
+
+The limits:
+
+- Only local files that exist are drawn, up to 10 MB and 40 million pixels. An image link to a URL (`![](https://…)`) is never fetched: it stays a link.
+- For kitty and Sixel, a JPEG, GIF, WebP or SVG is turned into a PNG first by a tool already on your machine (`sips` on macOS, ImageMagick, `ffmpeg`, or `rsvg-convert` for SVG), and kept in `~/.clued/cache/images/`; without one it stays a link. iTerm2 draws an SVG only through such a tool too.
+- An image scrolled partly out of view is cropped to its rows still in view (a JPEG in iTerm2 shows a placeholder until all of it is). Images show in the chat and a request's view; an agent's view, a reply still being written and the panel show the link.
+- Selecting text across an image copies the words around it, not the image.
+- You can delete `~/.clued/cache` at any time.
+
 ## Permissions
 
 When Claude Code needs permission for a tool, clued asks you in the app, the way `claude` would: with Claude's description of the command and the whole command, wrapped (a very long one has `⧉ copy all`). Your allow and deny rules apply as usual.

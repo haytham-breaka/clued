@@ -801,6 +801,10 @@ async function scenario(m: Msg) {
     say(`<<reply T999>>\nThis names the wrong message.\n${tag([{ id: m.topic, status: 'done' }])}`)
     return result()
   }
+  // An image in a reply ($FAKE_DIR/chart.png, a test writes it), a remote one, and a Mermaid diagram.
+  if (t.includes('show me a chart'))
+    return finish(m, `Here is the chart.\n\n![sales by month](${dir}/chart.png)\n\nA remote one stays a link: ![logo](https://example.com/logo.png)`)
+  if (t.includes('draw a diagram')) return finish(m, ['The flow:', '', '```mermaid', 'graph TD', '  A --> B', '```', '', 'That is it.'].join('\n'))
   // Arabic in, Arabic out: a reply in Arabic, with English words, inline code and a number in it.
   if (t.includes('بالعربية'))
     return finish(m, ['أهلاً بك! هذا رد بالعربية.', '', 'شغّل `npm test` ثم افتح app/main.ts في 3 دقائق.'].join('\n'))

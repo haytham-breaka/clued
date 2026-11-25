@@ -110,3 +110,42 @@ describe('markdown', () => {
     assert.deepEqual(markdown('The deploy is green.', 40).map(plain), ['The deploy is green.'])
   })
 })
+
+describe('images in markdown', () => {
+  test('without a way to draw: a local image is [image: alt] (a click opens it), a remote one a link never fetched', () => {
+    const opened: string[] = []
+    const lines = markdown('See ![the chart](/tmp/c.png) and ![](https://example.com/x.png "t").', 80, undefined, { key: 'links', open: p => opened.push(p) })
+    assert.deepEqual(lines.map(plain), ['See [image: the chart] and image (https://example.com/x.png).'])
+    lines[0]!.find(s => s.text === 'chart]')!.action!()
+    assert.deepEqual(opened, ['/tmp/c.png'])
+    // No alt: the file's name. No opener: no click.
+    const bare = markdown('![](/tmp/d.png)', 40)
+    assert.deepEqual(bare.map(plain), ['[image: d.png]'])
+    assert.equal(bare[0]![0]!.action, undefined)
+  })
+
+  test('drawn: an image goes under its paragraph, its words without it; several, a line apart', () => {
+    const rows = (alt: string): Line[] => [[{ text: `<${alt}>` }]]
+    const media = { key: 'k1', image: (alt: string, src: string) => (src.startsWith('/') ? rows(alt) : undefined) }
+    assert.deepEqual(markdown('Look: ![a](/a.png) ok ![b](/b.png)\n\n![c](https://x/c.png)', 40, undefined, media).map(plain), ['Look: ok', '<a>', '', '<b>', '', 'c (https://x/c.png)'])
+    // A paragraph that is only the image: no empty line above it.
+    assert.deepEqual(markdown('![a](/a.png)', 40, undefined, media).map(plain), ['<a>'])
+    // The media's key is part of the cache: a new key lays it out again.
+    assert.deepEqual(markdown('![a](/a.png)', 40, undefined, { ...media, key: 'k2', image: () => rows('new') }).map(plain), ['<new>'])
+  })
+
+  test('a mermaid block: replaced by its diagram (⧉ copy copies the source), or the code with a note under it', () => {
+    const copied: string[] = []
+    const src = 'Flow:\n\n```mermaid\ngraph TD\n  A-->B\n```\n\nEnd.'
+    const drawn = markdown(src, 40, t => copied.push(t), { key: 'd1', diagram: () => ({ lines: [[{ text: '[pic]' }], [{ text: '[image: diagram]' }]], replace: true }) })
+    assert.deepEqual(drawn.map(plain), ['Flow:', '', '[pic]', '[image: diagram]  ⧉ copy', '', 'End.'])
+    drawn[3]!.at(-1)!.action!()
+    assert.deepEqual(copied, ['graph TD\n  A-->B'])
+    const noted = markdown(src, 40, undefined, { key: 'd2', diagram: () => ({ lines: [[{ text: '◌ drawing' }]], replace: false }) }).map(plain)
+    assert.deepEqual(noted.slice(2, 6).map(l => l.trim()), ['mermaid', 'graph TD', 'A-->B', '◌ drawing'])
+    // Another language is never a diagram.
+    let asked = 0
+    markdown('```ts\nx\n```', 40, undefined, { key: 'd3', diagram: () => (asked++, undefined) })
+    assert.equal(asked, 0)
+  })
+})

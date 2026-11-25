@@ -6,7 +6,7 @@ clued starts `claude -p --input-format stream-json --output-format stream-json` 
 
 ## What clued adds to the conversation
 
-- **The guide:** a short instruction, appended to Claude Code's system prompt with `--append-system-prompt`, asks Claude to end each reply with one hidden tag line. The tag says which of your messages the reply is about and what their status is now: on Claude, on you, or done. The guide also covers reply parts, reactions and keeping long waits in the background. Today it is about 4,300 characters.
+- **The guide:** a short instruction, appended to Claude Code's system prompt with `--append-system-prompt`, asks Claude to end each reply with one hidden tag line. The tag says which of your messages the reply is about and what their status is now: on Claude, on you, or done. The guide also covers reply parts, reactions, keeping long waits in the background and how to show an image or a diagram. Today it is about 4,800 characters.
 - **The note:** each message you send carries a short hidden note with its id (`T12`), the messages still open, and the questions it asks when there are several. A message that goes into Claude's running turn says so, and asks for its own reply part; a reply to an old message brings its request's chain (below).
 - **Splitting:** when a reply answers several messages, Claude marks each part with `<<reply T12>>` lines. The app hides these and draws one bubble per part.
 
@@ -30,6 +30,7 @@ The chat comes from Claude Code's own session file (under `~/.claude/projects/`)
 - `panel.json`: the panel's width and whether it's folded, and the `/notify`, `/hold` and `/queue` settings.
 - `sent.log`: every message you send, with its hidden note and the time, one line each, plus edits, deletions and answers to Claude's questions. It's there to debug timing problems; the app never reads it back. When the app starts, and every hour after, it drops the entries older than 7 days and keeps the file to its newest 5 MB.
 - `images/`: images you pasted from the clipboard, saved as PNG files. One a message was sent with stays as long as that session's file names it, so a click on its `[image N]` still opens it. One that no session's file names (pasted and never sent, or its message deleted while held) is deleted once it is 30 days old. An image you attach by its path stays where it is, and clued never deletes it.
+- `cache/`: Mermaid diagrams drawn by `mmdc` (`cache/mermaid/`) and images turned into PNG to draw them (`cache/images/`), each named by what it was made from. Safe to delete at any time.
 - `reload`: the session id, for a moment during `/reload`.
 
 Apart from that trimming (and `reload`, gone once the app is back), clued never deletes any of these itself. To change the limits, set these before you start clued (0 turns a limit off):

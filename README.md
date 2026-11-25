@@ -26,6 +26,7 @@ Underneath it's the same Claude Code, run headless: the same account, tools, per
 - **Every request is tracked.** Each message has a mark in the panel: ⏳ Claude is on it, ✋ waiting on you, ✓ done. Replies sometimes go missing: when Claude marks a message done but never wrote its reply, clued asks Claude again at once, and a reply still missing after that is marked `⚠ reply lost`, with `↻ ask again`, instead of looking answered.
 - **Keep typing while Claude works.** A message sent while Claude is busy waits `⏳ in queue` and goes as its own turn when Claude's turn ends, so it gets its own answer. To steer the work in progress, reply to it, and your message goes in at once.
 - **See the work, not just the chat.** The panel lists each agent Claude started, with a live view of its steps (background agents too), the shell commands running in the background with their output, and the jobs Claude scheduled, with when each runs next.
+- **Images and diagrams in the reply.** Claude can show you a chart, an image or a Mermaid diagram right in its reply: drawn inline in iTerm2, WezTerm, kitty, Ghostty and Windows Terminal (Sixel), and a link that opens it everywhere else ([details](docs/usage.md#images-and-diagrams-in-replies)).
 - **Stay in control.** Unread replies, ★ saved messages, Claude's open questions in one list, 3 seconds to edit or take back a message after Enter, and a notification when Claude asks you something while you're in another window.
 
 ## Quick start
