@@ -240,6 +240,18 @@ describe('inbox', () => {
     assert.ok(!inbox([old, agent, cur, q1, q2], board, new Set(), live()).messages.some(m => m.queued))
   })
 
+  test('owed with nothing on it ("waiting") comes after in queue and before the answered ones, however old', () => {
+    const owed = turn('owed long ago', { topicId: 'T1', answer: 'On it.' })
+    const done = turn('answered later', { topicId: 'T2', answer: 'Done.', at: NOW + 1 })
+    const board = boardOf(topic('T1', [owed.key], 'claude'), topic('T2', [done.key], 'done', { updatedAt: NOW + 60_000 }))
+    assignParts([owed, done], board)
+    const box = inbox([owed, done], board, new Set(), live({ now: NOW + STALE_MS + 120_000 }))
+    assert.deepEqual(box.messages.map(m => [m.turn.text, m.stale ? 'waiting' : m.state]), [
+      ['owed long ago', 'waiting'],
+      ['answered later', 'done'],
+    ])
+  })
+
   test('while Claude works, only messages not answered yet are in progress, not old ones answered without naming them', () => {
     const thanked = turn('thanks', { topicId: 'T1' })
     const lost = turn('lost one', { topicId: 'T2', at: NOW + 1 })

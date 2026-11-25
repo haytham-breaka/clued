@@ -255,6 +255,21 @@ async function scenario(m: Msg) {
     toolResult('dl-1', 'Async agent launched successfully. agentId: dl-9')
     return finish(m, 'Delegated it.', 'claude')
   }
+  // A helper agent that runs and finishes in the turn; then another message of yours. On
+  // release-nudge Claude, in a turn of its own (no message of yours), sends the helper more to do.
+  if (t.startsWith('start helper one')) {
+    tool('hp-1', 'Agent', { description: 'Helper one', subagent_type: 'general-purpose', prompt: 'Help.' })
+    toolResult('hp-1', 'Helped. agentId: helper-one')
+    return finish(m, 'Helper one finished.', 'claude')
+  }
+  if (t.startsWith('meanwhile, an unrelated note')) {
+    finish(m, 'Noted.', 'done')
+    if (!(await release('nudge', 20_000))) return
+    tool('nudge-1', 'SendMessage', { to: 'helper-one', message: 'One more thing for you.' })
+    toolResult('nudge-1', 'Message sent to helper-one.')
+    say('Sent helper one more to do.')
+    return result()
+  }
   if (t.includes('background agent')) {
     tool('bg-1', 'Agent', { description: 'Long job', subagent_type: 'general-purpose', prompt: 'Do the long job.', run_in_background: true })
     toolResult('bg-1', 'Started in the background. agentId: bg-42')

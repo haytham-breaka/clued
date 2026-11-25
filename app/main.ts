@@ -921,7 +921,10 @@ function onEvent(e: ClaudeEvent) {
       // one that finished (back under Agents, running).
       if (e.tool.name === 'SendMessage') {
         const a = agentFor(S.agents.values(), String(e.tool.input.to ?? ''))
-        if (a) sendTask(a, e.tool.input, Date.now(), openFor(), e.tool.id)
+        // Answering one of your messages, the task is for it. Otherwise (a turn of Claude's own:
+        // an agent's report, another session's message) it goes on with the agent's own work.
+        const isYours = S.turns.some(x => !x.isDone && !x.reaction && !x.followUp && !waiting(x))
+        if (a) sendTask(a, e.tool.input, Date.now(), isYours ? openFor() : (a.tasks.at(-1)?.for ?? a.for), e.tool.id)
       }
       if (e.tool.name === 'Agent' || e.tool.name === 'Task') {
         // A subagent: which of your messages it works for are the ones this turn answers.

@@ -221,6 +221,20 @@ describe('panel', () => {
       assert.ok(!rows.some(l => l.includes('and a second thing') && l.includes('James')), 'nor shown as on it')
     }))
 
+  test('a message Claude sends an agent in a turn of its own goes on with that agent\'s work, not your latest message', () =>
+    withApp({ unfocused: true, setup: widePanel }, async app => {
+      await app.send('start helper one')
+      await app.waitFor('Helper one finished.')
+      await app.send('meanwhile, an unrelated note')
+      await app.waitFor('Noted.')
+      app.release('nudge')
+      const s = await app.waitFor('Sent helper one more to do.')
+      const rows = s.split('\n').map(l => [...l].slice(0, app.divider()).join(''))
+      const other = rows.find(l => l.includes('meanwhile, an unrelated note'))!
+      assert.ok(!other.includes('James'), 'your latest message is not the agent\'s work\n' + rows.join('\n'))
+      assert.match(rows.find(l => l.includes('start helper one'))!, /James/, 'its own message shows it')
+    }))
+
   test('a background agent: Claude goes on by itself when it comes back', () =>
     withApp({ unfocused: true, setup: widePanel }, async app => {
       await app.send('background agent please')

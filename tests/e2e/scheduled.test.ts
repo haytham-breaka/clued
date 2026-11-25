@@ -28,7 +28,7 @@ describe('scheduled jobs', () => {
       assert.match(rowOf(s, 'waiting for CI'), /⏲ waiting for CI to finish +scheduled/)
       assert.match(s, /in 10 min/)
       assert.match(rowOf(s, 'Remind the user'), /⏲ Remind the user to tag the release\./)
-      assert.match(s, /in 3 h · by James \(planner\)|at \d\d:\d\d · by James \(planner\)/)
+      assert.match(s, /in 3 h · by James \(planner\)|at (?:\w{3} )?\d\d:\d\d · by James \(planner\)/)
 
       // The view: what it is for, the schedule in words and as cron, who set it up and runs it.
       await app.click('Check the deploy', { area: 'panel' })

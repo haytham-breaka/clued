@@ -312,9 +312,10 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}), ...(topic ? { homeId: topic.id } : {}) })
   })
   // What is being worked on first, then what waits in queue (oldest first: Claude takes them in
-  // order), then the rest by newest activity; the same moment keeps the later message on top.
+  // order), then what Claude still owes with nothing on it ("waiting"), then the rest by newest
+  // activity; the same moment keeps the later message on top.
   const order = new Map(messages.map((m, i) => [m, i]))
-  const rank = (m: MessageRef) => (m.active ? 0 : m.queued ? 1 : 2)
+  const rank = (m: MessageRef) => (m.active ? 0 : m.queued ? 1 : m.stale ? 2 : 3)
   messages.sort((a, b) => rank(a) - rank(b) || (rank(a) === 1 ? order.get(a)! - order.get(b)! : b.updatedAt - a.updatedAt || order.get(b)! - order.get(a)!))
   return { unread: parts.filter(p => !read.has(p.id)), waiting, messages }
 }
