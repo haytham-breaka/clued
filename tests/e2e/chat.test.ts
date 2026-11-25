@@ -293,6 +293,22 @@ describe('chat', () => {
       assert.match(s, /✓ hold on/)
     }))
 
+  test('a queued message Claude Code takes in is no longer in queue: Claude is on it', () =>
+    withApp({}, async app => {
+      await app.send('two steps please')
+      await app.waitFor('First step')
+      await app.send('and one more')
+      let s = await app.waitFor(/⏳ and one more +in queue/)
+      app.release('step1')
+      // Taken in at the step's end (✓✓), the second step still running.
+      s = await app.waitFor(s => s.includes('Second step') && !s.includes('✓ sent'))
+      assert.doesNotMatch(s, /and one more +in queue/)
+      assert.ok(!s.includes('⏸ queued'))
+      app.release('step2')
+      s = await app.waitFor('Also got: and one more')
+      assert.match(s, /✓ and one more/)
+    }))
+
   test('a message Claude Code never echoes back stays ✓ sent: received means Claude Code took it in', () =>
     withApp({ env: { FAKE_NO_ECHO: '1' } }, async app => {
       await app.send('hello there')

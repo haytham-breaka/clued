@@ -874,7 +874,8 @@ function onEvent(e: ClaudeEvent) {
       const sent = S.turns.findLast(x => x.uuid === e.uuid)
       if (!sent) break
       delete sent.delivery
-      // Taken in now: mid-turn, the work goes on under it; after the turn, Claude starts on it.
+      // Taken in now: no longer in queue. Mid-turn, the work goes on under it; after the turn, Claude starts on it.
+      delete sent.queued
       if (!sent.isDone) {
         handOver(sent)
         S.isWorking = true

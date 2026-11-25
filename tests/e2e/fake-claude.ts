@@ -418,6 +418,16 @@ async function scenario(m: Msg) {
     toolResult('pause-2', '')
     return finish(m, 'Finished after the pause.')
   }
+  // Two held steps: a message sent during the first is taken in (echoed) at its end, while the second runs.
+  if (t.includes('two steps')) {
+    tool('two-1', 'Bash', { command: 'sleep 1', description: 'First step' })
+    await release('step1')
+    toolResult('two-1', 'ok')
+    tool('two-2', 'Bash', { command: 'sleep 2', description: 'Second step' })
+    await release('step2')
+    toolResult('two-2', 'ok')
+    return finish(m, 'Both steps are done.')
+  }
   if (t.includes('hold on')) {
     say('Starting the slow work.')
     tool('slow-1', 'Bash', { command: 'sleep 100', description: 'Slow work' })
