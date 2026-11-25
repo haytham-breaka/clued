@@ -73,13 +73,15 @@ export function markdown(src: string, width: number, copy?: (text: string) => vo
   // The chat draws every reply on every frame: each text is rendered once per width. (A cached line's
   // copy action holds an earlier frame's copy function, which does the same.)
   const key = `${width}${copy ? 'c' : ''}\0${src}`
+  // Callers add to the lines they get (the caret while a reply streams): each gets its own copy,
+  // or the final reply, the same words, would keep the caret.
   const known = rendered.get(key)
-  if (known) return known
+  if (known) return known.map(l => [...l])
   copyNow = copy
   try {
     const lines = render(src, width, copy)
     remember(rendered, key, lines)
-    return lines
+    return lines.map(l => [...l])
   } finally {
     copyNow = undefined
   }

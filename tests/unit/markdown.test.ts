@@ -103,4 +103,10 @@ describe('markdown', () => {
     assert.deepEqual(text('a\n\n---\n\n'), ['a', '', '─'.repeat(40)])
     assert.deepEqual(text('a\r\nb'), ['a b'])
   })
+  test('what a caller adds to its lines (the caret) is not in the next one\'s: each gets its own copy', () => {
+    const first = markdown('The deploy is green.', 40)
+    first.at(-1)!.push({ text: '▍' })
+    first.push([{ text: 'extra' }])
+    assert.deepEqual(markdown('The deploy is green.', 40).map(plain), ['The deploy is green.'])
+  })
 })
