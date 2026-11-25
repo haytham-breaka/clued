@@ -212,6 +212,19 @@ describe('inbox', () => {
     assert.ok(!inbox([old, agent, cur, q1, q2], board, new Set(), live()).messages.some(m => m.queued))
   })
 
+  test('while Claude works, only messages not answered yet are in progress, not old ones answered without naming them', () => {
+    const thanked = turn('thanks', { topicId: 'T1' })
+    const lost = turn('lost one', { topicId: 'T2', at: NOW + 1 })
+    const later = turn('later', { topicId: 'T3', at: NOW + 2, answer: '<<reply T3>>\nLater.' })
+    const now = turn('new one', { topicId: 'T4', at: NOW + 3, isDone: false })
+    const board = boardOf(topic('T1', [thanked.key], 'done'), topic('T2', [lost.key], 'done'), topic('T3', [later.key], 'done'), topic('T4', [now.key], 'claude', { isProvisional: true }))
+    const all = [thanked, lost, later, now]
+    assignParts(all, board)
+    const box = inbox(all, board, new Set(), live({ isWorking: true, reacted: new Set([thanked.key]) }))
+    assert.deepEqual(box.messages.filter(m => m.active).map(m => m.turn.text), ['new one'])
+    assert.deepEqual(Object.fromEntries(box.messages.map(m => [m.turn.text, m.state])), { thanks: 'done', 'lost one': 'lost', later: 'done', 'new one': 'claude' })
+  })
+
   test('a status change long after the reply is a status event', () => {
     const a = turn('later', { topicId: 'T1', answer: 'Reply.' })
     const board = boardOf(topic('T1', [a.key], 'done', { updatedAt: NOW + 60_000 }))

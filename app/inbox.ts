@@ -233,7 +233,9 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const waitsOnYou = topic?.status === 'me' && (topic.askedBy ? topic.askedBy.includes(turn.key) : !merged || !!(reply && questionOf(reply.part.text)))
     const state: MessageState = replyId
       ? waitsOnYou ? 'me' : owes || isBusy ? 'progress' : 'done'
-      : turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'
+      // Not answered yet only while no finished answer came after it: an old message Claude answered
+      // without naming it (a ✅, a lost reply) is not "in progress" each time Claude works.
+      : !by && turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'
       // A reaction can be the whole reply (✅ done); a topic Claude's tag settled had a reply that got lost.
       : live.reacted?.has(turn.key) ? 'done' : topic && !topic.isProvisional ? 'lost' : 'none'
     const stale = state === 'progress' && !live.isWorking && !isBusy && live.now - (topic?.updatedAt ?? turn.at) > STALE_MS
