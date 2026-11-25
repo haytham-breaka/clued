@@ -718,6 +718,8 @@ export function tasksBlock(a: Agent, ctx: ChatCtx, width: number): Line[] {
  * messages about this agent and Claude's replies, drawn as in the main chat.
  */
 export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number): { lines: Line[]; anchors: Record<string, number>; owners: string[] } {
+  /** How it is doing now, while it runs (shown again at the foot when your messages follow). */
+  const live: Line[] = []
   const out: Line[] = []
   const IN = 4
   const max = Math.max(20, Math.min(110, width - 6 - IN))
@@ -814,11 +816,12 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
     const now = ctx.now
     const pulse = pulseOf(a, now)
     const doing = pulse.kind === 'tool' ? `running ${pulse.tool} for ${ago(now - pulse.since)}` : `last step ${ago(now - pulse.since)} ago`
-    out.push([pad(IN), { text: `${ctx.spin} working for ${ago(now - a.startedAt)} · ${a.steps} step${a.steps === 1 ? '' : 's'} so far · ${doing}`, style: { fg: C.cyan } }])
+    live.push([pad(IN), { text: `${ctx.spin} working for ${ago(now - a.startedAt)} · ${a.steps} step${a.steps === 1 ? '' : 's'} so far · ${doing}`, style: { fg: C.cyan } }])
     // Nothing new for a while, and nothing running: it may be stuck. Claude can check on it.
     if (pulse.kind === 'quiet')
-      out.push([pad(IN), { text: `◌ no new steps for ${ago(now - pulse.since)}: it may be stuck.`, style: { fg: C.yellow, italic: true } },
+      live.push([pad(IN), { text: `◌ no new steps for ${ago(now - pulse.since)}: it may be stuck.`, style: { fg: C.yellow, italic: true } },
         ...(isQuiet(a, now) && ctx.continueAgent ? [{ text: '  ▶ continue', style: { fg: C.cyan, bold: true }, action: () => ctx.continueAgent!(a.id) }] : [])])
+    out.push(...live)
   }
   // Stopped mid-run by Claude Code's exit: what happened, and going on from here.
   if (a.state === 'stopped' && a.cut) {
@@ -844,6 +847,14 @@ export function agentLines(a: Agent, about: Turn[], ctx: ChatCtx, width: number)
   const ownersShifted: string[] = []
   owners.forEach((o, i) => (ownersShifted[i + shift] = o))
   out.push(...rest.lines)
+  // The view opens at its foot: below your messages about it, how it is doing now shows again, so
+  // a running agent never looks idle behind them.
+  if (about.length && live.length) {
+    const last = a.log.findLast(x => 'step' in x)
+    out.push([], [pad(2), { text: `── where it is now ${'─'.repeat(Math.max(0, width - 24))}`, style: { fg: C.faint } }])
+    if (last && 'step' in last) out.push([pad(IN), { text: clip(`· ${stepLabel(last.step, ctx.cwd).text}`, width - IN - 2), style: { fg: C.gray } }])
+    out.push(...live)
+  }
   return { lines: out, anchors, owners: ownersShifted }
 }
 

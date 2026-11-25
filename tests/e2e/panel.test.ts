@@ -235,6 +235,23 @@ describe('panel', () => {
       assert.match(rows.find(l => l.includes('start helper one'))!, /James/, 'its own message shows it')
     }))
 
+  test('an agent\'s view with your messages about it: how it is doing now shows at the foot, below them', () =>
+    withApp({ unfocused: true, setup: widePanel, height: 50 }, async app => {
+      await app.send('background agent please')
+      await app.waitFor('· Build the project')
+      await app.click('Long job', { area: 'panel' })
+      await app.waitFor('Checking the build first.')
+      await app.send('how is it going')
+      await app.waitFor('your messages about this agent')
+      const s = await app.waitFor('── where it is now')
+      const lines = s.split('\n')
+      const about = lines.findIndex(l => l.includes('your messages about this agent'))
+      const now = lines.findLastIndex(l => /working for \S+ · 1 step so far/.test(l))
+      assert.ok(now > about, 'the live line is below your messages\n' + s)
+      assert.ok(lines.slice(about).some(l => l.includes('── where it is now')) && lines.slice(about).some(l => l.includes('· Build the project')), 'with its last step\n' + lines.slice(about).join('\n'))
+      app.release('bg')
+    }))
+
   test('a background agent: Claude goes on by itself when it comes back', () =>
     withApp({ unfocused: true, setup: widePanel }, async app => {
       await app.send('background agent please')
