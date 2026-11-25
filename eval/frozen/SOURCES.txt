@@ -1,5 +1,5 @@
-Frozen 2026-11-25T18:10:10+04:00. sha256 and mtime of the originals at that moment:
-ef996bd5f04b7e2acc0be778a2d32b0661d0b97816fadfbaeb25cc7668b5957f  17:51:11  hooks/model.ts
-1b79e99c7c62c7e57b3827b9b4104d8b288cbf84ff778b3100f3d1e87e32d9e8  18:09:08  app/inbox.ts
-11b4b1e8c2f70e11d4fc85904d52fd4349d16151bb879d5707829bea741dc02b  18:09:08  app/main.ts
+Frozen 2026-11-25T20:27:37+04:00. sha256 and mtime of the originals at that moment:
+e2b7b5727df8a136131e373347c08ed9d95052311a512c54e263711ba4dd6306  20:16:49  hooks/model.ts
+42f0b7fe015cdaaec2cae5030a4a63b9794e2c800b5528d39e08cf580e2a9d7f  20:15:51  app/inbox.ts
+428efddc3cb002ae55e77216ee7e9bddf5e0fa54dfe22264ad8ad16062ed9009  20:17:15  app/main.ts
 model.ts and inbox.ts here are those files with import paths changed; guide.ts holds main.ts's APP_GUIDE lines (main-app-guide.txt).

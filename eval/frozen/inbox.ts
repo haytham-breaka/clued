@@ -59,6 +59,12 @@ export function lostRepliesPrompt(ids: readonly string[]): string {
   return `Your ${many ? 'replies' : 'reply'} to ${ids.join(', ')} never reached the app: it shows no answer to ${many ? 'them' : 'it'}. Write ${many ? 'each of them' : 'it'} again now as reply text, ${many ? 'each in its own part starting with <<reply T…>> for its message' : `in a part starting with <<reply ${ids[0]}>>`}.`
 }
 
+/** The ids a lostRepliesPrompt() asks again for (the session file has only its text), or undefined. */
+export function lostRepliesAsked(text: string): string[] | undefined {
+  const m = text.match(/^Your repl(?:y|ies) to (T\d+(?:, T\d+)*) never reached the app: it shows no answer to (?:it|them)\./)
+  return m ? m[1]!.split(', ') : undefined
+}
+
 /** Whether text holds reply marks (a reply written mid-turn, not narration). */
 export const hasMarks = (text: string) => /^[ \t]*<<reply\s+[^>]*>>[ \t]*$/im.test(text)
 
@@ -147,6 +153,8 @@ export type MessageRef = {
   active?: boolean
   stale?: boolean
   queued?: boolean
+  /** The topic it lives in now (the one it merged into, when it did). */
+  homeId?: string
   /** When it last moved, and how: you sent it, Claude replied to it, or its status changed. */
   updatedAt: number
   event: 'sent' | 'replied' | 'status'
@@ -184,7 +192,8 @@ const LINKS = new Set(['is', 'are', 'was', 'were', 'uses', 'use', 'has', 'have',
 
 /**
  * The gist of a reply, in one line of `max` cells: its first sentence, without the words at its start
- * that only restate your message ("The port in server.toml is 8137" to "8137"), cut to fit.
+ * that only restate your message ("The port in server.toml is 8137" to "8137"), cut to fit. For a
+ * request, the thing it changed stays as a label: "workers in server.toml is now 6" to "workers: now 6".
  */
 export function answerGist(message: string, reply: string, max: number): string {
   // "Done:" says nothing the ✓ doesn't.
@@ -194,13 +203,26 @@ export function answerGist(message: string, reply: string, max: number): string 
   const restated = (t: string) => pieces(t).length > 0 && pieces(t).every(w => asked.has(w))
   const linking = (t: string) => pieces(t).length === 1 && LINKS.has(pieces(t)[0]!)
   const toks = first.split(' ')
-  // Restated words and the linking words between them ("The port in server.toml is"), if any were restated.
+  // Restated words and the linking words between them ("The port in server.toml is"), if any were
+  // restated; the first restated words in a row are the thing it is about.
   let i = 0
   let any = false
-  while (i < toks.length - 1 && (restated(toks[i]!) || linking(toks[i]!))) any = restated(toks[i++]!) || any
+  const thing: string[] = []
+  while (i < toks.length - 1 && (restated(toks[i]!) || linking(toks[i]!))) {
+    const tok = toks[i++]!
+    any = restated(tok) || any
+    if (!linking(tok) && thing.length === i - 1 - leading(toks, linking)) thing.push(tok.replace(/[,:;]+$/, ''))
+  }
   if (!any) i = 0
-  const gist = toks.slice(i).join(' ')
+  const rest = toks.slice(i).join(' ')
+  const gist = i && thing.length && !/\?\s*$/.test(message) ? `${thing.join(' ')}: ${rest}` : rest
   return gist.length > max ? `${gist.slice(0, max - 1).trimEnd()}…` : gist
+}
+/** How many linking words a sentence starts with ("The …"). */
+const leading = (toks: string[], linking: (t: string) => boolean) => {
+  let n = 0
+  while (n < toks.length && linking(toks[n]!)) n++
+  return n
 }
 
 /** The last question in a part, if it ends on one (what "waiting on you" shows). */
@@ -240,6 +262,10 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     if (turns[i]!.answer && turns[i]!.parts?.length && !turns[i]!.followUp) next = turns[i]
     answeredBy[i] = next
   }
+  // The topics agents are on: a message merged into one (written in its view) is worked on with it,
+  // so the request it continues isn't "not started" while an agent works for the follow-up.
+  const homeOf = (t: Turn) => { const id = topicOfTurn(board, t); return (board.topics.find(x => x.id === id) ?? board.topics.find(x => x.messageKeys.includes(t.key)))?.id }
+  const busyTopics = new Set(turns.filter(t => live.busy.has(t.key)).map(homeOf).filter((id): id is string => !!id))
   const messages: MessageRef[] = []
   turns.forEach((turn, i) => {
     if (turn.reaction || turn.followUp || turn.text.startsWith('/')) return
@@ -255,7 +281,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     // answers). Taking the answer's first part instead linked "answered" to some other message's reply
     // when its own reply never arrived. History from before the app has no topics: there it is the answer.
     const replyId = latest?.id ?? own?.id ?? (topicId || topic ? undefined : by?.parts?.[0]?.id)
-    const isBusy = live.busy.has(turn.key)
+    const isBusy = live.busy.has(turn.key) || (!!topic && busyTopics.has(topic.id))
     // "claude" after a settled tag means Claude still owes work: an "OK, I'll do it" is not done.
     const owes = !!topic && !topic.isProvisional && topic.status === 'claude'
     const reply = replyId ? parts.find(p => p.id === replyId) : undefined
@@ -265,7 +291,9 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const waitsOnYou = topic?.status === 'me' && (topic.askedBy ? topic.askedBy.includes(turn.key) : !merged || !!(reply && questionOf(reply.part.text)))
     const state: MessageState = replyId
       ? waitsOnYou ? 'me' : owes || isBusy ? 'progress' : 'done'
-      : turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'
+      // Not answered yet only while no finished answer came after it: an old message Claude answered
+      // without naming it (a ✅, a lost reply) is not "in progress" each time Claude works.
+      : !by && turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'
       // A reaction can be the whole reply (✅ done); a topic Claude's tag settled had a reply that got lost.
       : live.reacted?.has(turn.key) ? 'done' : topic && !topic.isProvisional ? 'lost' : 'none'
     const stale = state === 'progress' && !live.isWorking && !isBusy && live.now - (topic?.updatedAt ?? turn.at) > STALE_MS
@@ -278,7 +306,7 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)
     // The tag that came with a reply stamps its topic a moment later: that is still the reply.
     const event = updatedAt === turn.at ? 'sent' : repliedAt && updatedAt - repliedAt < 10_000 ? 'replied' : 'status'
-    messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}) })
+    messages.push({ turn, topicId, state, replyId, ...(reply ? { replyText: reply.part.text } : {}), updatedAt, event, ...(active ? { active } : {}), ...(stale ? { stale } : {}), ...(queued ? { queued } : {}), ...(topic ? { homeId: topic.id } : {}) })
   })
   // What is being worked on first, then what waits in queue (oldest first: Claude takes them in
   // order), then the rest by newest activity; the same moment keeps the later message on top.

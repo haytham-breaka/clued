@@ -17,7 +17,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // Frozen copies of hooks/model.ts and app/inbox.ts, and APP_GUIDE from app/main.ts (see frozen/SOURCES.txt).
-import { emptyBoard, flatBrief, FLAT_GUIDE, keyOf, parseTag, raiseTopic, settleTurn, stripTag } from './frozen/model.ts'
+import { chainNote, emptyBoard, flatBrief, FLAT_GUIDE, keyOf, parseTag, raiseTopic, settleTurn, stripTag } from './frozen/model.ts'
 import { hasMarks, lostRepliesPrompt, preview, questionsOf, REPLY_GUIDE, splitAnswer, stripMarks } from './frozen/inbox.ts'
 import { APP_GUIDE } from './frozen/guide.ts'
 import type { Board } from '../types/index.d.ts'
@@ -28,8 +28,11 @@ const FROZEN = Object.fromEntries(['model.ts', 'inbox.ts', 'guide.ts'].map(f => 
 
 // ---- Options -----------------------------------------------------------------------
 
-type Arm = 'A' | 'B'
-type SetName = 'baseline' | 'hard'
+/** A: clued's note. B: plain, quotes as `> ` lines. C: A, plus the request's chain when the quoted message is from before a compaction. */
+type Arm = 'A' | 'B' | 'C'
+/** The arms that run as the app does (APP_GUIDE, notes, tags, reply parts). */
+const isApp = (arm: Arm) => arm !== 'B'
+type SetName = 'baseline' | 'hard' | 'chain'
 type Opts = {
   rescore?: string; set: SetName | 'all'; reps: number; concurrency: number; seed: number
   model: string; budget: number; runCap: number; maxTurns: number; scenarios?: string[]; arms: Arm[]
@@ -50,7 +53,7 @@ function parseArgs(argv: string[]): Opts {
     else if (a === '--run-cap') o.runCap = Number(v())
     else if (a === '--max-turns') o.maxTurns = Number(v())
     else if (a === '--scenarios') o.scenarios = v().split(',').filter(Boolean)
-    else if (a === '--arms') o.arms = v().split(',').filter((x): x is Arm => x === 'A' || x === 'B')
+    else if (a === '--arms') o.arms = v().split(',').filter((x): x is Arm => x === 'A' || x === 'B' || x === 'C')
     else if (a === '--judge') o.judge = true
     else if (a === '--out') o.out = v()
     else if (a === '--keep-tmp') o.keepTmp = true
@@ -72,12 +75,13 @@ type Expect = { name: string; re: string; about?: string }
 type Message = { id: string; send: 'start' | 'idle' | 'afterTool' | 'after'; delayMs?: number; text: string; about?: string; quote?: { who: 'me' | 'claude'; of: string }; expect: Expect[] }
 /** A check on the project afterwards: a regex on a file, a command, or Python code run in the project. `msg`: the message it judges. */
 type Check = { name: string; msg?: string; file?: string; re?: string; absent?: boolean; cmd?: string[]; py?: string }
-type Scenario = { id: string; set: SetName; about: string; fixture: string; messages: Message[]; checks: Check[] }
+/** `compactBefore`: a message id; before it is sent, the harness sends `/compact` (in every arm) and waits for the compaction. */
+type Scenario = { id: string; set: SetName; about: string; fixture: string; messages: Message[]; checks: Check[]; compactBefore?: string }
 
 function loadScenarios(): Scenario[] {
   const read = (file: string, set: SetName, fixture: string) =>
     (JSON.parse(readFileSync(join(HERE, file), 'utf8')).scenarios as Scenario[]).map(s => ({ ...s, set, fixture: s.fixture ?? fixture }))
-  return [...read('scenarios-hard.json', 'hard', 'fixture-hard'), ...read('scenarios.json', 'baseline', 'fixture')]
+  return [...read('scenarios-hard.json', 'hard', 'fixture-hard'), ...read('scenarios.json', 'baseline', 'fixture'), ...read('scenarios-chain.json', 'chain', 'fixture-hard')]
 }
 
 // ---- One run ---------------------------------------------------------------------------
@@ -96,6 +100,8 @@ export type Run = {
   sent: Sent[]; texts: TextBlock[]; tools: { t: number; name: string; sub: boolean }[]; calls: Call[]; results: Result[]; perms: Perm[]
   checks: { name: string; msg?: string; ok: boolean; detail?: string }[]
   board?: Board; costUsd: number
+  /** When Claude Code's compact_boundary came (ms since the start), if it did. */
+  compactedAt?: number
   /** Arm A: the app asking again for replies its tag settled but that never arrived (as app/main.ts askForLost()). */
   retries?: { t: number; ids: string[]; text: string }[]
 }
@@ -155,7 +161,7 @@ function quoteFor(run: Run, sc: Scenario, of: string): { text: string; topics?: 
   const ofMsg = sc.messages.find(m => m.id === of)
   if (!target || !ofMsg) return { text: '' }
   const finals = run.results.filter(r => r.t >= target.t)
-  if (run.arm === 'A' && target.topicId) {
+  if (isApp(run.arm) && target.topicId) {
     const part = replyParts(run).parts.filter(p => p.to.includes(target.topicId!) && p.t >= target.t).at(-1)
     if (part) return { text: stripTag(part.text), topics: part.to }
   }
@@ -164,10 +170,30 @@ function quoteFor(run: Run, sc: Scenario, of: string): { text: string; topics?: 
   return { text: hits.length ? hits.join('\n\n') : answer }
 }
 
+/**
+ * Arm C, as app/main.ts chainFor(): a reply to a message from before the compaction brings its request's
+ * chain along. The request here is the quoted part's topic (else the quoted message's own): its messages
+ * and the reply parts naming it, in order, less the quoted text itself.
+ */
+function chainFor(run: Run, quote: { who: 'me' | 'claude'; of: string }, q: { text: string; topics?: string[] }): string {
+  const target = run.sent.find(s => s.id === quote.of)
+  if (!target || run.compactedAt === undefined || target.t > run.compactedAt) return ''
+  const topic = q.topics?.[0] ?? target.topicId
+  if (!topic) return ''
+  const pieces = [
+    ...run.sent.filter(s => s.topicId === topic).map(s => ({ t: s.t, who: 'me' as const, text: s.text })),
+    ...replyParts(run).parts.filter(p => p.to.includes(topic)).map(p => ({ t: p.t, who: 'claude' as const, text: stripTag(p.text) })),
+  ].sort((a, b) => a.t - b.t)
+  const same = (p: { who: string; text: string }) => p.who === quote.who && p.text.trim() === q.text.trim()
+  const [first, ...more] = pieces
+  const rest = more.filter(p => !same(p))
+  return first && (rest.length || !same(first)) ? chainNote([first, ...rest], 'compacted') : ''
+}
+
 async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts, cap: number): Promise<Run> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'tl-eval-')))
   cpSync(join(HERE, sc.fixture), dir, { recursive: true })
-  const args = [...baseArgs(o, cap), ...(arm === 'A' ? ['--append-system-prompt', APP_GUIDE] : [])]
+  const args = [...baseArgs(o, cap), ...(isApp(arm) ? ['--append-system-prompt', APP_GUIDE] : [])]
   const t0 = Date.now()
   const run: Run = { scenario: sc.id, set: sc.set, arm, rep, slot, dir, startedAt: new Date(t0).toISOString(), wallMs: 0, timedOut: false, exitCode: null, stderr: '', sent: [], texts: [], tools: [], calls: [], results: [], perms: [], checks: [], costUsd: 0 }
   const raw: string[] = []
@@ -200,6 +226,7 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
     switch (e.type) {
       case 'system':
         if (e.subtype === 'init') run.model = e.model
+        else if (e.subtype === 'compact_boundary') run.compactedAt = t
         return
       case 'stream_event': {
         const ev = e.event
@@ -236,7 +263,7 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
         }
         run.results.push(r)
         // As app/main.ts finishTurn(): the answer's tag settles the topics.
-        if (arm === 'A' && r.text) {
+        if (isApp(arm) && r.text) {
           board = settleTurn(board, r.text, Date.now(), { flat: true }).board
           // Its unmarked text replies to every message since the last answer.
           for (const p of splitAnswer(r.text, sinceResult)) p.to.forEach(id => replied.add(id))
@@ -297,7 +324,7 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
     const q = m.quote ? (m.quote.who === 'me' ? { text: run.sent.find(s => s.id === m.quote!.of)?.text ?? '' } : quoteFor(run, sc, m.quote.of)) : undefined
     let note: string | undefined
     let topicId: string | undefined
-    if (arm === 'A') {
+    if (isApp(arm)) {
       // As app/main.ts submit(): quoting a reply answers its question; else a plain answer to the one open question does.
       const quotedTopics = q?.topics ?? []
       const asked = board.topics.filter(t => t.status === 'me')
@@ -307,13 +334,17 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
       const raised = raiseTopic(board, { text: m.text, key: keyOf(m.text), replyTo: null }, now)
       topicId = raised.topicId
       note = flatBrief(raised.board, raised.topicId, q ? [{ who: m.quote!.who, text: q.text, ...(q.topics ? { topics: q.topics } : {}) }] : [])
+      if (arm === 'C' && m.quote && q) {
+        const chain = chainFor(run, m.quote, q)
+        if (chain) note = `${note}\n${chain}`
+      }
       const qs = questionsOf(m.text)
       if (qs.length) note = `${note}\nIt asks ${qs.length} things: ${qs.map((x, i) => `${raised.topicId}.${i + 1} "${preview(x, 80)}"`).join('; ')}.`
       board = raised.board
     }
     // B gets the same quote as prose: what a CLI user pastes above their reply.
     const shown = q ? `${asQuote(q.text)}\n\n${m.text}` : m.text
-    const content = arm === 'A' ? (note ? [{ type: 'text', text: m.text }, { type: 'text', text: note }] : m.text) : shown
+    const content = isApp(arm) ? (note ? [{ type: 'text', text: m.text }, { type: 'text', text: note }] : m.text) : shown
     write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' })
     run.sent.push({ id: m.id, t: now - t0, text: m.text, shown, ...(note ? { note } : {}), ...(topicId ? { topicId } : {}), ...(q ? { quoted: q.text } : {}), midTurn })
     if (topicId) sinceResult.push(topicId)
@@ -330,6 +361,14 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
   const idle = (quiet: number) => () => lastType === 'result' && Date.now() - lastEventAt >= quiet
 
   for (const m of sc.messages) {
+    if (m.id === sc.compactBefore) {
+      // As the user typing /compact: Claude Code summarizes the conversation so far (every arm alike).
+      await until(idle(1500))
+      write({ type: 'user', message: { role: 'user', content: '/compact' }, parent_tool_use_id: null, session_id: '' })
+      lastType = 'sent'
+      lastEventAt = Date.now()
+      await until(() => run.compactedAt !== undefined && lastType === 'result')
+    }
     if (m.send === 'idle') await until(idle(1500))
     else if (m.send === 'afterTool') await until(() => toolSinceSend || lastType === 'result')
     if (m.delayMs) await sleep(m.delayMs)
@@ -346,7 +385,7 @@ async function runOne(sc: Scenario, arm: Arm, rep: number, slot: number, o: Opts
 
   // In stream-json mode total_cost_usd on a result is cumulative for the process; usage and num_turns are per turn (README).
   run.costUsd = Math.max(0, ...run.results.map(r => r.costUsd))
-  if (arm === 'A') run.board = board
+  if (isApp(arm)) run.board = board
 
   for (const c of sc.checks) {
     const base = { name: c.name, ...(c.msg ? { msg: c.msg } : {}) }
@@ -418,7 +457,7 @@ function replyParts(run: Run): { parts: ReplyPart[]; marks: number; badMarks: st
   const badMarks: string[] = []
   const known = new Set(run.sent.map(s => s.topicId).filter(Boolean) as string[])
   const markIds = new Set<string>()
-  if (run.arm !== 'A') return { parts, marks, badMarks, markIds }
+  if (!isApp(run.arm)) return { parts, marks, badMarks, markIds }
   let since: string[] = []
   let si = 0
   let prevT = -1
@@ -500,7 +539,7 @@ export function score(sc: Scenario, run: Run): RunScore {
       const alone = !!own && groupSize(g) === 1 && re.test(plain(own.text))
       const cued = !!about && laterFinals.some(r => segments(r.text).some(seg => re.test(seg) && new RegExp(about, 'i').test(seg)))
       const f: MessageScore['facts'][number] = { name: e.name, final, any: re.test(after), attributed: final && (alone || cued || (!about && final)) }
-      if (run.arm === 'A' && s.topicId) {
+      if (isApp(run.arm) && s.topicId) {
         const mine = parts.filter(p => p.to.includes(s.topicId!) && p.t >= s.t && re.test(plain(p.text)))
         const other = parts.filter(p => p.t >= s.t && !p.to.includes(s.topicId!) && re.test(plain(p.text)))
         f.attribution = mine.some(p => p.to.length === 1) ? 'own' : mine.some(p => p.marked) ? 'grouped' : mine.length ? 'shared' : other.length ? 'other' : 'missing'
@@ -513,7 +552,7 @@ export function score(sc: Scenario, run: Run): RunScore {
     if (reacted) out.reacted = reacted
     const mine = run.checks.filter(c => c.msg === m.id)
     if (mine.length) out.checksOk = mine.every(c => c.ok)
-    if (run.arm === 'A' && s.topicId) {
+    if (isApp(run.arm) && s.topicId) {
       out.attribution = worst(facts.map(f => f.attribution!))
       out.named = markIds.has(s.topicId)
       out.inTag = finals.some(r => r.t >= s.t && (parseTag(r.text)?.topics ?? []).some(t => t.id === s.topicId || t.same_as === s.topicId))
@@ -521,7 +560,7 @@ export function score(sc: Scenario, run: Run): RunScore {
     return out
   })
   const known = new Set(run.sent.map(x => x.topicId).filter(Boolean) as string[])
-  const badTagIds = run.arm === 'A' ? finals.flatMap(r => (parseTag(r.text)?.topics ?? []).map(t => t.id).filter(id => !known.has(id))) : []
+  const badTagIds = isApp(run.arm) ? finals.flatMap(r => (parseTag(r.text)?.topics ?? []).map(t => t.id).filter(id => !known.has(id))) : []
   return { messages, marks, badMarks, badTagIds, tags: finals.filter(r => parseTag(r.text)).length, results: finals.length, checksOk: run.checks.filter(c => c.ok).length, checksTotal: run.checks.length }
 }
 
@@ -530,6 +569,7 @@ export function score(sc: Scenario, run: Run): RunScore {
 /** Both arms rendered the same way: the user's messages as B sends them, Claude's text in order with marks, tags and topic ids removed. */
 function transcript(run: Run): string {
   const items: { t: number; line: string }[] = run.sent.map((s, i) => ({ t: s.t, line: `[U${i + 1}] user${s.midTurn ? ' (sent while the assistant was working)' : ''}:\n${s.shown}` }))
+  if (run.compactedAt !== undefined) items.push({ t: run.compactedAt, line: '(here the user ran /compact: the assistant kept only its summary of the conversation so far)' })
   for (const x of run.texts.filter(x => !x.sub)) {
     const text = plain(x.text)
     if (text) items.push({ t: x.t, line: `assistant:\n${text}` })
@@ -696,18 +736,19 @@ function summary(rows: Row[], o: Opts, spent: number, stopped: string): string {
   L.push(`Frozen sources (sha256): ${Object.entries(FROZEN).map(([k, v]) => `${k} ${v.slice(0, 12)}`).join(', ')}; APP_GUIDE ${APP_GUIDE.length} chars.`, '')
   const fmtMoney = (x: number) => x.toFixed(4)
   const fmtInt = (x: number) => Math.round(x).toLocaleString('en-US')
-  for (const set of ['hard', 'baseline'] as SetName[]) {
+  for (const set of ['hard', 'baseline', 'chain'] as SetName[]) {
     const rs = rows.filter(r => r.sc.set === set)
     if (!rs.length) continue
     L.push(`## Set: ${set} (${rs.length} runs)`, '')
     L.push('Mean ± sd per run, over every run of the set (scenarios pooled).', '')
-    L.push('| metric | A threadline | B plain | A − B (stratified by scenario) | permutation p |')
-    L.push('|---|---|---|---|---|')
+    // Arm C (the chain note) gets its own column when it ran; the A − B test leaves it out.
+    const withC = rs.some(r => r.run.arm === 'C')
+    L.push(`| metric | A threadline | B plain |${withC ? ' C threadline + chain |' : ''} A − B (stratified by scenario) | permutation p |`)
+    L.push(`|---|---|---|${withC ? '---|' : ''}---|---|`)
     const line = (label: string, key: Metric, fmt: (x: number) => string) => {
-      const a = rs.filter(r => r.run.arm === 'A').map(r => metrics(r)[key])
-      const b = rs.filter(r => r.run.arm === 'B').map(r => metrics(r)[key])
+      const of = (arm: Arm) => rs.filter(r => r.run.arm === arm).map(r => metrics(r)[key])
       const c = compare(rs, key)
-      L.push(`| ${label} | ${ms(a, fmt)} | ${ms(b, fmt)} | ${Number.isFinite(c.diff) ? fmt(c.diff) : '-'} | ${f(c.p, 3)} |`)
+      L.push(`| ${label} | ${ms(of('A'), fmt)} | ${ms(of('B'), fmt)} |${withC ? ` ${ms(of('C'), fmt)} |` : ''} ${Number.isFinite(c.diff) ? fmt(c.diff) : '-'} | ${f(c.p, 3)} |`)
     }
     line('cost $', 'cost', fmtMoney)
     line('input tokens (all)', 'allInput', fmtInt)
@@ -737,7 +778,7 @@ function summary(rows: Row[], o: Opts, spent: number, stopped: string): string {
     L.push('| scenario | arm | n | cost $ | input | output | turn s | answered | attributed | checks | judge clear | judge misattr. |')
     L.push('|---|---|---|---|---|---|---|---|---|---|---|---|')
     for (const id of [...new Set(rs.map(r => r.sc.id))])
-      for (const arm of ['A', 'B'] as Arm[]) {
+      for (const arm of ['A', 'B', 'C'] as Arm[]) {
         const xs = rs.filter(r => r.sc.id === id && r.run.arm === arm).map(metrics)
         if (!xs.length) continue
         const col = (k: Metric, fmt: (x: number) => string) => ms(xs.map(x => x[k]), fmt)
@@ -771,7 +812,7 @@ function failures(rows: Row[]) {
       if (!m.addressedFinal) why.push(`${m.reacted ? `reaction-only reply (${m.reacted}); ` : ''}missing facts: ${m.facts.filter(x => !x.final).map(x => x.name).join(', ')}`)
       else if (!m.attributed) why.push(`facts not tied to this message: ${m.facts.filter(x => !x.attributed).map(x => x.name).join(', ')}`)
       if (m.checksOk === false) why.push(`checks failed: ${r.run.checks.filter(c => c.msg === m.id && !c.ok).map(c => c.name).join(', ')}`)
-      if (r.run.arm === 'A' && m.attribution && !['own', 'grouped'].includes(m.attribution)) why.push(`A structure: ${m.attribution}`)
+      if (isApp(r.run.arm) && m.attribution && !['own', 'grouped'].includes(m.attribution)) why.push(`A structure: ${m.attribution}`)
       if (j && (j.misattributed || j.clear === 0 || j.answered === 0 || j.correct === false)) why.push(`judge: ${JSON.stringify(j)}`)
       if (!why.length) return
       const s = r.run.sent.find(x => x.id === m.id)

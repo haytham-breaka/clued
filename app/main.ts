@@ -15,6 +15,8 @@ import { execFile, spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import {
+  CHAIN_FAR,
+  chainNote,
   emptyBoard,
   flatBrief,
   FLAT_GUIDE,
@@ -1067,6 +1069,11 @@ function onEvent(e: ClaudeEvent) {
     }
     case 'status':
       if (e.text === 'compacting') toast('Compacting the conversation…')
+      // What came before is left to Claude's summary: a reply to it brings its chain along.
+      if (e.text === 'compacted') {
+        const last = S.turns.at(-1)
+        if (last) last.compacted = true
+      }
       break
     case 'exit':
       if (!quitting) {
@@ -1239,6 +1246,33 @@ function autoLink(json: string) {
   }
 }
 
+/**
+ * The chain of the request a quoted message belongs to, for the note, when that message is from before
+ * Claude Code's last compaction or more than CHAIN_FAR of your messages back. Empty otherwise.
+ */
+function chainFor(q: Quote): string {
+  const at = S.turns.findLastIndex(t => t.key === q.key)
+  if (at < 0) return ''
+  const compactedAt = S.turns.findLastIndex(t => t.compacted)
+  const since = S.turns.slice(at + 1).filter(t => !t.reaction && !t.followUp && t.text).length
+  const why = at <= compactedAt ? 'compacted' : since >= CHAIN_FAR ? 'far' : undefined
+  if (!why) return ''
+  // The request: the topic the quoted reply answered, else the quoted message's own.
+  const topic = q.topics?.length ? S.kept.board.topics.find(t => t.id === q.topics![0]) : undefined
+  const reqKey = topic?.messageKeys[0] ?? S.turns[at]!.key
+  const req = S.turns.findLast(t => t.key === reqKey) ?? S.turns[at]!
+  const info = requestInfo(req)
+  const pieces: { who: 'me' | 'claude'; text: string }[] = []
+  for (const t of info.turns) {
+    if (info.keys.has(t.key) && !t.reaction && t.text) pieces.push({ who: 'me', text: t.text })
+    for (const p of t.parts ?? []) if (p.to.some(id => info.ids.includes(id))) pieces.push({ who: 'claude', text: p.text })
+  }
+  // The message replied to is quoted already (the request's first message stays, as its start).
+  const [first, ...more] = pieces
+  const rest = more.filter(p => !(p.who === q.who && p.text.trim() === q.text.trim()))
+  return first && (rest.length || !(first.who === q.who && first.text.trim() === q.text.trim())) ? chainNote([first, ...rest], why) : ''
+}
+
 /** `about`: the request (turn key) it is part of, as when written inside that request's view. */
 /** `agent`: the agent (Agent tool use id) it is about, as when written inside that agent's view. */
 function submit(text: string, opts: { reaction?: string; about?: string; agent?: string; retry?: string[] } = {}) {
@@ -1263,6 +1297,9 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     const raised = raiseTopic(S.kept.board, { text, key: turn.key, replyTo: null }, now)
     turn.topicId = raised.topicId
     hidden = flatBrief(raised.board, raised.topicId, reply?.quotes ?? [])
+    // A reply to a message Claude no longer holds word for word: its request's chain comes along.
+    const chain = reply?.quotes.length === 1 ? chainFor(reply.quotes[0]!) : ''
+    if (chain) hidden = `${hidden}\n${chain}`
     // Several questions in one message: numbered, so a reply can say which it answers (each is quoted).
     const qs = questionsOf(text)
     if (qs.length) hidden = `${hidden}\nIt asks ${qs.length} things: ${qs.map((q, i) => `${raised.topicId}.${i + 1} "${preview(q, 80)}"`).join('; ')}.`

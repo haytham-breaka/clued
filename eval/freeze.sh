@@ -13,7 +13,7 @@ done
 mkdir -p eval/frozen
 cp hooks/model.ts eval/frozen/model.ts
 cp app/inbox.ts eval/frozen/inbox.ts
-sed -i "s|from '../types'|from '../../types/index.d.ts'|" eval/frozen/model.ts
+sed -i "s|from '../types'|from '../../types/index.d.ts'|; s|from '../types/index.d.ts'|from '../../types/index.d.ts'|" eval/frozen/model.ts
 sed -i "s|from '../hooks/model.ts'|from './model.ts'|; s|from '../types/index.d.ts'|from '../../types/index.d.ts'|; s|from './session.ts'|from '../../app/session.ts'|; s|from './text.ts'|from '../../app/text.ts'|" eval/frozen/inbox.ts
 # The guide lines in main.ts must be the ones guide.ts holds.
 start=$(grep -n '^const APP_GUIDE = \[' app/main.ts | cut -d: -f1)

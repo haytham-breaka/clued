@@ -10,6 +10,7 @@ Runs the same conversations through Claude Code two ways and compares cost, cont
   - **Status updates.** A quoted reply moves its topic back to "on Claude"; otherwise a plain answer moves the one open question back, as `submit()` does.
   - **Settling.** After every `result`, the board is settled with `settleTurn(…, { flat: true })`, as `finishTurn()` does.
 - **B, plain:** the same process, flags, model and messages, without `--append-system-prompt` and without notes. A quoted reply is sent as the quote in `> ` lines above the user's text, so both arms get the same information.
+- **C, threadline + chain** (the `chain` set): A, plus the request's chain when the quoted message is from before a compaction, as `chainFor()` in `app/main.ts` adds it. The note gains `chainNote()`'s lines: the request's first message, then its last few messages and reply parts, in order, trimmed to about 2,000 characters. In the eval, the request is the quoted part's topic: its messages and the reply parts naming it.
 
 ## Frozen app code
 
@@ -43,14 +44,14 @@ node --no-warnings eval/run.ts --scenarios burst --reps 5 --concurrency 2 --seed
 
 | flag | default | meaning |
 |---|---|---|
-| `--set` | `hard` | `hard` (`scenarios-hard.json` on `fixture-hard/`), `baseline` (`scenarios.json` on `fixture/`), or `all` |
+| `--set` | `hard` | `hard` (`scenarios-hard.json` on `fixture-hard/`), `baseline` (`scenarios.json` on `fixture/`), `chain` (`scenarios-chain.json` on `fixture-hard/`), or `all` |
 | `--reps` | `1` | runs per scenario per arm. The arm order is shuffled per repeat (seeded by `--seed`). |
 | `--concurrency` | `1` | runs at once |
 | `--model` | `sonnet` | `claude --model`, for both arms and the judge |
 | `--budget` | `3` | hard cap in USD for the invocation, summed from `total_cost_usd` (runs and judge). See below. |
 | `--run-cap` | `1` | `--max-budget-usd` for each claude process (lowered near the end of the budget) |
 | `--max-turns` | `12` | `--max-turns` for each claude process (applies per turn) |
-| `--scenarios`, `--arms` | all, `A,B` | subsets |
+| `--scenarios`, `--arms` | all, `A,B` | subsets; `C` is the chain arm (`--set chain --arms A,B,C`) |
 | `--judge` | off | one blind-judge call per run |
 | `--out` | `eval/results/run-<time>` | where `results.json`, `summary.md` and `raw/<scenario>-<arm>-r<rep>.jsonl` go |
 | `--keep-tmp`, `--quiet-ms`, `--timeout-min` | off, `6000`, `12` | keep temp dirs; how long the stream must stay quiet after the last `result`; the limit per run |
@@ -66,6 +67,8 @@ node --no-warnings eval/run.ts --scenarios burst --reps 5 --concurrency 2 --seed
 ## Scenario format
 
 `scenarios*.json` define each conversation:
+
+- `compactBefore`: a message id. Before sending it, the harness waits for idle, sends `/compact` (every arm alike) and waits for Claude Code's `compact_boundary`. The judge's transcript shows where it happened.
 
 - `messages[]`:
   - `send`: when the message goes out:

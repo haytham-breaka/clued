@@ -1,0 +1,159 @@
+{
+  "_doc": "Replies to a message from before a compaction. Each scenario: a request with a detail only in the user's first message, two unrelated requests that grow the context (a pasted log, an edit), then /compact (compactBefore), then a reply quoting Claude's answer to the first request, asking for something that needs the detail. Arms: A (clued's note), B (plain, the quote as > lines), C (A plus the request's chain). The fixture is fixture-hard.",
+  "scenarios": [
+    {
+      "id": "chain-detail",
+      "about": "A short detail in the request's first message (the staging port and health route), needed after a compaction.",
+      "compactBefore": "m4",
+      "messages": [
+        {
+          "id": "m1",
+          "send": "start",
+          "text": "Context for later: our staging box runs this server on port 9412, and its health route there is /readyz (production uses /healthz). For now: which port does server.toml set?",
+          "about": "port|server",
+          "expect": [
+            {
+              "name": "port 8137",
+              "re": "8137"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "send": "idle",
+          "text": "Here's the checkout log from last night's run:\n```\n02:00:00 INFO  checkout order=A-1001 status=ok total=46.50 items=6 worker=1\n02:00:29 INFO  checkout order=A-1003 status=ok total=218.68 items=1 worker=3\n02:01:58 INFO  checkout order=A-1008 status=ok total=22.64 items=2 worker=1\n02:01:27 INFO  checkout order=A-1009 status=ok total=119.53 items=1 worker=2\n02:02:56 INFO  checkout order=A-1012 status=ok total=149.54 items=1 worker=1\n02:02:25 INFO  checkout order=A-1015 status=ok total=169.80 items=5 worker=1\n02:03:54 INFO  checkout order=A-1020 status=ok total=157.50 items=1 worker=2\n02:03:23 INFO  checkout order=A-1021 status=ok total=150.17 items=3 worker=4\n02:04:52 INFO  checkout order=A-1024 status=ok total=146.15 items=5 worker=3\n02:04:21 INFO  checkout order=A-1029 status=ok total=216.87 items=2 worker=1\n02:05:50 INFO  checkout order=A-1032 status=ok total=154.81 items=2 worker=3\n02:05:19 INFO  checkout order=A-1033 status=ok total=148.91 items=1 worker=1\n02:06:48 INFO  checkout order=A-1038 status=ok total=60.63 items=6 worker=4\n02:06:17 INFO  checkout order=A-1040 status=ok total=127.74 items=4 worker=3\n02:07:46 ERROR checkout order=A-1042 status=failed reason=\"card declined\" retry=0\n02:07:15 INFO  checkout order=A-1045 status=ok total=211.23 items=6 worker=2\n02:08:44 INFO  checkout order=A-1048 status=ok total=155.38 items=5 worker=4\n02:08:13 INFO  checkout order=A-1052 status=ok total=194.57 items=3 worker=1\n02:09:42 INFO  checkout order=A-1054 status=ok total=139.53 items=2 worker=3\n02:09:11 INFO  checkout order=A-1057 status=ok total=133.53 items=1 worker=1\n02:10:40 INFO  checkout order=A-1062 status=ok total=154.40 items=3 worker=3\n02:10:09 INFO  checkout order=A-1065 status=ok total=135.74 items=4 worker=1\n02:11:38 INFO  checkout order=A-1066 status=ok total=77.60 items=6 worker=1\n02:11:07 INFO  checkout order=A-1069 status=ok total=195.89 items=3 worker=4\n02:12:36 INFO  checkout order=A-1073 status=ok total=191.49 items=6 worker=3\n02:12:05 ERROR checkout order=A-1077 status=failed reason=\"address missing\" retry=0\n02:13:34 INFO  checkout order=A-1079 status=ok total=98.21 items=5 worker=1\n02:13:03 INFO  checkout order=A-1082 status=ok total=23.27 items=3 worker=2\n02:14:32 INFO  checkout order=A-1086 status=ok total=71.50 items=4 worker=4\n02:14:01 INFO  checkout order=A-1087 status=ok total=50.57 items=4 worker=3\n02:15:30 INFO  checkout order=A-1090 status=ok total=217.55 items=5 worker=3\n02:15:59 INFO  checkout order=A-1095 status=ok total=114.45 items=6 worker=4\n02:16:28 INFO  checkout order=A-1096 status=ok total=46.10 items=2 worker=2\n02:16:57 INFO  checkout order=A-1099 status=ok total=176.29 items=1 worker=4\n02:17:26 ERROR checkout order=A-1103 status=failed reason=\"card declined\" retry=0\n02:17:55 INFO  checkout order=A-1105 status=ok total=75.36 items=1 worker=2\n02:18:24 INFO  checkout order=A-1109 status=ok total=144.47 items=5 worker=3\n02:18:53 INFO  checkout order=A-1111 status=ok total=184.65 items=5 worker=1\n02:19:22 INFO  checkout order=A-1115 status=ok total=238.99 items=6 worker=4\n02:19:51 INFO  checkout order=A-1118 status=ok total=110.50 items=1 worker=4\n02:20:20 INFO  checkout order=A-1122 status=ok total=110.07 items=2 worker=1\n02:20:49 INFO  checkout order=A-1123 status=ok total=120.20 items=1 worker=3\n02:21:18 INFO  checkout order=A-1128 status=ok total=21.13 items=1 worker=2\n02:21:47 INFO  checkout order=A-1131 status=ok total=33.46 items=5 worker=1\n02:22:16 INFO  checkout order=A-1132 status=ok total=231.26 items=5 worker=4\n02:22:45 INFO  checkout order=A-1135 status=ok total=170.32 items=3 worker=3\n02:23:14 INFO  checkout order=A-1139 status=ok total=39.14 items=4 worker=4\n02:23:43 INFO  checkout order=A-1142 status=ok total=131.39 items=1 worker=2\n02:24:12 INFO  checkout order=A-1144 status=ok total=199.43 items=6 worker=3\n02:24:41 INFO  checkout order=A-1148 status=ok total=220.88 items=2 worker=1\n02:25:10 INFO  checkout order=A-1150 status=ok total=143.46 items=2 worker=1\n02:25:39 INFO  checkout order=A-1155 status=ok total=84.82 items=1 worker=3\n02:26:08 INFO  checkout order=A-1158 status=ok total=101.21 items=3 worker=2\n02:26:37 INFO  checkout order=A-1161 status=ok total=146.99 items=5 worker=3\n02:27:06 INFO  checkout order=A-1164 status=ok total=65.78 items=2 worker=2\n02:27:35 INFO  checkout order=A-1166 status=ok total=197.29 items=2 worker=4\n02:28:04 INFO  checkout order=A-1169 status=ok total=195.03 items=1 worker=3\n02:28:33 INFO  checkout order=A-1172 status=ok total=74.24 items=6 worker=3\n02:29:02 INFO  checkout order=A-1175 status=ok total=214.92 items=3 worker=3\n02:29:31 INFO  checkout order=A-1177 status=ok total=64.13 items=2 worker=4\n```\nWhich orders failed, and why?",
+          "about": "fail|order|declin|address",
+          "expect": [
+            {
+              "name": "A-1042",
+              "re": "1042"
+            },
+            {
+              "name": "A-1077",
+              "re": "1077"
+            },
+            {
+              "name": "A-1103",
+              "re": "1103"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "send": "idle",
+          "text": "In pricing.py, add a function with_tax(amount) that returns the amount with TAX_RATE applied, rounded to 2 places. Keep it short.",
+          "about": "with_tax|tax",
+          "expect": [
+            {
+              "name": "with_tax added",
+              "re": "with_tax"
+            }
+          ]
+        },
+        {
+          "id": "m4",
+          "send": "idle",
+          "quote": {
+            "who": "claude",
+            "of": "m1"
+          },
+          "text": "Give me the one-line curl health check for staging.",
+          "about": "curl|health|staging",
+          "expect": [
+            {
+              "name": "staging port 9412",
+              "re": "9412"
+            },
+            {
+              "name": "route /readyz",
+              "re": "readyz"
+            }
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "name": "with_tax in pricing.py",
+          "msg": "m3",
+          "file": "pricing.py",
+          "re": "def with_tax\\("
+        }
+      ]
+    },
+    {
+      "id": "chain-paste",
+      "about": "A detail inside a pasted env file in the request's first message (the redis host, port and db), needed after a compaction.",
+      "compactBefore": "m4",
+      "messages": [
+        {
+          "id": "m1",
+          "send": "start",
+          "text": "Here's the staging .env from the ops wiki, for reference only (don't write it to disk):\n```\nAPP_ENV=staging\nAPP_NAME=shopkit\nLOG_LEVEL=info\nDEBUG=true\nHTTP_HOST=0.0.0.0\nDB_HOST=pg-stg-1.internal\nDB_PORT=5432\nDB_NAME=shopkit_stg\nREDIS_HOST=cache-stg-3.internal\nREDIS_PORT=6390\nREDIS_DB=7\nSTRIPE_KEY=sk_live_51Hq0xStg\nSENTRY_DSN=https://k3@ingest.sentry.example/77\nS3_BUCKET=shopkit-stg-assets\nS3_REGION=eu-west-1\nMAIL_FROM=noreply@shopkit.example\nSESSION_TTL_MIN=30\nFEATURE_GIFT_CARDS=1\nFEATURE_NEW_CART=0\nWORKERS=2\n```\nAnything in it that looks wrong for staging?",
+          "about": "wrong|debug|live|stripe",
+          "expect": [
+            {
+              "name": "DEBUG or live key flagged",
+              "re": "DEBUG|sk_live|live key"
+            }
+          ]
+        },
+        {
+          "id": "m2",
+          "send": "idle",
+          "text": "Here's the checkout log from last night's run:\n```\n02:00:00 INFO  checkout order=A-1001 status=ok total=46.50 items=6 worker=1\n02:00:29 INFO  checkout order=A-1003 status=ok total=218.68 items=1 worker=3\n02:01:58 INFO  checkout order=A-1008 status=ok total=22.64 items=2 worker=1\n02:01:27 INFO  checkout order=A-1009 status=ok total=119.53 items=1 worker=2\n02:02:56 INFO  checkout order=A-1012 status=ok total=149.54 items=1 worker=1\n02:02:25 INFO  checkout order=A-1015 status=ok total=169.80 items=5 worker=1\n02:03:54 INFO  checkout order=A-1020 status=ok total=157.50 items=1 worker=2\n02:03:23 INFO  checkout order=A-1021 status=ok total=150.17 items=3 worker=4\n02:04:52 INFO  checkout order=A-1024 status=ok total=146.15 items=5 worker=3\n02:04:21 INFO  checkout order=A-1029 status=ok total=216.87 items=2 worker=1\n02:05:50 INFO  checkout order=A-1032 status=ok total=154.81 items=2 worker=3\n02:05:19 INFO  checkout order=A-1033 status=ok total=148.91 items=1 worker=1\n02:06:48 INFO  checkout order=A-1038 status=ok total=60.63 items=6 worker=4\n02:06:17 INFO  checkout order=A-1040 status=ok total=127.74 items=4 worker=3\n02:07:46 ERROR checkout order=A-1042 status=failed reason=\"card declined\" retry=0\n02:07:15 INFO  checkout order=A-1045 status=ok total=211.23 items=6 worker=2\n02:08:44 INFO  checkout order=A-1048 status=ok total=155.38 items=5 worker=4\n02:08:13 INFO  checkout order=A-1052 status=ok total=194.57 items=3 worker=1\n02:09:42 INFO  checkout order=A-1054 status=ok total=139.53 items=2 worker=3\n02:09:11 INFO  checkout order=A-1057 status=ok total=133.53 items=1 worker=1\n02:10:40 INFO  checkout order=A-1062 status=ok total=154.40 items=3 worker=3\n02:10:09 INFO  checkout order=A-1065 status=ok total=135.74 items=4 worker=1\n02:11:38 INFO  checkout order=A-1066 status=ok total=77.60 items=6 worker=1\n02:11:07 INFO  checkout order=A-1069 status=ok total=195.89 items=3 worker=4\n02:12:36 INFO  checkout order=A-1073 status=ok total=191.49 items=6 worker=3\n02:12:05 ERROR checkout order=A-1077 status=failed reason=\"address missing\" retry=0\n02:13:34 INFO  checkout order=A-1079 status=ok total=98.21 items=5 worker=1\n02:13:03 INFO  checkout order=A-1082 status=ok total=23.27 items=3 worker=2\n02:14:32 INFO  checkout order=A-1086 status=ok total=71.50 items=4 worker=4\n02:14:01 INFO  checkout order=A-1087 status=ok total=50.57 items=4 worker=3\n02:15:30 INFO  checkout order=A-1090 status=ok total=217.55 items=5 worker=3\n02:15:59 INFO  checkout order=A-1095 status=ok total=114.45 items=6 worker=4\n02:16:28 INFO  checkout order=A-1096 status=ok total=46.10 items=2 worker=2\n02:16:57 INFO  checkout order=A-1099 status=ok total=176.29 items=1 worker=4\n02:17:26 ERROR checkout order=A-1103 status=failed reason=\"card declined\" retry=0\n02:17:55 INFO  checkout order=A-1105 status=ok total=75.36 items=1 worker=2\n02:18:24 INFO  checkout order=A-1109 status=ok total=144.47 items=5 worker=3\n02:18:53 INFO  checkout order=A-1111 status=ok total=184.65 items=5 worker=1\n02:19:22 INFO  checkout order=A-1115 status=ok total=238.99 items=6 worker=4\n02:19:51 INFO  checkout order=A-1118 status=ok total=110.50 items=1 worker=4\n02:20:20 INFO  checkout order=A-1122 status=ok total=110.07 items=2 worker=1\n02:20:49 INFO  checkout order=A-1123 status=ok total=120.20 items=1 worker=3\n02:21:18 INFO  checkout order=A-1128 status=ok total=21.13 items=1 worker=2\n02:21:47 INFO  checkout order=A-1131 status=ok total=33.46 items=5 worker=1\n02:22:16 INFO  checkout order=A-1132 status=ok total=231.26 items=5 worker=4\n02:22:45 INFO  checkout order=A-1135 status=ok total=170.32 items=3 worker=3\n02:23:14 INFO  checkout order=A-1139 status=ok total=39.14 items=4 worker=4\n02:23:43 INFO  checkout order=A-1142 status=ok total=131.39 items=1 worker=2\n02:24:12 INFO  checkout order=A-1144 status=ok total=199.43 items=6 worker=3\n02:24:41 INFO  checkout order=A-1148 status=ok total=220.88 items=2 worker=1\n02:25:10 INFO  checkout order=A-1150 status=ok total=143.46 items=2 worker=1\n02:25:39 INFO  checkout order=A-1155 status=ok total=84.82 items=1 worker=3\n02:26:08 INFO  checkout order=A-1158 status=ok total=101.21 items=3 worker=2\n02:26:37 INFO  checkout order=A-1161 status=ok total=146.99 items=5 worker=3\n02:27:06 INFO  checkout order=A-1164 status=ok total=65.78 items=2 worker=2\n02:27:35 INFO  checkout order=A-1166 status=ok total=197.29 items=2 worker=4\n02:28:04 INFO  checkout order=A-1169 status=ok total=195.03 items=1 worker=3\n02:28:33 INFO  checkout order=A-1172 status=ok total=74.24 items=6 worker=3\n02:29:02 INFO  checkout order=A-1175 status=ok total=214.92 items=3 worker=3\n02:29:31 INFO  checkout order=A-1177 status=ok total=64.13 items=2 worker=4\n```\nWhich orders failed, and why?",
+          "about": "fail|order|declin|address",
+          "expect": [
+            {
+              "name": "A-1042",
+              "re": "1042"
+            },
+            {
+              "name": "A-1077",
+              "re": "1077"
+            },
+            {
+              "name": "A-1103",
+              "re": "1103"
+            }
+          ]
+        },
+        {
+          "id": "m3",
+          "send": "idle",
+          "text": "In pricing.py, add a function with_tax(amount) that returns the amount with TAX_RATE applied, rounded to 2 places. Keep it short.",
+          "about": "with_tax|tax",
+          "expect": [
+            {
+              "name": "with_tax added",
+              "re": "with_tax"
+            }
+          ]
+        },
+        {
+          "id": "m4",
+          "send": "idle",
+          "quote": {
+            "who": "claude",
+            "of": "m1"
+          },
+          "text": "Using that env file, give me the full redis URL for staging.",
+          "about": "redis|url",
+          "expect": [
+            {
+              "name": "redis://cache-stg-3.internal:6390/7",
+              "re": "redis://cache-stg-3\\.internal:6390/7"
+            }
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "name": "with_tax in pricing.py",
+          "msg": "m3",
+          "file": "pricing.py",
+          "re": "def with_tax\\("
+        }
+      ]
+    }
+  ]
+}

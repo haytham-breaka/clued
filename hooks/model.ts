@@ -490,6 +490,43 @@ export function flatBrief(board: Board, topicId: string, quotes: { who: 'me' | '
   return lines.join('\n')
 }
 
+/** A reply to a message older than this many of your messages brings its request's chain along. */
+export const CHAIN_FAR = 30
+/** About how many characters the chain may take in the note. */
+export const CHAIN_BUDGET = 2000
+/** How many of the chain's last messages and replies go with its first message (2–3 exchanges). */
+export const CHAIN_TAIL = 6
+
+const clipTo = (text: string, max: number) => {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, Math.max(0, max - 1))}…` : flat
+}
+
+/**
+ * The part of the note that brings back a request's chain when the message replied to is older than
+ * what Claude still holds word for word: its first message, then its last few messages and replies,
+ * each trimmed, about CHAIN_BUDGET characters in all. `why`: compacted since, or just far back.
+ */
+export function chainNote(chain: { who: 'me' | 'claude'; text: string }[], why: 'compacted' | 'far'): string {
+  const pieces = chain.filter(c => c.text.trim())
+  if (!pieces.length) return ''
+  const [first, ...rest] = pieces
+  const tail = rest.slice(-CHAIN_TAIL)
+  const skipped = rest.length - tail.length
+  const firstMax = Math.min(500, CHAIN_BUDGET)
+  const each = tail.length ? Math.max(120, Math.floor((CHAIN_BUDGET - firstMax) / tail.length)) : 0
+  const label = (c: { who: 'me' | 'claude' }) => (c.who === 'me' ? 'You' : 'Claude')
+  const lines = [
+    why === 'compacted'
+      ? 'Earlier in this request (the conversation was compacted since: this is the app\'s copy, in order):'
+      : 'Earlier in this request (far back in the conversation: the app\'s copy, in order):',
+    `- ${label(first!)} (its first message): ${clipTo(first!.text, firstMax)}`,
+    ...(skipped > 0 ? [`- … ${skipped} more in between …`] : []),
+    ...tail.map(c => `- ${label(c)}: ${clipTo(c.text, each)}`),
+  ]
+  return lines.join('\n')
+}
+
 export const statusMark: Record<TopicStatus, string> = { claude: '⏳', me: '✋', done: '✓' }
 
 export const describeThread = (t: Thread) => `#${t.id} ${t.name}`

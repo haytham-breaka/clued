@@ -1,6 +1,9 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  CHAIN_BUDGET,
+  CHAIN_TAIL,
+  chainNote,
   ACTIVE_MS,
   activeThreads,
   answerOfBlock,
@@ -283,6 +286,26 @@ describe('notes for Claude', () => {
     const two = flatBrief(emptyBoard(), 'T1', [{ who: 'me', text: 'a', topics: ['T3'] }, { who: 'claude', text: 'b' }])
     assert.match(two, /answering 2 of these messages at once/)
     assert.match(two, /\(your reply to T3\)\n> a/)
+  })
+  test('chainNote: the request\'s first message, then its last few, in order, trimmed; why it is there', () => {
+    assert.equal(chainNote([], 'far'), '')
+    const short = chainNote([{ who: 'me', text: 'deploy the api on port 8137' }, { who: 'claude', text: 'Done: it listens on 8137.' }], 'compacted')
+    assert.equal(short, [
+      "Earlier in this request (the conversation was compacted since: this is the app's copy, in order):",
+      '- You (its first message): deploy the api on port 8137',
+      '- Claude: Done: it listens on 8137.',
+    ].join('\n'))
+    assert.match(chainNote([{ who: 'me', text: 'a' }], 'far'), /^Earlier in this request \(far back in the conversation/)
+    // A long chain: the first, a gap, then the last CHAIN_TAIL, each trimmed, about CHAIN_BUDGET in all.
+    const long = Array.from({ length: 12 }, (_, i) => ({ who: (i % 2 ? 'claude' : 'me') as 'me' | 'claude', text: `m${i} ${'x'.repeat(900)}` }))
+    const note = chainNote(long, 'compacted')
+    const lines = note.split('\n')
+    assert.match(lines[1]!, /^- You \(its first message\): m0 x+…$/)
+    assert.equal(lines[2], `- … ${11 - CHAIN_TAIL} more in between …`)
+    assert.deepEqual(lines.slice(3).map(l => l.match(/^- (You|Claude): (m\d+)/)!.slice(1).join(' ')), ['You m6', 'Claude m7', 'You m8', 'Claude m9', 'You m10', 'Claude m11'])
+    assert.ok(note.length < CHAIN_BUDGET + 400, `about the budget: ${note.length}`)
+    // Line breaks inside a message are folded, so each piece is one line.
+    assert.equal(chainNote([{ who: 'me', text: 'one\n\ntwo' }], 'far').split('\n')[1], '- You (its first message): one two')
   })
   test('briefFor: in a thread, quoting, and in Main with active threads', () => {
     let b = raised('a')

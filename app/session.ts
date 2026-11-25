@@ -45,6 +45,11 @@ export type Turn = {
   uuid?: string
   /** Its work went on under a later message (sent while it ran): one piece of work, not a stopped one. */
   continued?: boolean
+  /**
+   * Claude Code compacted the conversation during or right after this turn: it and the turns before
+   * it are left to Claude's summary (a reply to one of them brings its request's chain along).
+   */
+  compacted?: boolean
   /** Sent from inside a request's view: that request's turn key. */
   aboutRequest?: string
   /** Sent from inside an agent's view: that agent's id. */
@@ -278,6 +283,11 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
       continue
     }
     if (e.isSidechain) continue
+    // Claude Code compacted the conversation here: what came before is only in its summary now.
+    if (e.type === 'system' && e.subtype === 'compact_boundary') {
+      if (cur) cur.compacted = true
+      continue
+    }
     const at = Date.parse(e.timestamp ?? '') || 0
     // A background agent's run ended: Claude Code tells Claude with a task notification.
     if (cur && (e.type === 'user' || (e.type === 'attachment' && e.attachment?.type === 'queued_command'))) {

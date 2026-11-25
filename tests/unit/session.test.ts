@@ -187,6 +187,18 @@ describe('session files', () => {
     assignParts(turns, emptyBoard())
     assert.deepEqual(turns.slice(1, 3).map(t => t.parts?.map(p => p.id)), [['follow-bg-42:0'], ['follow-bg-42.2:0']])
   })
+  test('loadHistory: a compaction marks the turn it came in (what came before is left to the summary)', () => {
+    write('compact', [
+      user('first', { timestamp: '2026-11-25T10:00:00.000Z' }),
+      assistant([{ type: 'text', text: 'One.' }]),
+      { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', timestamp: '2026-11-25T10:01:00.000Z' },
+      { type: 'system', subtype: 'compact_boundary', isSidechain: true },
+      user('second', { timestamp: '2026-11-25T10:02:00.000Z' }),
+      assistant([{ type: 'text', text: 'Two.' }]),
+    ])
+    const [a, b] = S.loadHistory(CWD, 'compact')
+    assert.deepEqual([a!.text, a!.compacted, b!.text, b!.compacted], ['first', true, 'second', undefined])
+  })
   test('readAgentFile: steps, words and results; later messages to it are prompts, the first is skipped', () => {
     const dir = join(S.projectDir(CWD), 'sess', 'subagents')
     mkdirSync(dir, { recursive: true })

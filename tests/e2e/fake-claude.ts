@@ -404,6 +404,12 @@ async function scenario(m: Msg) {
       '- one', '- two', '  - nested', '1. first', '- [x] done item', '', '> a quote', '> more quote', '',
       '```ts', 'const x = 1', '```', '', '| a | b |', '|---|---|', '| 1 | 2 |', '', '---', 'The end.',
     ].join('\n'))
+  // Claude Code compacts the conversation (as /compact or an automatic one does), then answers.
+  if (t.includes('compact now')) {
+    out({ type: 'system', subtype: 'status', status: 'compacting' })
+    out({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 100000 } })
+    return finish(m, 'Compacted.')
+  }
   // The tag settles the message, but the only reply names another id: the app shows it as lost.
   if (t.includes('lose my reply')) {
     say(`<<reply T999>>\nThis names the wrong message.\n${tag([{ id: m.topic, status: 'done' }])}`)

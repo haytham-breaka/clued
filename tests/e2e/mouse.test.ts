@@ -87,6 +87,30 @@ describe('mouse', () => {
       await app.waitFor('big! world')
     }))
 
+  test('a reply to a message from before a compaction brings its request\'s chain to Claude; a recent one does not', () =>
+    withApp({ unfocused: true, height: 70 }, async app => {
+      await app.send('deploy the api on port 8137')
+      await app.waitFor('Echo: deploy the api on port 8137')
+      await app.send('compact now')
+      await app.waitFor('Compacted.')
+      await app.send('fresh one')
+      await app.waitFor('Echo: fresh one')
+      // A recent message: the note is the plain one.
+      await app.hover('fresh one', { area: 'chat' })
+      await app.click('↩ reply', { area: 'chat' })
+      await app.send('about the fresh one')
+      await app.waitFor('Echo: about the fresh one')
+      assert.ok(!app.sent().at(-1)!.note.includes('Earlier in this request'))
+      // From before the compaction: its chain comes along, the app's copy.
+      await app.hover('Echo: deploy the api on port 8137', { area: 'chat' })
+      await app.click('↩ reply', { area: 'chat' })
+      await app.send('same for staging')
+      await app.waitFor('Echo: same for staging')
+      const note = app.sent().at(-1)!.note
+      assert.match(note, /The user is replying to your message:/)
+      assert.match(note, /Earlier in this request \(the conversation was compacted since: this is the app's copy, in order\):\n- You \(its first message\): deploy the api on port 8137/)
+    }))
+
   test('hover on your message: copy it, or reply to it', () =>
     withApp({ unfocused: true }, async app => {
       await app.send('my own words')

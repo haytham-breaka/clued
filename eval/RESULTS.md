@@ -1,5 +1,57 @@
 # Results
 
+## A reply to a message from before a compaction (2026-11-25)
+
+**Question.** After Claude Code compacts the conversation, a reply to an older message carries only the quoted bubble. Does adding that request's chain to the note (the request's first message, then its last few messages and replies, about 2,000 characters) help Claude use the right earlier detail?
+
+**Set-up** (`--set chain --arms A,B,C --reps 3 --judge`, Sonnet, `scenarios-chain.json` on `fixture-hard/`). Each scenario:
+
+1. a request whose detail is only in the user's first message;
+2. two unrelated requests that grow the context: a pasted 60-line log, and an edit;
+3. `/compact`;
+4. a reply quoting Claude's answer to the first request, asking for something that needs the detail.
+
+There are two scenarios:
+
+- **chain-detail:** a short sentence holds the detail: "staging runs on port 9412, health route /readyz". Then: "Give me the one-line curl health check for staging."
+- **chain-paste:** a 20-line `.env` pasted "for reference only (don't write it to disk)" holds the detail: `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`. Then: "Using that env file, give me the full redis URL for staging."
+
+In both, the quoted answer doesn't contain the detail. The arms:
+
+- **A:** today's note, with the quote;
+- **B:** plain Claude Code, with the quote as `> ` lines;
+- **C:** A plus the chain.
+
+3 runs per arm per scenario, 18 in all. That is small: read the table as counts, not rates.
+
+| the reply after /compact used the right detail | A | B | C |
+|---|---|---|---|
+| chain-detail (port 9412 and /readyz) | 3/3 | 3/3 | 3/3 |
+| chain-paste (`redis://cache-stg-3.internal:6390/7`) | 3/3 | **0/3** | 3/3 |
+
+The blind judge agrees on every one of these messages. In the 3 B misses, Claude says the compaction lost the values. Twice it gave nothing; once it gave a template with the port and db and asked for the host.
+
+**Where the detail came from.** Each run's compaction summary decides this. Checking each run's summary for the redis host:
+
+- **chain-detail:** every summary kept the short sentence. Claude Code's summary lists the user's messages, so a short detail survives, and the chain adds nothing there. A tie.
+- **chain-paste:**
+  - **B:** the summary lost the host 3 of 3 times, and B failed 3 of 3.
+  - **C:** the summary lost the host 2 of 3 times. Both times the chain note supplied it, and C answered correctly.
+  - **A:** the summary happened to keep the whole env file all 3 times, so A's 3/3 says nothing about the note. A, without the chain, was never tested on a lost detail.
+
+  The fair reading: when the summary dropped the detail, the chain recovered it 2/2, and plain Claude Code 0/3. With n this small, whether A's summaries really keep pastes more often than B's is unknown.
+
+**Cost.** Arm C's note on the reply after compaction was 568–622 characters in chain-detail and about 1,385 in chain-paste, against 308–808 for A. Mean cost per run was A $0.126, B $0.113, C $0.123. A and C differ by noise, since the chain is one note on one message. B is cheaper by APP_GUIDE and the notes, as in the earlier runs.
+
+**Limits.**
+
+- The chain clips the request's first message to 500 characters. Here `REDIS_DB` lay at character ~280, so it fit. A detail further into a long paste would be cut.
+- The eval builds the chain from the quoted part's topic: its messages and the reply parts naming it. The app uses `requestInfo()`, which also follows links and `about` tags.
+- After the run, two decoy lines of the pasted `.env` were reworded so the repo's privacy check passes. The Sentry DSN's host became `ingest.sentry.example`, and the `MAIL_FROM` domain became `shopkit.example` in place of the `.test` domain. Neither is the measured detail. The runs used the original lines, and their copy is with the raw data.
+- The filler edit (m3) asked for `with_tax()`, which `fixture-hard/pricing.py` already has. Claude said so, and the judge marked that "incorrect" in 7 runs across all arms. That is the scenario's fault, not the arms', and doesn't touch the measured message.
+
+**Spend:** $2.559 for the 18 runs, of which $0.381 was the judge. There was also $0.013 of Haiku probes and a smoke run. Raw transcripts are outside the repo.
+
 ## Can you see what was answered? (2026-11-25)
 
 The first evaluation compared answers. This one asks what clued is for: for each message you sent, can you see whether it was answered, by which reply, and what is still open, without reading the whole chat?
