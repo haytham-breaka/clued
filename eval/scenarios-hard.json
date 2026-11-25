@@ -1,0 +1,162 @@
+{
+  "_doc": "Hard scenarios for eval/run.ts, on fixture-hard/. send: 'start', 'idle' (Claude finished and went quiet), 'afterTool' (Claude's next tool call after the previous message, or idle), 'after' (delayMs after the previous send). quote: the message replies to Claude's reply to message `of` (who 'claude') or to the user's own message `of` (who 'me'); A gets it in the note as the app sends it, B as '> ' lines above the text. expect: facts (JS regexes, case-insensitive) a reply to this message must contain; about: words naming the subject, so the plain-text rubric can tell which message a passage answers. checks: the project afterwards; msg ties a check to the message it judges.",
+  "scenarios": [
+    {
+      "id": "numbered",
+      "about": "One message with four questions, then a follow-up naming one of them by number.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Four quick ones. What is TAX_RATE in the pricing module? What port does the server config use? How many items does the stock CSV list? Who is the maintainer named in the README?",
+          "expect": [
+            { "name": "TAX_RATE 0.19", "re": "0\\.19|19\\s?%", "about": "tax" },
+            { "name": "port 8137", "re": "8137", "about": "port|server" },
+            { "name": "10 items", "re": "\\b10\\b|\\bten\\b", "about": "item|stock|row|csv" },
+            { "name": "Rana Okafor", "re": "okafor", "about": "maintain" }
+          ] },
+        { "id": "m2", "send": "idle", "text": "For the third one: how many of those are below LOW_STOCK?", "about": "low|below|stock",
+          "expect": [{ "name": "3 below 5 (bolts, washers, rivets)", "re": "\\b3\\b|\\bthree\\b" }] }
+      ],
+      "checks": []
+    },
+    {
+      "id": "continuation",
+      "about": "A request, two unrelated questions, then two follow-ups to the request that never name it.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Add a function discount_price(amount, pct) to pricing.py that returns the amount after a pct percent discount.", "about": "discount",
+          "expect": [{ "name": "discount_price", "re": "discount_price" }] },
+        { "id": "m2", "send": "idle", "text": "What port does server.toml use?", "about": "port", "expect": [{ "name": "port 8137", "re": "8137" }] },
+        { "id": "m3", "send": "idle", "text": "Which customer has the highest balance?", "about": "balance|customer", "expect": [{ "name": "Marco Rossi", "re": "marco|rossi" }] },
+        { "id": "m4", "send": "idle", "text": "It should reject negative percentages too.", "about": "discount|negative|pct|percent",
+          "expect": [{ "name": "negative handled", "re": "negative|valueerror|raise|reject" }] },
+        { "id": "m5", "send": "idle", "text": "And round the result to 2 decimals.", "about": "discount|round",
+          "expect": [{ "name": "rounding", "re": "round|2 decimal|two decimal" }] }
+      ],
+      "checks": [
+        { "name": "discount_price(100, 10) == 90", "msg": "m1", "py": "from pricing import discount_price\nassert abs(discount_price(100, 10) - 90) < 1e-9" },
+        { "name": "negative pct raises", "msg": "m4", "py": "from pricing import discount_price\ntry:\n    discount_price(100, -5)\nexcept Exception:\n    pass\nelse:\n    raise SystemExit('no error for -5')" },
+        { "name": "rounded to cents", "msg": "m5", "py": "from pricing import discount_price\nassert discount_price(1, 33.333) == 0.67, discount_price(1, 33.333)" },
+        { "name": "tests still import", "py": "import pricing, inventory" }
+      ]
+    },
+    {
+      "id": "open-question",
+      "about": "Claude must ask a question; two other questions pass; the user answers with a bare '8.' without quoting.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Add a function needs_reorder(rows) to inventory.py that returns the names of items whose quantity is below a reorder threshold. Ask me which threshold to use before you write it.", "about": "threshold|reorder",
+          "expect": [{ "name": "asks for the threshold", "re": "\\?" }] },
+        { "id": "m2", "send": "idle", "text": "Meanwhile: what host does server.toml bind to?", "about": "host", "expect": [{ "name": "127.0.0.1", "re": "127\\.0\\.0\\.1" }] },
+        { "id": "m3", "send": "idle", "text": "How many customers are from Germany?", "about": "german|DE|customer", "expect": [{ "name": "2", "re": "\\b2\\b|\\btwo\\b" }] },
+        { "id": "m4", "send": "idle", "text": "8.", "about": "reorder|threshold", "expect": [{ "name": "needs_reorder with 8", "re": "needs_reorder|reorder" }] },
+        { "id": "m5", "send": "idle", "text": "What does it return for the current stock?", "about": "reorder|return|stock",
+          "expect": [
+            { "name": "bolts", "re": "bolts" }, { "name": "washers", "re": "washers" }, { "name": "hinges", "re": "hinges" },
+            { "name": "rivets", "re": "rivets" }, { "name": "clamps", "re": "clamps" }
+          ] }
+      ],
+      "checks": [
+        { "name": "needs_reorder uses 8", "msg": "m4", "py": "from inventory import needs_reorder, load_stock\nr = needs_reorder(load_stock())\nassert set(r) == {'bolts', 'washers', 'hinges', 'rivets', 'clamps'}, r" },
+        { "name": "server.toml unchanged", "file": "server.toml", "re": "^port = 8137$" }
+      ]
+    },
+    {
+      "id": "late-correction",
+      "about": "A request, three unrelated turns, then a correction that names it only as 'that fee'.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "In pricing.py, add SHIPPING_FEE = 4.99 and a function total_with_shipping(amount) that returns with_tax(amount) plus the shipping fee.", "about": "shipping",
+          "expect": [{ "name": "total_with_shipping", "re": "total_with_shipping|shipping" }] },
+        { "id": "m2", "send": "idle", "text": "What port does server.toml use?", "about": "port", "expect": [{ "name": "port 8137", "re": "8137" }] },
+        { "id": "m3", "send": "idle", "text": "How many items does stock.csv list?", "about": "item|stock", "expect": [{ "name": "10", "re": "\\b10\\b|\\bten\\b" }] },
+        { "id": "m4", "send": "idle", "text": "Which customer has the highest balance?", "about": "balance|customer", "expect": [{ "name": "Marco Rossi", "re": "marco|rossi" }] },
+        { "id": "m5", "send": "idle", "text": "Oh, and that fee should be 5.49.", "about": "shipping|fee", "expect": [{ "name": "5.49", "re": "5\\.49" }] }
+      ],
+      "checks": [
+        { "name": "total_with_shipping(100) == 124.49", "msg": "m5", "py": "from pricing import total_with_shipping\nassert abs(total_with_shipping(100) - 124.49) < 1e-6, total_with_shipping(100)" },
+        { "name": "SHIPPING_FEE = 5.49", "msg": "m5", "file": "pricing.py", "re": "^SHIPPING_FEE\\s*=\\s*5\\.49\\b" },
+        { "name": "no 4.99 left", "msg": "m5", "file": "pricing.py", "re": "4\\.99", "absent": true },
+        { "name": "TAX_RATE unchanged", "file": "pricing.py", "re": "^TAX_RATE = 0\\.19$" },
+        { "name": "server.toml unchanged", "file": "server.toml", "re": "^port = 8137$" }
+      ]
+    },
+    {
+      "id": "midturn-edits",
+      "about": "A test-fixing task; while it runs: two edits to different files, a correction to the first edit, and a question.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Run the tests (python3 -m unittest tests/test_pricing.py tests/test_inventory.py) and fix every failure.", "about": "test|fail|fix|member_price|low_stock|pricing|inventory",
+          "expect": [{ "name": "names a fix", "re": "member_price|low_stock|DEFAULT_DISCOUNT|<=" }] },
+        { "id": "m2", "send": "afterTool", "text": "Also set workers in server.toml to 8.", "about": "worker", "expect": [{ "name": "workers", "re": "workers" }] },
+        { "id": "m3", "send": "afterTool", "text": "And add a customer Ines Duarte from PT with balance 0 to customers.json.", "about": "customer|ines|duarte", "expect": [{ "name": "Ines Duarte", "re": "ines|duarte" }] },
+        { "id": "m4", "send": "after", "delayMs": 1500, "text": "Sorry, workers should be 6, not 8.", "about": "worker", "expect": [{ "name": "6 workers", "re": "\\b6\\b" }] },
+        { "id": "m5", "send": "afterTool", "text": "What host does server.toml use?", "about": "host", "expect": [{ "name": "127.0.0.1", "re": "127\\.0\\.0\\.1" }] }
+      ],
+      "checks": [
+        { "name": "tests pass", "msg": "m1", "cmd": ["python3", "-m", "unittest", "tests/test_pricing.py", "tests/test_inventory.py"] },
+        { "name": "workers = 6", "msg": "m4", "file": "server.toml", "re": "^workers\\s*=\\s*6\\s*$" },
+        { "name": "Ines Duarte, PT, 0", "msg": "m3", "py": "import json\nc = json.load(open('customers.json'))\nx = [r for r in c if r.get('name') == 'Ines Duarte']\nassert len(c) == 8 and x and x[0].get('country') == 'PT' and float(x[0].get('balance')) == 0, c" },
+        { "name": "port and host unchanged", "file": "server.toml", "re": "^host = \"127\\.0\\.0\\.1\"\\s*\\nport = 8137$" }
+      ]
+    },
+    {
+      "id": "quotes",
+      "about": "Three questions, then three replies that quote an earlier bubble or message instead of naming it.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "What is the tax rate in pricing.py?", "about": "tax", "expect": [{ "name": "0.19", "re": "0\\.19|19\\s?%" }] },
+        { "id": "m2", "send": "idle", "text": "Which port does server.toml set?", "about": "port", "expect": [{ "name": "8137", "re": "8137" }] },
+        { "id": "m3", "send": "idle", "text": "Which item in stock.csv has the most units?", "about": "nails|most|item", "expect": [{ "name": "nails, 120", "re": "nails" }] },
+        { "id": "m4", "send": "idle", "quote": { "who": "claude", "of": "m2" }, "text": "Change it to 8443.", "about": "port", "expect": [{ "name": "8443", "re": "8443" }] },
+        { "id": "m5", "send": "idle", "quote": { "who": "me", "of": "m1" }, "text": "Same question for the member discount.", "about": "discount", "expect": [{ "name": "0.05", "re": "0\\.05|\\b5\\s?%" }] },
+        { "id": "m6", "send": "idle", "quote": { "who": "claude", "of": "m3" }, "text": "Halve that.", "about": "nails|stock|60", "expect": [{ "name": "60", "re": "\\b60\\b" }] }
+      ],
+      "checks": [
+        { "name": "port = 8443", "msg": "m4", "file": "server.toml", "re": "^port\\s*=\\s*8443\\s*$" },
+        { "name": "nails,60", "msg": "m6", "file": "stock.csv", "re": "^nails,60\\s*$" },
+        { "name": "other stock unchanged", "msg": "m6", "file": "stock.csv", "re": "^screws,75\\s*$" },
+        { "name": "TAX_RATE unchanged", "file": "pricing.py", "re": "^TAX_RATE = 0\\.19$" },
+        { "name": "DEFAULT_DISCOUNT unchanged", "file": "pricing.py", "re": "^DEFAULT_DISCOUNT = 0\\.05$" }
+      ]
+    },
+    {
+      "id": "midturn-flood",
+      "about": "A multi-step task; five unrelated questions arrive while it runs.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Run the tests (python3 -m unittest tests/test_pricing.py tests/test_inventory.py), fix every failure, then add a test for member_price with an amount of 0.", "about": "test|fail|fix|member_price|low_stock|pricing|inventory",
+          "expect": [{ "name": "names a fix", "re": "member_price|low_stock|DEFAULT_DISCOUNT|<=" }] },
+        { "id": "m2", "send": "afterTool", "text": "What port does server.toml use?", "about": "port", "expect": [{ "name": "8137", "re": "8137" }] },
+        { "id": "m3", "send": "afterTool", "text": "How many customers are in customers.json?", "about": "customer", "expect": [{ "name": "7", "re": "\\b7\\b|\\bseven\\b" }] },
+        { "id": "m4", "send": "afterTool", "text": "What's LOW_STOCK set to?", "about": "low_stock|low stock", "expect": [{ "name": "5", "re": "\\b5\\b|\\bfive\\b" }] },
+        { "id": "m5", "send": "after", "delayMs": 1200, "text": "Who is the maintainer?", "about": "maintain", "expect": [{ "name": "Rana Okafor", "re": "okafor" }] },
+        { "id": "m6", "send": "afterTool", "text": "How many workers does server.toml configure?", "about": "worker", "expect": [{ "name": "4", "re": "\\b4\\b|\\bfour\\b" }] }
+      ],
+      "checks": [
+        { "name": "tests pass", "msg": "m1", "cmd": ["python3", "-m", "unittest", "tests/test_pricing.py", "tests/test_inventory.py"] },
+        { "name": "a member_price(0) test", "msg": "m1", "py": "import glob, re\nassert any(re.search(r'member_price\\(\\s*0(\\.0+)?\\s*\\)', open(f).read()) for f in glob.glob('tests/*.py'))" }
+      ]
+    },
+    {
+      "id": "interleaved",
+      "about": "Twelve messages on four subjects (tax, server, stock, customers), with bursts and references like 'the second thing I asked' and 'the CSV one'.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "What's the tax rate in pricing.py?", "about": "tax", "expect": [{ "name": "0.19", "re": "0\\.19|19\\s?%" }] },
+        { "id": "m2", "send": "after", "delayMs": 800, "text": "Which port is set in server.toml?", "about": "port", "expect": [{ "name": "8137", "re": "8137" }] },
+        { "id": "m3", "send": "idle", "text": "Which items in stock.csv are below LOW_STOCK?", "about": "low|below|stock",
+          "expect": [{ "name": "bolts", "re": "bolts" }, { "name": "washers", "re": "washers" }, { "name": "rivets", "re": "rivets" }] },
+        { "id": "m4", "send": "after", "delayMs": 800, "text": "How many customers in customers.json are from Germany?", "about": "german|customer|DE", "expect": [{ "name": "2", "re": "\\b2\\b|\\btwo\\b" }] },
+        { "id": "m5", "send": "idle", "text": "Change that port to 9000.", "about": "port", "expect": [{ "name": "9000", "re": "9000" }] },
+        { "id": "m6", "send": "idle", "text": "For the CSV one: which item has the lowest quantity?", "about": "lowest|item|washers", "expect": [{ "name": "washers", "re": "washers" }] },
+        { "id": "m7", "send": "idle", "text": "Lower the tax rate to 0.16.", "about": "tax", "expect": [{ "name": "0.16", "re": "0\\.16|16\\s?%" }] },
+        { "id": "m8", "send": "idle", "text": "Back to the second thing I asked: does README.md mention that port too? If so, update it.", "about": "readme|port", "expect": [{ "name": "README", "re": "readme" }] },
+        { "id": "m9", "send": "idle", "text": "List their names.", "about": "german|customer|names", "expect": [{ "name": "Anna Weber", "re": "anna|weber" }, { "name": "Lukas Brandt", "re": "lukas|brandt" }] },
+        { "id": "m10", "send": "after", "delayMs": 800, "text": "Add 20 to that lowest item's quantity.", "about": "washers|quantity|stock", "expect": [{ "name": "21", "re": "\\b21\\b" }] },
+        { "id": "m11", "send": "idle", "text": "What would 100 cost with tax now?", "about": "tax|cost|100", "expect": [{ "name": "116", "re": "\\b116\\b" }] },
+        { "id": "m12", "send": "idle", "text": "And which of the German ones has the highest balance?", "about": "german|balance", "expect": [{ "name": "Lukas Brandt", "re": "lukas|brandt" }] }
+      ],
+      "checks": [
+        { "name": "port = 9000", "msg": "m5", "file": "server.toml", "re": "^port\\s*=\\s*9000\\s*$" },
+        { "name": "TAX_RATE = 0.16", "msg": "m7", "file": "pricing.py", "re": "^TAX_RATE\\s*=\\s*0\\.16\\b" },
+        { "name": "README says 9000", "msg": "m8", "file": "README.md", "re": "9000" },
+        { "name": "README has no 8137", "msg": "m8", "file": "README.md", "re": "8137", "absent": true },
+        { "name": "washers,21", "msg": "m10", "file": "stock.csv", "re": "^washers,21\\s*$" },
+        { "name": "other stock unchanged", "msg": "m10", "file": "stock.csv", "re": "^bolts,3\\s*$" },
+        { "name": "customers unchanged", "py": "import json\nassert len(json.load(open('customers.json'))) == 7" }
+      ]
+    }
+  ]
+}

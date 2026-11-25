@@ -1,0 +1,9 @@
+[
+  { "name": "Anna Weber", "country": "DE", "balance": 420.0 },
+  { "name": "Lukas Brandt", "country": "DE", "balance": 1310.5 },
+  { "name": "Chloé Martin", "country": "FR", "balance": 980.0 },
+  { "name": "Marco Rossi", "country": "IT", "balance": 2250.75 },
+  { "name": "Sofia Lindqvist", "country": "SE", "balance": 150.0 },
+  { "name": "Tomás Novak", "country": "CZ", "balance": 610.0 },
+  { "name": "Emma Clarke", "country": "IE", "balance": 75.25 }
+]

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# clued: a chat app on top of a real Claude Code session (run headless underneath).
+#   clued                 new session          clued -c           continue the last one
+#   clued --resume [id]   pick or open one     any other flag     passed to claude
+# /reload inside the app restarts it on the same session (the app exits 75; this loop starts it again).
+# The older tmux layout (Claude Code's own screen with a threads panel beside it): clued-classic
+set -uo pipefail
+here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+args=("$@")
+while true; do
+  node --no-warnings "$here/app/main.ts" "${args[@]}"
+  code=$?
+  [ "$code" -eq 75 ] && [ -s "$HOME/.clued/reload" ] || exit "$code"
+  # Same session, same other flags.
+  keep=()
+  skip=0
+  for a in "${args[@]}"; do
+    if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+    case "$a" in
+      -c|--continue) ;;
+      -r|--resume) skip=1 ;;
+      *) keep+=("$a") ;;
+    esac
+  done
+  args=("${keep[@]}" --resume "$(cat "$HOME/.clued/reload")")
+  rm -f "$HOME/.clued/reload"
+done

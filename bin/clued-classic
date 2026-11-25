@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# clued: Claude Code with the threads panel on the left.
+# Every claude flag passes through: clued-classic -c, --resume, --model opus, ...
+# CLUED_PLAIN=1 (or no tmux) runs Claude Code alone, with the mod's own panel.
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+if [ -n "${CLUED_PLAIN:-}" ] || ! command -v tmux >/dev/null; then
+  exec claude --plugin-dir "$here" "$@"
+fi
+
+id="$(date +%Y%m%d-%H%M%S)-$$"
+dir="$HOME/.clued/run/$id"
+mkdir -p "$dir"
+session="tl-$id"
+# The panel's width: what you last dragged it to, else 34.
+width="$(sed -n 's/.*"width":\([0-9]*\).*/\1/p' "$HOME/.clued/panel.json" 2>/dev/null || true)"
+case "$width" in ''|*[!0-9]*) width=34 ;; esac
+q() { printf '%q' "$1"; }
+args=""
+for a in "$@"; do args+=" $(q "$a")"; done
+
+claude_cmd="CLUED_DIR=$(q "$dir") claude --plugin-dir $(q "$here")$args; tmux -L clued kill-session -t $session"
+panel_cmd="CLUED_DIR=$(q "$dir") node --no-warnings $(q "$here/panel/main.ts")"
+
+# A window of its own, even when started inside another tmux.
+unset TMUX
+exec tmux -L clued -f "$here/bin/tmux.conf" \
+  new-session -s "$session" -c "$PWD" "$claude_cmd" \; \
+  split-window -hb -l "$width" -c "$PWD" "$panel_cmd" \; \
+  select-pane -R

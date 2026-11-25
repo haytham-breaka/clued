@@ -1,0 +1,6 @@
+{
+  "name": "clued",
+  "version": "0.1.0",
+  "description": "A threads-and-notifications side panel, replies and reactions for Claude Code",
+  "types": "./types/index.d.ts"
+}

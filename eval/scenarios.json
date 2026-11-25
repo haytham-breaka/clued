@@ -1,0 +1,59 @@
+{
+  "_doc": "Scenarios for eval/run.ts. Each message: send = 'start' (first), 'idle' (after Claude finished and went quiet), 'afterTool' (as soon as Claude's first tool call after the previous message shows, then delayMs: a message sent mid-turn), or 'after' (delayMs after the previous send). expect: regexes (JS, case-insensitive) that a reply to this message must contain. checks: what must hold in the project after the run.",
+  "scenarios": [
+    {
+      "id": "correction",
+      "about": "A request, then a correction sent while Claude is working on it.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Add a function export_totals(path) to report.py that writes the monthly totals to a PDF file.", "expect": [{ "name": "export_totals", "re": "export_totals" }] },
+        { "id": "m2", "send": "afterTool", "delayMs": 0, "text": "actually CSV, not PDF. No new dependencies.", "expect": [{ "name": "says CSV", "re": "\\bcsv\\b" }] }
+      ],
+      "checks": [
+        { "name": "export_totals exists", "file": "report.py", "re": "def export_totals\\(" },
+        { "name": "writes CSV", "file": "report.py", "re": "csv\\.(writer|DictWriter)" },
+        { "name": "no PDF library", "file": "report.py", "re": "(import|from)\\s+(reportlab|fpdf|fpdf2|weasyprint|matplotlib)", "absent": true }
+      ]
+    },
+    {
+      "id": "busy-burst",
+      "about": "A task with tool calls, and two unrelated questions sent quickly while it runs.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Run the tests in tests/test_utils.py and fix whatever fails.", "expect": [{ "name": "mentions percent fix", "re": "percent|\\*\\s*100|100" }] },
+        { "id": "m2", "send": "afterTool", "delayMs": 0, "text": "Unrelated: what port is set in config.json?", "expect": [{ "name": "port 8137", "re": "8137" }] },
+        { "id": "m3", "send": "after", "delayMs": 1500, "text": "Also, who is the maintainer listed in README.md?", "expect": [{ "name": "Rana Okafor", "re": "okafor" }] }
+      ],
+      "checks": [
+        { "name": "tests pass", "cmd": ["python3", "-m", "unittest", "tests/test_utils.py"] },
+        { "name": "percent fixed", "file": "utils.py", "re": "\\*\\s*100" }
+      ]
+    },
+    {
+      "id": "two-questions",
+      "about": "One message asking two things.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "What does parse_amount in utils.py return for an empty string? Which function in report.py calls it?", "expect": [{ "name": "returns 0.0", "re": "0\\.0\\b" }, { "name": "monthly_totals", "re": "monthly_totals" }] }
+      ],
+      "checks": []
+    },
+    {
+      "id": "follow-up",
+      "about": "A follow-up that only makes sense with the earlier answer.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "What is the tax rate in report.py?", "expect": [{ "name": "0.19", "re": "0\\.19|19\\s?%" }] },
+        { "id": "m2", "send": "idle", "text": "Double it.", "expect": [{ "name": "0.38", "re": "0\\.38|38\\s?%" }] }
+      ],
+      "checks": [
+        { "name": "TAX_RATE = 0.38", "file": "report.py", "re": "TAX_RATE\\s*=\\s*0\\.38\\b" }
+      ]
+    },
+    {
+      "id": "tool-task",
+      "about": "A question that needs a couple of tool calls, then a short follow-up.",
+      "messages": [
+        { "id": "m1", "send": "start", "text": "Which customer has the highest total in sales.csv, and what is that total? Check with a quick script rather than by eye.", "expect": [{ "name": "Umbrella", "re": "umbrella" }, { "name": "2351", "re": "2,?351" }] },
+        { "id": "m2", "send": "idle", "text": "And the lowest?", "expect": [{ "name": "Globex", "re": "globex" }, { "name": "1670.50", "re": "1,?670\\.5" }] }
+      ],
+      "checks": []
+    }
+  ]
+}

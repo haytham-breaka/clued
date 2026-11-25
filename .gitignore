@@ -1,0 +1,18 @@
+node_modules/
+.claude-plugin/types/
+
+# Raw eval transcripts and logs hold local paths and account details: never publish them.
+eval/results/**/raw/
+eval/results/*.log
+
+# Local and secret files.
+.env
+.env.*
+*.pem
+*.key
+*.log
+*.tgz
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
