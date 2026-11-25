@@ -22,7 +22,8 @@ describe('/btw', () => {
       await app.send('stream this')
       await app.waitFor('Streaming the answer')
       await app.send('/btw what is a helper agent?')
-      let s = await app.waitFor('I can see 1 messages of old-b.')
+      // Answered: its words come before its result, which brings ⧉ copy.
+      let s = await app.waitFor(s => s.includes('I can see 1 messages of old-b.') && s.includes('⧉ copy · ✕ close'))
       // Marked as a side answer, the app's own markup gone; Claude is still at work on the main turn.
       assert.match(rowOf(s, '╭ btw'), /╭ btw · what is a helper agent\?/)
       assert.match(s, /a side answer: not part of the conversation · ⧉ copy · ✕ close/)

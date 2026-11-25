@@ -43,6 +43,7 @@ import { Claude } from './claude.ts'
 import { Btw } from './btw.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
 import type { Card, Ctx as LocalCtx } from './local.ts'
+import { PLUGIN_COMMANDS, Plugins } from './plugin.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
@@ -237,6 +238,8 @@ const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', '
 const btw = new Btw(() => draw())
 /** clued's own /help, /status, /plan, /diff, /copy and /export (headless Claude Code refuses them): cards in the chat. */
 const local = new Local(() => draw())
+/** /plugin: Claude Code's plugin CLI, then the session reloads its plugins. */
+const plugins = new Plugins(local.cards)
 
 // ---- Notifications: a system notification when Claude asks you something ---------------------
 
@@ -2186,7 +2189,7 @@ function menuItems(): string[] {
   if (S.search) return []
   const m = S.text.match(/^\/(\S*)$/)
   if (!m) return []
-  const all = [...new Set([...OUR_COMMANDS, ...S.commands, ...LOCAL_COMMANDS])]
+  const all = [...new Set([...OUR_COMMANDS, ...S.commands, ...LOCAL_COMMANDS, ...PLUGIN_COMMANDS])]
   return all.filter(c => c.startsWith(m[1]!)).sort((a, b) => a.length - b.length).slice(0, 8)
 }
 
@@ -2699,7 +2702,7 @@ function localCtx(): LocalCtx {
     cwd,
     turns: S.turns,
     after: S.turns.at(-1)?.key ?? '',
-    own: [...OUR_COMMANDS, ...LOCAL_COMMANDS],
+    own: [...OUR_COMMANDS, ...LOCAL_COMMANDS, ...PLUGIN_COMMANDS],
     status: () => ({ cliVersion: cluedVersion(), sessionId: S.sessionId, cwd, here: (S.sessionId && lastCwd(cwd, S.sessionId)) || cwd, model: S.model, permissionMode: S.permissionMode, contextUsed: used, contextSize: S.contextWindow || knownWindows[S.model] || 0, costUsd: S.costUsd, extra: [
       ...(S.kept.forkOf ? [['Branch of', `${S.kept.forkOf.id}${S.kept.forkOf.name ? ` (as “${S.kept.forkOf.name}”)` : ''}`] as [string, string]] : []),
       ...((S.sessionId ? S.kept.addDirs ?? [] : local.fresh).length ? [['Added folders', (S.sessionId ? S.kept.addDirs ?? [] : local.fresh).join('\n')] as [string, string]] : []),
@@ -2739,7 +2742,9 @@ function localCtx(): LocalCtx {
 function runCommand(text: string): boolean {
   const [cmd, ...rest] = text.slice(1).split(/\s+/)
   const arg = rest.join(' ').trim()
-  if (local.run(cmd ?? '', arg, localCtx())) return true
+  const ctx = localCtx()
+  if (local.run(cmd ?? '', arg, ctx)) return true
+  if (plugins.command(cmd ?? '', arg, { ...ctx, isBusy: () => S.isWorking, ...(S.claude ? { reload: done => S.claude?.reloadPlugins(done) ?? done({ ok: false, error: 'Claude Code stopped' }) } : {}) })) return true
   switch (cmd) {
     case 'exit':
     case 'quit':

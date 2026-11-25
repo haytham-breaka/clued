@@ -29,6 +29,8 @@ export const ABOUT: Record<string, { args?: string; about: string }> = {
   export: { args: '[file]', about: 'the chat as Markdown: to a file, or to the clipboard' },
   branch: { args: '[name]', about: 'a new session with the conversation so far, to try another way (/resume goes back)' },
   'add-dir': { args: '<path>', about: 'let Claude work in another folder too, for this session' },
+  plugin: { args: '[action] [name]', about: 'Claude Code\'s plugins: list, install, enable, disable, uninstall or update one' },
+  plugins: { about: 'the same as /plugin' },
   clear: { about: 'a new session' },
   resume: { about: 'pick a session to go back to' },
   model: { args: '<name>', about: 'switch model: opus, sonnet, haiku or a model id' },

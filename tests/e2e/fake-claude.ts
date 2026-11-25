@@ -9,6 +9,46 @@ import { createInterface } from 'node:readline'
 
 const dir = process.env.FAKE_DIR ?? '.'
 const args = process.argv.slice(2)
+
+/**
+ * `claude plugin …` (/plugin runs Claude Code's own CLI): its plugins kept in $FAKE_DIR/plugins.json,
+ * never the real ones. Each call is logged to plugin.log. FAKE_PLUGIN_BROKEN=1: list fails; a name
+ * with "fail" in it fails to install; "slow" waits for release-plugin.
+ */
+if (args[0] === 'plugin' || args[0] === 'plugins') {
+  appendFileSync(`${dir}/plugin.log`, JSON.stringify({ args: args.slice(1), cwd: process.cwd() }) + '\n')
+  const file = `${dir}/plugins.json`
+  type P = { id: string; version: string; scope: string; enabled: boolean }
+  const all: P[] = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [{ id: 'figma@fake-market', version: '2.2.0', scope: 'user', enabled: true }, { id: 'old-tool@local', version: '0.1.0', scope: 'project', enabled: false }]
+  const save = () => writeFileSync(file, JSON.stringify(all))
+  const fail = (text: string) => (process.stderr.write(`✘ ${text}\n`), process.exit(1))
+  const [verb, name = ''] = args.slice(1)
+  const find = () => all.find(p => p.id === name || p.id.split('@')[0] === name)
+  if (verb === 'list') {
+    if (process.env.FAKE_PLUGIN_BROKEN) fail('Failed to read the plugin settings: boom')
+    process.stdout.write(JSON.stringify(all, null, 2) + '\n')
+  } else if (verb === 'marketplace') process.stdout.write(JSON.stringify([{ name: 'fake-market', source: 'github', repo: 'example/fake-market' }]) + '\n')
+  else if (verb === 'install') {
+    if (name.includes('fail')) fail(`Failed to install plugin "${name}": Plugin "${name}" not found in any marketplace`)
+    if (name.includes('slow')) while (!existsSync(`${dir}/release-plugin`)) await new Promise(r => setTimeout(r, 40))
+    all.push({ id: name.includes('@') ? name : `${name}@fake-market`, version: '1.0.0', scope: 'user', enabled: true })
+    save()
+    process.stdout.write(`\x1b[32m✔\x1b[0m Successfully installed plugin: ${name} (scope: user)\n`)
+  } else if (verb === 'enable' || verb === 'disable') {
+    const p = find()
+    if (!p) fail(`Failed to ${verb} plugin "${name}": Plugin "${name}" not found in any editable settings scope. Use plugin@marketplace format.`)
+    p!.enabled = verb === 'enable'
+    save()
+    process.stdout.write(`✔ Successfully ${verb}d plugin: ${p!.id} (scope: ${p!.scope})\n`)
+  } else if (verb === 'uninstall') {
+    const p = find()
+    if (!p) fail(`Failed to uninstall plugin "${name}": Plugin "${name}" is not installed`)
+    all.splice(all.indexOf(p!), 1)
+    save()
+    process.stdout.write(`✔ Successfully uninstalled plugin: ${p!.id} (scope: ${p!.scope})\n`)
+  } else fail(`unknown command ${verb}`)
+  process.exit(0)
+}
 /**
  * A /btw side question (app/btw.ts): no tools (`--tools ""`), forked from the session when there is
  * one. It logs to side.log, so claude.log stays the main session's, and answers once (see `sideAnswer`).
@@ -616,6 +656,11 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (e.type === 'control_request') {
     if (e.request?.subtype === 'interrupt') interrupted = true
+    // As /reload-plugins does; FAKE_RELOAD_BUSY=1 plays one refused mid-turn. Each enabled plugin brings a command.
+    if (e.request?.subtype === 'reload_plugins') {
+      const on = (existsSync(`${dir}/plugins.json`) ? JSON.parse(readFileSync(`${dir}/plugins.json`, 'utf8')) : []).filter((p: any) => p.enabled)
+      out({ type: 'control_response', response: process.env.FAKE_RELOAD_BUSY || busy ? { subtype: 'error', request_id: e.request_id, error: 'Cannot reload plugins while a turn is running' } : { subtype: 'success', request_id: e.request_id, response: { commands: [...hello.commands, ...on.map((p: any) => ({ name: p.id.split('@')[0], description: `From the ${p.id} plugin` }))], plugins: on, mcpServers: [], error_count: 0 } } })
+    }
     if (e.request?.subtype === 'initialize') out({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response: hello } })
     // Taking back a message not taken in yet (as a real Claude Code does): it leaves the queue unread.
     // FAKE_NO_CANCEL=1 plays a Claude Code that can't.

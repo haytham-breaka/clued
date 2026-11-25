@@ -20,9 +20,9 @@ describe('clued\'s own commands', () => {
       assert.match(rowOf(s, '/plan [description]'), /plan mode/)
       assert.match(s, /\/btw <question>/)
       // Claude Code's, from its answer to the initialize request (descriptions and argument hints).
+      app.keys('PageDown', 'PageDown', 'PageDown')
+      s = await app.waitFor(/Esc closes this\.\n/)
       assert.match(rowOf(s, '/compact <optional custom'), /Clear conversation history but keep a summary/)
-      await app.scrollTo('/cost')
-      s = app.screen()
       assert.match(rowOf(s, '/cost'), /Show the total cost and duration/)
       // A command clued runs itself is listed once, as clued's.
       assert.doesNotMatch(s, /free up context/)

@@ -142,6 +142,31 @@ export class Claude {
     this.write({ type: 'control_request', request_id: id, request: { subtype: 'cancel_async_message', message_uuid: uuid } })
   }
 
+  /**
+   * Claude Code reloads its plugins, skills, agents and hooks (the reload_plugins control request, as
+   * /reload-plugins does). `done`: its answer, or the error (busy, gone, or no answer in 30 s).
+   */
+  reloadPlugins(done: (r: { ok: true; plugins: number; commands: number; errors: number } | { ok: false; error: string }) => void) {
+    const id = randomUUID()
+    let isOver = false
+    const end = (r: Parameters<typeof done>[0]) => {
+      if (isOver) return
+      isOver = true
+      this.answers.delete(id)
+      done(r)
+    }
+    this.answers.set(id, r => {
+      // Its commands now: a plugin's own come with it (/help lists them).
+      if (r?.subtype === 'success' && Array.isArray(r.response?.commands)) this.onEvent({ kind: 'commands', commands: r.response.commands })
+      end(r?.subtype === 'success'
+        ? { ok: true, plugins: r.response?.plugins?.length ?? 0, commands: r.response?.commands?.length ?? 0, errors: Number(r.response?.error_count ?? 0) }
+        : { ok: false, error: String(r?.error ?? 'Claude Code refused') })
+    })
+    setTimeout(() => end({ ok: false, error: 'no answer from Claude Code' }), 30_000).unref()
+    if (!this.proc.stdin.writable) return end({ ok: false, error: 'Claude Code is not running' })
+    this.write({ type: 'control_request', request_id: id, request: { subtype: 'reload_plugins' } })
+  }
+
   interrupt() {
     this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'interrupt' } })
   }
