@@ -688,6 +688,10 @@ function onEvent(e: ClaudeEvent) {
       S.usage = e.usage
       statusSoon()
       break
+    case 'output-tokens':
+      S.usage = { ...S.usage, output_tokens: e.tokens }
+      statusSoon()
+      break
     case 'agent-step': {
       const a = S.agents.get(e.parent)
       if (a) {

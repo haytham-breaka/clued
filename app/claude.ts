@@ -18,6 +18,7 @@ export type ClaudeEvent =
   | { kind: 'result'; text: string; isError: boolean; usage: Usage; costUsd: number; durationMs: number; sessionId: string; contextWindow?: number }
   | { kind: 'rate'; info: Record<string, unknown> }
   | { kind: 'usage'; usage: Usage }
+  | { kind: 'output-tokens'; tokens: number }
   | { kind: 'permission'; requestId: string; tool: string; input: Record<string, unknown> }
   | { kind: 'exit'; code: number | null; stderr: string }
   /** A subagent's own step: the Agent call it runs under, and the tool it used. */
@@ -146,6 +147,8 @@ export class Claude {
         if (e.parent_tool_use_id) return // a subagent's stream
         const ev = e.event
         if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') emit({ kind: 'text-delta', text: ev.delta.text })
+        // The reply's real output count comes at its end (the assistant event carries the count from its start).
+        if (ev?.type === 'message_delta' && typeof ev.usage?.output_tokens === 'number') emit({ kind: 'output-tokens', tokens: ev.usage.output_tokens })
         return
       }
       case 'assistant': {
