@@ -1,12 +1,12 @@
 # Contributing to clued
 
-The [README](README.md) covers what clued does and how to use it. This file covers how to help.
+The [README](README.md) covers what clued does, and [docs/](docs/usage.md) how to use it. This file covers how to help.
 
 ## Issues, not pull requests
 
 clued takes contributions through **issues only**. Bug reports, ideas, questions and "this confused me" are all welcome, and they are the most useful thing you can send.
 
-Pull requests from outside the project are not accepted: one opened by anyone but a collaborator is closed automatically, with a note pointing here. clued is a single-maintainer project with strong opinions about how it should feel to use, so a change is cheaper to talk through in an issue than to review as code. If you've already found the fix, put it in the issue: a few lines or a diff pasted there is welcome, and you'll be credited when it lands.
+For now, changes are worked out in issues rather than pull requests: one opened by anyone but a collaborator is closed automatically, with a note pointing here. clued is a single-maintainer project with strong opinions about how it should feel to use, so a change is cheaper to talk through in an issue than to review as code. If you've already found the fix, put it in the issue: a few lines or a diff pasted there is welcome, and you'll be credited when it lands.
 
 You're free to fork it. The [MIT licence](LICENSE) allows that, and you can change your copy however you like.
 

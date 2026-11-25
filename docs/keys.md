@@ -1,0 +1,31 @@
+# Keys
+
+Back to the [README](../README.md) · [Using clued](usage.md) · [Commands](commands.md)
+
+| Key | Does |
+|---|---|
+| Enter / Alt+Enter | send / new line |
+| Esc | cancel a reply, dismiss Claude's question, or interrupt Claude |
+| Ctrl+C | clear the input or interrupt; twice to quit |
+| Alt+↑ / Alt+↓ | go through your recent messages; the chat scrolls to each |
+| Alt+→ / Alt+← | from a message to its reply, and back |
+| Alt+S | save the message Alt+↑/↓ picked to get back to later, or unsave it |
+| Ctrl+F | search your messages |
+| Ctrl+Z | take back the message you just sent, while it waits to go (back in the box) |
+| Ctrl+N | next unread reply |
+| Ctrl+O | show or hide Claude's steps |
+| Shift+Tab | next permission mode (default, accept edits, plan, and bypass or auto when you started in it), shown under the status line |
+| ↑ / ↓ | move between rows of a long message; from the top row, earlier messages |
+| Ctrl+← / Ctrl+→ | jump words |
+| Ctrl+Backspace / Alt+Backspace (⌥⌫) | delete the word before the cursor (Ctrl+W: up to the last space) |
+| Ctrl+Delete / Alt+D | delete the word after the cursor |
+| Ctrl+V or Alt+V | add the image on the clipboard |
+| PgUp / PgDn | scroll |
+
+On a question card, a number picks an option and Enter sends it. Esc dismisses the question, and also closes what a command like `/status` shows.
+
+## Selecting text
+
+Drag over the chat or the input box to select text; it's copied when you let go. A double-click selects a word, a path or a URL. With text selected, Ctrl+C copies it again and Esc drops it. In the input box, typing or Backspace replaces the selection.
+
+To select across the panel too, hold ⌥ (Option) in iTerm2 or Shift in Windows Terminal: the terminal then selects instead of the app.
