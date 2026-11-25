@@ -458,8 +458,21 @@ function openFired(key: string) {
   draw()
 }
 
-/** How many messages and replies a message's chain holds besides it (0: none yet). Worked out once a paint. */
+/**
+ * How many messages and replies a message's chain holds besides it (0: none yet). Worked out again
+ * only when the conversation changed: a new message or reply part, a topic or a link moving.
+ */
 let chainCache = new Map<Turn, number>()
+let chainVersion = ''
+/** Once a paint: drops the chain sizes when the conversation moved since they were worked out. */
+function checkChains() {
+  const b = S.kept.board
+  const version = `${S.turns.length}|${S.turns.reduce((n, t) => n + (t.parts?.length ?? 0), 0)}|${b.topics.length}|${b.topics.reduce((m, t) => Math.max(m, t.updatedAt ?? 0), 0)}|${Object.keys(S.kept.links).length}|${S.agents.size}|${S.turns.at(-1)?.aboutRequest ?? ''}`
+  if (version !== chainVersion) {
+    chainCache = new Map()
+    chainVersion = version
+  }
+}
 function chainSize(turn: Turn): number {
   let n = chainCache.get(turn)
   if (n == null) {
@@ -1735,7 +1748,16 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
 // ---- Drawing -----------------------------------------------------------------------
 
 let drawQueued = false
+/**
+ * The frame asked for only moves the spinner. Laying out a long chat on each of its 8 frames a second
+ * kept a core busy; such a frame reuses the last layout (for up to a second, for the timers in it)
+ * and only turns the spinners in it.
+ */
+let spinOnly = false
+let chatCache: { key: string; at: number; out: ReturnType<typeof chatLines> } | undefined
+const SPIN_SPAN = new RegExp(`^[${SPIN}] `)
 function draw() {
+  spinOnly = false
   if (drawQueued) return
   drawQueued = true
   setImmediate(paint)
@@ -1777,7 +1799,7 @@ function paint() {
     const rank = (k: string) => at.get(k) ?? -1
     S.box.messages.sort((a, b) => rank(a.turn.key) - rank(b.turn.key))
   } else S.recentOrder = S.box.messages.map(m => m.turn.key)
-  chainCache = new Map()
+  checkChains()
   const lostTurns = new Set(S.box.messages.filter(m => m.state === 'lost').map(m => m.turn))
   const replyByTurn = new Map(S.box.messages.filter(m => m.replyId).map(m => [m.turn, m.replyId!]))
 
@@ -1924,20 +1946,29 @@ function paint() {
         return j ? { label: `${jobMark(j)} scheduled job ran: “${jobName(j, 50)}”`, open: () => openJob(j.toolId) } : t.fired ? { label: `⏰ a scheduled job ran${t.fired.prompt ? `: “${preview(t.fired.prompt, 50)}”` : ''}` } : undefined
       },
   }
-  const { lines: chat, anchors, owners } = job
-    ? jobLines(job, {
-        by: jobBy(job),
-        for: jobFor,
-        runs: job.runs.map(r => ({ at: r.at, ...(r.turn && S.turns.some(t => t.key === r.turn) ? { open: () => openFired(r.turn!) } : {}) })),
-        openMessage,
-        openAgent,
-        cancel: () => cancelJob(job),
-        copy: text => copyText(text),
-        now: Date.now(),
-      }, { ...ctx, turns: S.turns.filter(t => t.aboutJob === job.toolId) }, cw - 2)
-    : req && reqInfo
-    ? requestLines(req, reqInfo, { ...ctx, askStatus: () => submit('What is the status of this request?') }, cw - 2)
-    : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2)
+  const viewKey = `${cw}|${req?.key ?? ''}|${inside?.id ?? ''}|${S.agentView}|${job?.toolId ?? ''}`
+  const reuse = spinOnly && chatCache?.key === viewKey && Date.now() - chatCache.at < 1000
+  spinOnly = false
+  if (!reuse)
+    chatCache = {
+      key: viewKey,
+      at: Date.now(),
+      out: job
+        ? jobLines(job, {
+            by: jobBy(job),
+            for: jobFor,
+            runs: job.runs.map(r => ({ at: r.at, ...(r.turn && S.turns.some(t => t.key === r.turn) ? { open: () => openFired(r.turn!) } : {}) })),
+            openMessage,
+            openAgent,
+            cancel: () => cancelJob(job),
+            copy: text => copyText(text),
+            now: Date.now(),
+          }, { ...ctx, turns: S.turns.filter(t => t.aboutJob === job.toolId) }, cw - 2)
+        : req && reqInfo
+        ? requestLines(req, reqInfo, { ...ctx, askStatus: () => submit('What is the status of this request?') }, cw - 2)
+        : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
+    }
+  const { lines: chat, anchors, owners } = chatCache!.out
   S.anchors = anchors
   S.owners = owners
   S.chatLines = chat
@@ -1980,7 +2011,9 @@ function paint() {
     for (let r = 0; r < chatRows; r++) if (r < 1 || r > 3) frame[r + top] += ' '.repeat(cw)
   } else
     for (let r = 0; r < chatRows; r++) {
-      const line = r >= lead ? view[r - lead]! : []
+      const raw = r >= lead ? view[r - lead]! : []
+      // A reused layout has last frame's spinners: turned to this frame's.
+      const line = reuse && raw.some(sp => SPIN_SPAN.test(sp.text)) ? raw.map(sp => (SPIN_SPAN.test(sp.text) ? { ...sp, text: ctx.spin + sp.text.slice(1) } : sp)) : raw
       const marked = r >= lead ? selCells(viewStart + r - lead) : undefined
       frame[r + top] += ' ' + lineText(marked ? markCells(line, marked[0], marked[1]) : line, cw - 1, r + top + 1, cx + 1)
     }
@@ -2647,7 +2680,12 @@ process.on('uncaughtException', err => {
 setInterval(() => {
   if (S.isWorking || S.box.messages.some(m => m.active)) {
     S.spinAt++
-    draw()
+    // Only the spinner moved: the chat's layout from the last frame does (see paint).
+    if (!drawQueued) {
+      drawQueued = true
+      spinOnly = true
+      setImmediate(paint)
+    }
   }
 }, 120)
 setInterval(refreshStatus, 15000)

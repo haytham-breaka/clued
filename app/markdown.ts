@@ -1,7 +1,7 @@
 // Markdown to styled terminal lines: headings, lists, quotes, code blocks, tables,
 // inline `code`, **bold**, *italic*, [links](url). Enough for Claude's answers.
 
-import { C, cells, clipLine, lineCells, pad, wrap } from './text.ts'
+import { C, cells, clipLine, lineCells, pad, remember, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
 import { clean, hardWrap, highlight, K, langOf } from './code.ts'
 
@@ -67,10 +67,19 @@ function table(rows: string[], width: number): Line[] {
 }
 
 /** Renders markdown into lines of at most `width` cells. */
+const rendered = new Map<string, Line[]>()
+
 export function markdown(src: string, width: number, copy?: (text: string) => void): Line[] {
+  // The chat draws every reply on every frame: each text is rendered once per width. (A cached line's
+  // copy action holds an earlier frame's copy function, which does the same.)
+  const key = `${width}${copy ? 'c' : ''}\0${src}`
+  const known = rendered.get(key)
+  if (known) return known
   copyNow = copy
   try {
-    return render(src, width, copy)
+    const lines = render(src, width, copy)
+    remember(rendered, key, lines)
+    return lines
   } finally {
     copyNow = undefined
   }
