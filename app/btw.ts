@@ -195,37 +195,55 @@ export class Btw {
 
   /**
    * The chat with each aside after the message that was last when it was asked (before the next
-   * message's lines); anchors and owners move down with the lines. `keys`: the chat's messages, in order.
+   * message's lines). `keys`: the chat's messages, in order.
    */
   into(laid: Laid, keys: string[], width: number, d: Draw): Laid {
-    const inserts: { at: number; lines: Line[] }[] = []
-    for (const a of this.asides) {
-      const from = a.after ? keys.lastIndexOf(a.after) : -1
-      // Asked in another session's chat.
-      if (a.after && from < 0) continue
-      let at = laid.lines.length
-      for (const k of keys.slice(from + 1)) {
-        const starts = STARTS.map(p => laid.anchors[`${p}:${k}`]).filter((n): n is number => n != null)
-        if (starts.length) {
-          at = Math.min(...starts)
-          break
-        }
-      }
-      inserts.push({ at, lines: this.lines(a, width, d) })
-    }
-    if (!inserts.length) return laid
-    // The asides going in before each line; a blank row parts them from the message after.
-    const before = new Map<number, Line[]>()
-    for (const x of inserts) before.set(x.at, [...(before.get(x.at) ?? []), ...x.lines])
-    for (const [at, ls] of before) if (at < laid.lines.length) ls.push([])
-    const lines: Line[] = []
-    const owners: string[] = []
-    for (let n = 0; n <= laid.lines.length; n++) {
-      for (const l of before.get(n) ?? []) lines.push(l), owners.push('')
-      if (n < laid.lines.length) lines.push(laid.lines[n]!), owners.push(laid.owners[n] ?? '')
-    }
-    const moved = (n: number) => n + [...before].filter(([at]) => at <= n).reduce((sum, [, ls]) => sum + ls.length, 0)
-    const anchors = Object.fromEntries(Object.entries(laid.anchors).map(([k, v]) => [k, moved(v)]))
-    return { lines, anchors, owners }
+    return placeAsides(laid, keys, this.asides.map(a => ({ after: a.after, lines: this.lines(a, width, d) })))
   }
+}
+
+/**
+ * The chat with lines of its own put in after the message that was last when each came (`after`, a
+ * turn key; '' before any message): before the next message's lines. Anchors and owners move down
+ * with the lines; `anchor` names where an aside starts. One from another session's chat is left out.
+ */
+export function placeAsides(laid: Laid, keys: string[], asides: { after: string; lines: Line[]; anchor?: string }[]): Laid {
+  const inserts: { at: number; lines: Line[]; anchor?: string }[] = []
+  for (const a of asides) {
+    const from = a.after ? keys.lastIndexOf(a.after) : -1
+    // Asked in another session's chat.
+    if (a.after && from < 0) continue
+    let at = laid.lines.length
+    for (const k of keys.slice(from + 1)) {
+      const starts = STARTS.map(p => laid.anchors[`${p}:${k}`]).filter((n): n is number => n != null)
+      if (starts.length) {
+        at = Math.min(...starts)
+        break
+      }
+    }
+    inserts.push({ at, lines: a.lines, ...(a.anchor ? { anchor: a.anchor } : {}) })
+  }
+  if (!inserts.length) return laid
+  // The asides going in before each line; a blank row parts them from the message after.
+  const before = new Map<number, Line[]>()
+  // Each named aside's place within the lines going in before its line.
+  const offset = new Map<string, number>()
+  for (const x of inserts) {
+    const ls = before.get(x.at) ?? []
+    if (x.anchor) offset.set(x.anchor, ls.length)
+    before.set(x.at, [...ls, ...x.lines])
+  }
+  for (const [at, ls] of before) if (at < laid.lines.length) ls.push([])
+  const lines: Line[] = []
+  const owners: string[] = []
+  const placed = new Map<number, number>()
+  for (let n = 0; n <= laid.lines.length; n++) {
+    placed.set(n, lines.length)
+    for (const l of before.get(n) ?? []) lines.push(l), owners.push('')
+    if (n < laid.lines.length) lines.push(laid.lines[n]!), owners.push(laid.owners[n] ?? '')
+  }
+  const moved = (n: number) => n + [...before].filter(([at]) => at <= n).reduce((sum, [, ls]) => sum + ls.length, 0)
+  const anchors = Object.fromEntries(Object.entries(laid.anchors).map(([k, v]) => [k, moved(v)]))
+  for (const x of inserts) if (x.anchor) anchors[x.anchor] = placed.get(x.at)! + offset.get(x.anchor)!
+  return { lines, anchors, owners }
 }

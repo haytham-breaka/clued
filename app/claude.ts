@@ -9,7 +9,11 @@ import { randomUUID } from 'node:crypto'
 export type ToolUse = { id: string; name: string; input: Record<string, unknown> }
 
 export type ClaudeEvent =
-  | { kind: 'init'; sessionId: string; model: string; cwd: string; commands: string[]; permissionMode: string }
+  | { kind: 'init'; sessionId: string; model: string; cwd: string; commands: string[]; permissionMode: string; version?: string; mcpServers?: McpServer[]; apiKeySource?: string; outputStyle?: string }
+  /** Claude Code's answer to the initialize request: its commands with their descriptions, the account, its version… */
+  | { kind: 'hello'; info: Hello }
+  /** Claude Code's commands changed (plugins or skills reloaded). */
+  | { kind: 'commands'; commands: CommandInfo[] }
   | { kind: 'text-delta'; text: string }
   /** Claude Code took one of your messages into the conversation (its echo, with the uuid sent). */
   | { kind: 'received'; uuid: string }
@@ -36,6 +40,17 @@ export type ClaudeEvent =
   | { kind: 'fired'; source: string }
   /** Background task news from Claude Code: started, progress, or finished (status). */
   | { kind: 'task'; phase: 'started' | 'progress' | 'done'; taskId: string; toolUseId?: string; status?: string; text?: string; lastTool?: string }
+
+export type McpServer = { name: string; status: string }
+export type CommandInfo = { name: string; description?: string; argumentHint?: string }
+/** What Claude Code tells the host as it starts (the parts the app uses). */
+export type Hello = {
+  commands?: CommandInfo[]
+  account?: { email?: string; subscriptionType?: string; apiProvider?: string; organization?: string; tokenSource?: string; apiKeySource?: string }
+  claude_code_version?: string
+  output_style?: string
+  models?: { value: string; resolvedModel?: string; displayName?: string; description?: string }[]
+}
 
 export type Usage = { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
 
@@ -74,7 +89,13 @@ export class Claude {
     })
     this.proc.on('exit', code => this.onEvent({ kind: 'exit', code, stderr: this.stderr }))
     // As the Agent SDK does: tells Claude Code a host is here to answer permission prompts.
-    this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'initialize', hooks: null } })
+    // Its answer holds Claude Code's commands with their descriptions, the account and the version (/help, /status).
+    const hello = randomUUID()
+    this.answers.set(hello, r => {
+      this.answers.delete(hello)
+      if (r?.subtype === 'success' && r.response) this.onEvent({ kind: 'hello', info: r.response })
+    })
+    this.write({ type: 'control_request', request_id: hello, request: { subtype: 'initialize', hooks: null } })
   }
 
   /** `done`: once it is written to Claude Code (never when Claude Code is gone). */
@@ -175,7 +196,12 @@ export class Claude {
             cwd: e.cwd,
             commands: (e.slash_commands ?? []).map(String),
             permissionMode: e.permissionMode ?? '',
+            ...(e.claude_code_version ? { version: String(e.claude_code_version) } : {}),
+            ...(Array.isArray(e.mcp_servers) ? { mcpServers: e.mcp_servers.map((m: any) => ({ name: String(m?.name ?? ''), status: String(m?.status ?? '') })) } : {}),
+            ...(e.apiKeySource ? { apiKeySource: String(e.apiKeySource) } : {}),
+            ...(e.output_style ? { outputStyle: String(e.output_style) } : {}),
           })
+        else if (e.subtype === 'commands_changed' && Array.isArray(e.commands)) emit({ kind: 'commands', commands: e.commands })
         else if (e.subtype === 'status') {
           if (typeof e.status === 'string') emit({ kind: 'status', text: e.status })
           // The permission mode changed: Shift+Tab here, or Claude entering or leaving plan mode.

@@ -41,6 +41,8 @@ import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
 import { Btw } from './btw.ts'
+import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
+import type { Card, Ctx as LocalCtx } from './local.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, ago, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
@@ -230,6 +232,8 @@ const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'hold', 'queue', 'demo', 'btw']
 /** /btw side questions: their own Claude Code each, their answers asides in the chat. */
 const btw = new Btw(() => draw())
+/** clued's own /help, /status, /plan, /diff, /copy and /export (headless Claude Code refuses them): cards in the chat. */
+const local = new Local(() => draw())
 
 // ---- Notifications: a system notification when Claude asks you something ---------------------
 
@@ -794,7 +798,7 @@ function start(resume?: string) {
   }
   S.claude?.close()
   // Another session: its side answers go (the same one again, a new model, keeps them).
-  if (!resume || resume !== S.sessionId) btw.clear()
+  if (!resume || resume !== S.sessionId) btw.clear(), local.cards.clear()
   S.isWorking = false
   S.permissions = []
   S.asks = []
@@ -901,6 +905,7 @@ function leadPulse(now: number): Pulse {
 }
 
 function onEvent(e: ClaudeEvent) {
+  local.take(e)
   if (e.kind !== 'usage' && e.kind !== 'output-tokens') leadAt = Date.now()
   if (!turnFrom && (e.kind === 'text-delta' || e.kind === 'text' || e.kind === 'tool')) turnFrom = Date.now()
   if ((e.kind === 'permission' || e.kind === 'ask') && !S.asks.length && !S.permissions.length) askedAt = Date.now()
@@ -2170,7 +2175,7 @@ function menuItems(): string[] {
   if (S.search) return []
   const m = S.text.match(/^\/(\S*)$/)
   if (!m) return []
-  const all = [...new Set([...OUR_COMMANDS, ...S.commands])]
+  const all = [...new Set([...OUR_COMMANDS, ...S.commands, ...LOCAL_COMMANDS])]
   return all.filter(c => c.startsWith(m[1]!)).sort((a, b) => a.length - b.length).slice(0, 8)
 }
 
@@ -2509,7 +2514,7 @@ function paint() {
         : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
     }
   // Side answers (/btw) sit in the chat itself, after the message that was last when asked.
-  const base = job || req || inside ? chatCache!.out : btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin })
+  const base = job || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
   // Held messages last, in every view: they are the newest, and drawn fresh for their countdown.
   const held = S.held.length
     ? heldLines(S.held.map(h => {
@@ -2554,7 +2559,7 @@ function paint() {
     S.inView.add(p.id)
   }
   if (banner) frame[0] += ' ' + lineText(banner, cw - 1, 1, cx + 1)
-  if (!S.turns.length && !btw.asides.length && !S.held.length) {
+  if (!S.turns.length && !btw.asides.length && !local.cards.list.length && !S.held.length) {
     const hello = [
       [{ text: 'clued', style: { bold: true, fg: C.cyan } }, { text: `  on Claude Code · ${cwd.replace(homedir(), '~')}`, style: { fg: C.gray } }],
       [{ text: 'Your messages sit on the right, Claude\'s answers on the left, its work folded into one line.', style: { fg: C.gray } }],
@@ -2674,9 +2679,35 @@ const prevChar = (i: number) => {
   return cp != null && cp > 0xffff ? 2 : 1
 }
 
+/** What /help, /status and the rest (app/local.ts) need of the app. */
+function localCtx(): LocalCtx {
+  const used = (S.usage.input_tokens ?? 0) + (S.usage.cache_read_input_tokens ?? 0) + (S.usage.cache_creation_input_tokens ?? 0)
+  return {
+    cwd,
+    turns: S.turns,
+    after: S.turns.at(-1)?.key ?? '',
+    own: [...OUR_COMMANDS, ...LOCAL_COMMANDS],
+    status: () => ({ cliVersion: cluedVersion(), sessionId: S.sessionId, cwd, here: (S.sessionId && lastCwd(cwd, S.sessionId)) || cwd, model: S.model, permissionMode: S.permissionMode, contextUsed: used, contextSize: S.contextWindow || knownWindows[S.model] || 0, costUsd: S.costUsd }),
+    copy: (text, note) => copyText(text, note),
+    toast,
+    permissionMode: S.permissionMode,
+    setMode: mode => {
+      if (!S.claude) start(S.sessionId || undefined)
+      S.claude!.setMode(mode)
+    },
+    send: text => sendTyped(text),
+    shown: (card: Card) => {
+      if (S.agentView || S.requestView || S.jobView) toast(`/${card.title} is in the chat: ← back to chat.`)
+      else S.pendingJump = `card:${card.id}`
+      draw()
+    },
+  }
+}
+
 function runCommand(text: string): boolean {
   const [cmd, ...rest] = text.slice(1).split(/\s+/)
   const arg = rest.join(' ').trim()
+  if (local.run(cmd ?? '', arg, localCtx())) return true
   switch (cmd) {
     case 'exit':
     case 'quit':
@@ -3042,7 +3073,7 @@ function key(k: string) {
       else if (S.replyTo) S.replyTo = null
       else if (S.picked) S.picked = ''
       else if (S.agentView || S.requestView || S.jobView) closeAgent()
-      else if (btw.dismissLast()) {}
+      else if (local.cards.dismissLast() || btw.dismissLast()) {}
       else if (S.isWorking) {
         S.claude?.interrupt()
         toast('Interrupted.')

@@ -87,7 +87,25 @@ const toolResult = (id: string, content: unknown, isError = false, parent?: stri
   // Claude's next step: the messages that came meanwhile reach it now.
   if (!parent) echoJoined()
 }
-const init = () => out({ type: 'system', subtype: 'init', session_id: sessionId, model: MODEL, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default' })
+const VERSION = '9.9.9-fake'
+const init = () =>
+  out({
+    type: 'system', subtype: 'init', session_id: sessionId, model: MODEL, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default',
+    claude_code_version: VERSION, apiKeySource: 'none', output_style: 'default',
+    mcp_servers: [{ name: 'fake-docs', status: 'connected' }, { name: 'fake-mail', status: 'needs-auth' }],
+  })
+/** The answer to the app's initialize request, as a real Claude Code gives it (the parts the app reads). */
+const hello = {
+  commands: [
+    { name: 'compact', description: 'Clear conversation history but keep a summary in context', argumentHint: '<optional custom summarization instructions>' },
+    { name: 'cost', description: 'Show the total cost and duration of the current session', argumentHint: '' },
+    { name: 'clear', description: 'Clear conversation history and free up context', argumentHint: '' },
+  ],
+  account: { email: 'you@example.com', subscriptionType: 'Claude Max', apiProvider: 'firstParty' },
+  claude_code_version: VERSION,
+  output_style: 'default',
+  models: [{ value: 'default', resolvedModel: MODEL, displayName: 'Default', description: 'Fake 1.0 · for tests' }],
+}
 const hhmm = (at: number) => new Date(at).toTimeString().slice(0, 5)
 const result = (extra: Record<string, unknown> = {}) => {
   echoJoined()
@@ -590,6 +608,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (e.type === 'control_request') {
     if (e.request?.subtype === 'interrupt') interrupted = true
+    if (e.request?.subtype === 'initialize') out({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response: hello } })
     // Taking back a message not taken in yet (as a real Claude Code does): it leaves the queue unread.
     // FAKE_NO_CANCEL=1 plays a Claude Code that can't.
     if (e.request?.subtype === 'cancel_async_message') {
