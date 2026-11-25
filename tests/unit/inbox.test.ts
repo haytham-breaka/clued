@@ -1,0 +1,181 @@
+import { describe, test } from 'node:test'
+import assert from 'node:assert/strict'
+import { emptyBoard, keyOf } from '../../hooks/model.ts'
+import { assignParts, hasMarks, inbox, matches, partId, preview, questionOf, questionsOf, REPLY_GUIDE, splitAnswer, STALE_MS, stripMarks, topicOfKey } from '../../app/inbox.ts'
+import type { Turn } from '../../app/session.ts'
+import type { Board, Topic } from '../../types/index.d.ts'
+
+const NOW = 1_700_000_000_000
+
+function turn(text: string, extra: Partial<Turn> = {}): Turn {
+  return { key: keyOf(text), text, at: NOW, steps: [], live: '', pending: '', isDone: true, isOpen: false, ...extra }
+}
+const topic = (id: string, keys: string[], status: Topic['status'], extra: Partial<Topic> = {}): Topic => ({ id, title: id, threadId: 0, status, messageKeys: keys, updatedAt: NOW, ...extra })
+const boardOf = (...topics: Topic[]): Board => ({ ...emptyBoard(), topics })
+
+describe('reply marks', () => {
+  test('hasMarks and stripMarks', () => {
+    assert.equal(hasMarks('<<reply T1>>\nhi'), true)
+    assert.equal(hasMarks('say <<reply T1>> inline'), false)
+    assert.equal(stripMarks('<<reply T1>>\nhi\n\n\n\n<<reply T2,T3>>\nthere'), 'hi\n\nthere')
+    assert.match(REPLY_GUIDE, /<<reply T43>>/)
+  })
+  test('splitAnswer splits at marks; text before the first mark goes to the fallback', () => {
+    const parts = splitAnswer('Intro\n<<reply t1>>\nOne\n<<reply T2, T3>>\nTwo\n<<reply nonsense>>\nThree\n<clued>{}</clued>', ['T9'])
+    assert.deepEqual(parts, [
+      { to: ['T9'], text: 'Intro' },
+      { to: ['T1'], text: 'One' },
+      { to: ['T2', 'T3'], text: 'Two' },
+      { to: ['T9'], text: 'Three' },
+    ])
+  })
+  test('a numbered question names its message and remembers which', () => {
+    assert.deepEqual(splitAnswer('<<reply T90.2>>\nThe second one.', []), [{ to: ['T90'], text: 'The second one.', subs: ['T90.2'] }])
+    assert.deepEqual(splitAnswer('', ['T1']), [])
+  })
+})
+
+describe('questions', () => {
+  test('questionsOf lists them only when there are several', () => {
+    assert.deepEqual(questionsOf('What is it? And why is it here? ok?'), ['What is it?', 'And why is it here?'])
+    assert.deepEqual(questionsOf('Just one question here?'), [])
+  })
+  test('questionOf: the last sentence, when it asks', () => {
+    assert.equal(questionOf('Done.\n- **Shall I** go on?'), 'Shall I go on?')
+    assert.equal(questionOf('Is it? No, it is done.'), undefined)
+    assert.equal(questionOf('```\nwhat?\n```'), undefined)
+  })
+  test('preview makes one plain line', () => {
+    assert.equal(preview('# Title\n- **bold** and `code` [link](https://example.com)\n```\ncode\n```\n<clued>{}</clued>'), 'Title bold and code link')
+    assert.equal(preview('x'.repeat(100), 10), 'xxxxxxxxx…')
+  })
+  test('matches needs every word, any case', () => {
+    assert.equal(matches('Fix the Login bug', 'login fix'), true)
+    assert.equal(matches('Fix the Login bug', 'logout'), false)
+    assert.equal(matches('anything', '  '), true)
+  })
+})
+
+describe('assignParts', () => {
+  test('unmarked text answers every message since the last answer', () => {
+    const a = turn('first', { topicId: 'T1' })
+    const b = turn('second', { topicId: 'T2', answer: 'Both done.' })
+    const c = turn('third', { topicId: 'T3', answer: '<<reply T3>>\nThird.' })
+    assignParts([a, b, c], emptyBoard())
+    assert.deepEqual(b.parts, [{ to: ['T1', 'T2'], text: 'Both done.', id: `${b.key}:0` }])
+    assert.deepEqual(c.parts?.map(p => p.to), [['T3']])
+    assert.equal(a.parts, undefined)
+  })
+  test('early replies come first, the same words twice get their own ids, follow-ups answer their messages', () => {
+    const a = turn('yes', { topicId: 'T1', early: ['<<reply T1>>\nEarly.'], answer: '<<reply T1>>\nFinal.' })
+    const b = turn('yes', { topicId: 'T2', answer: 'Again.' })
+    const f = turn('', { key: 'follow-1', followUp: [b.key], answer: 'Agent done.' })
+    const r = turn('[clued reaction] 👍', { reaction: '👍' })
+    assignParts([a, b, f, r], emptyBoard())
+    assert.deepEqual(a.parts?.map(p => [p.id, p.text]), [[`${a.key}:0`, 'Early.'], [`${a.key}:1`, 'Final.']])
+    assert.equal(b.parts?.[0]!.id, `${b.key}~1:0`)
+    assert.deepEqual(f.parts?.[0]!.to, ['T2'])
+    assert.equal(partId(b, 0), `${b.key}~1:0`)
+    assert.equal(partId(r, 3), `${r.key}:3`)
+  })
+  test('a message without its own id uses the topic holding it', () => {
+    const a = turn('old message', { answer: 'Answer.' })
+    const board = boardOf(topic('T7', [a.key], 'done'))
+    assignParts([a], board)
+    assert.deepEqual(a.parts?.[0]!.to, ['T7'])
+    assert.equal(topicOfKey(board, a.key), 'T7')
+    assert.equal(topicOfKey(board, 'nope'), undefined)
+  })
+})
+
+describe('inbox', () => {
+  const live = (extra: Partial<Parameters<typeof inbox>[3] & object> = {}) => ({ isWorking: false, busy: new Set<string>(), now: NOW, ...extra })
+
+  test('unread parts, and questions waiting on you', () => {
+    const a = turn('which one', { topicId: 'T1', answer: 'A or B. Which do you want?', durationMs: 2000 })
+    const board = boardOf(topic('T1', [a.key], 'me'))
+    assignParts([a], board)
+    const box = inbox([a], board, new Set(), live())
+    assert.equal(box.unread.length, 1)
+    assert.equal(box.unread[0]!.preview, 'A or B. Which do you want?')
+    assert.deepEqual(box.waiting.map(w => w.question), ['Which do you want?'])
+    assert.equal(box.messages[0]!.state, 'me')
+    assert.equal(box.messages[0]!.event, 'replied')
+    assert.equal(box.messages[0]!.updatedAt, NOW + 2000)
+    assert.equal(inbox([a], board, new Set([a.parts![0]!.id!])).unread.length, 0)
+  })
+
+  test('a waiting topic whose part asks nothing shows the preview', () => {
+    const a = turn('do it', { topicId: 'T1', answer: 'Check the result.' })
+    const board = boardOf(topic('T1', [a.key], 'me'))
+    assignParts([a], board)
+    assert.equal(inbox([a], board, new Set()).waiting[0]!.question, 'Check the result.')
+  })
+
+  test('every message state', () => {
+    const working = turn('working on it', { topicId: 'T1', isDone: false })
+    const st = (t: Turn[], b: Board, l = live()) => {
+      assignParts(t, b)
+      return inbox(t, b, new Set(), l).messages.find(m => m.turn === t[0])!
+    }
+    assert.equal(st([working], boardOf(topic('T1', [working.key], 'claude', { isProvisional: true }))).state, 'claude')
+    const owes = turn('owes', { topicId: 'T1', answer: 'On it.' })
+    assert.equal(st([owes], boardOf(topic('T1', [owes.key], 'claude'))).state, 'progress')
+    const done = turn('finished', { topicId: 'T1', answer: 'Done.' })
+    assert.equal(st([done], boardOf(topic('T1', [done.key], 'done'))).state, 'done')
+    const failed = turn('broke', { topicId: 'T1', error: 'boom' })
+    assert.equal(st([failed], boardOf(topic('T1', [failed.key], 'claude', { isProvisional: true }))).state, 'failed')
+    const none = turn('silence', { topicId: 'T1' })
+    assert.equal(st([none], boardOf(topic('T1', [none.key], 'claude', { isProvisional: true }))).state, 'none')
+    const lost = turn('lost one', { topicId: 'T1' })
+    assert.equal(st([lost], boardOf(topic('T1', [lost.key], 'done'))).state, 'lost')
+    const reacted = turn('thanks', { topicId: 'T1' })
+    assert.equal(st([reacted], boardOf(topic('T1', [reacted.key], 'done')), live({ reacted: new Set([reacted.key]) })).state, 'done')
+    const agent = turn('agent on it', { topicId: 'T1' })
+    assert.equal(st([agent], boardOf(topic('T1', [agent.key], 'claude', { isProvisional: true })), live({ busy: new Set([agent.key]) })).state, 'progress')
+  })
+
+  test('in progress with nothing working on it for a while is stale', () => {
+    const owes = turn('owes', { topicId: 'T1', answer: 'On it.' })
+    const board = boardOf(topic('T1', [owes.key], 'claude'))
+    assignParts([owes], board)
+    assert.equal(inbox([owes], board, new Set(), live({ now: NOW + STALE_MS + 1 })).messages[0]!.stale, true)
+    assert.equal(inbox([owes], board, new Set(), live({ now: NOW + STALE_MS + 1, isWorking: true })).messages[0]!.stale, undefined)
+  })
+
+  test('history from before the app: the next answer is the reply', () => {
+    const a = turn('old question')
+    const b = turn('old follow', { answer: 'Old answer.' })
+    assignParts([a, b], emptyBoard())
+    const box = inbox([a, b], emptyBoard(), new Set())
+    assert.ok(box.messages.every(m => m.state === 'done' && m.replyId === b.parts![0]!.id))
+  })
+
+  test('reactions, follow-ups and commands are not listed; newest first, ties keep the later on top', () => {
+    const a = turn('one', { topicId: 'T1' })
+    const b = turn('two', { topicId: 'T2' })
+    const r = turn('[clued reaction] 👍', { reaction: '👍' })
+    const c = turn('/cost')
+    const f = turn('', { key: 'follow-x', followUp: [a.key] })
+    const box = inbox([a, b, r, c, f], emptyBoard(), new Set())
+    assert.deepEqual(box.messages.map(m => m.turn.text), ['two', 'one'])
+  })
+
+  test('a status change long after the reply is a status event', () => {
+    const a = turn('later', { topicId: 'T1', answer: 'Reply.' })
+    const board = boardOf(topic('T1', [a.key], 'done', { updatedAt: NOW + 60_000 }))
+    assignParts([a], board)
+    assert.equal(inbox([a], board, new Set()).messages[0]!.event, 'status')
+    const quiet = turn('quiet', { topicId: 'T1' })
+    assert.equal(inbox([quiet], boardOf(topic('T1', [quiet.key], 'claude', { isProvisional: true })), new Set()).messages[0]!.event, 'sent')
+  })
+
+  test('a merged message is answered by a part naming the topic it merged into', () => {
+    const a = turn('first', { topicId: 'T1', answer: 'First reply.' })
+    const b = turn('more', { topicId: 'T2', answer: '<<reply T1>>\nCovers both.' })
+    const board = boardOf(topic('T1', [a.key, b.key], 'done'))
+    assignParts([a, b], board)
+    const box = inbox([a, b], board, new Set())
+    assert.equal(box.messages.find(m => m.turn === b)!.replyId, b.parts![0]!.id)
+  })
+})

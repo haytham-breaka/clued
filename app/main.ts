@@ -2034,10 +2034,14 @@ function key(k: string) {
       S.cursor = Math.min(S.text.length, S.cursor + ((S.text.codePointAt(S.cursor) ?? 0) > 0xffff ? 2 : 1))
       break
     case '\x1b[H':
+    case '\x1b[1~': // Home in tmux and screen
+    case '\x1b[7~': // and rxvt
     case '\x01':
       S.cursor = S.text.lastIndexOf('\n', S.cursor - 1) + 1
       break
     case '\x1b[F':
+    case '\x1b[4~': // End in tmux and screen
+    case '\x1b[8~': // and rxvt
     case '\x05': {
       const e = S.text.indexOf('\n', S.cursor)
       S.cursor = e < 0 ? S.text.length : e
@@ -2159,6 +2163,8 @@ function key(k: string) {
       else if (items.length) {
         S.text = ''
         S.cursor = 0
+        // The next menu starts at its first item, not where this one was left.
+        S.menuAt = 0
       } else if (S.replyTo) S.replyTo = null
       else if (S.picked) S.picked = ''
       else if (S.agentView || S.requestView) closeAgent()
@@ -2261,8 +2267,9 @@ function mouse(b: number, x: number, y: number, isPress: boolean) {
     if (!p.isMoved && x === p.x && y === p.y) return
     p.isMoved = true
     if (p.area === 'chat') {
-      // Dragging past the top or bottom scrolls the chat.
-      if (y <= S.chatTop) S.chatScroll = Math.min(S.chatScroll + 1, Math.max(0, S.chatLines.length - S.chatRows))
+      // Dragging past the top or bottom scrolls the chat. The top is its first row: with no banner that
+      // is the window's first row, and the pointer can't go above it.
+      if (y <= S.chatTop + 1) S.chatScroll = Math.min(S.chatScroll + 1, Math.max(0, S.chatLines.length - S.chatRows))
       else if (y > S.chatTop + S.chatRows) S.chatScroll = Math.max(0, S.chatScroll - 1)
       const a = S.sel?.area === 'chat' ? S.sel.a : chatPos(p.x, p.y, true)!
       S.sel = { area: 'chat', a, b: chatPos(x, y, true)! }
@@ -2387,8 +2394,9 @@ out.on('resize', () => {
   refreshStatus()
   draw()
 })
-process.on('SIGTERM', quit)
-process.on('SIGHUP', quit)
+// Not quit itself: a listener gets the signal's name, which is no exit code.
+process.on('SIGTERM', () => quit())
+process.on('SIGHUP', () => quit())
 process.on('uncaughtException', err => {
   quitting = true
   out.write('\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1002l\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l')

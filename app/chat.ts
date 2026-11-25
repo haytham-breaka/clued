@@ -543,7 +543,8 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
       }
     }
 
-    if (turn.error) out.push([pad(IN), { text: `✕ ${turn.error}`, style: { fg: C.red } }])
+    // Wrapped, not cut: the end says what to do next ("Send a message to start it again").
+    if (turn.error) for (const l of wrap([{ text: `✕ ${turn.error}`, style: { fg: C.red } }], width - IN - 1, [pad(2)])) out.push([pad(IN), ...l])
   }
   return { lines: out, anchors, owners }
 }

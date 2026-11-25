@@ -1,0 +1,232 @@
+// The chat: sending, replies (whole, split, streamed, early), Claude's work, Markdown, failures, queueing.
+
+import { describe, test } from 'node:test'
+import assert from 'node:assert/strict'
+import { rowOf, withApp } from './harness.ts'
+
+describe('chat', () => {
+  test('sends a message and shows the reply, quoting it', () =>
+    withApp({ unfocused: true }, async app => {
+      // The empty chat says hello.
+      assert.match(app.screen(), /clued {2}on Claude Code/)
+      await app.send('hello there')
+      const s = await app.waitFor('Echo: hello there')
+      assert.ok(rowOf(s, '╭─ ● new  ↩ “hello there”'), 'the reply quotes the message and is new')
+      assert.match(rowOf(s, 'Your recent messages'), /\?  ⌕  1/)
+      assert.match(s, /✓ hello there +↩ \d\d:\d\d/)
+      assert.match(s, /1 next ▸/)
+      assert.match(s, / Fake 1\.0 {2}s1/)
+      // What went to Claude: the text, and the hidden note naming its topic.
+      const [sent] = app.sent()
+      assert.equal(sent!.text, 'hello there')
+      assert.match(sent!.note, /^\[clued\] This message is topic T1\./)
+      const start = app.claudeLog()[0]
+      assert.deepEqual(start.args.slice(0, 5), ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'])
+      assert.ok(start.args.includes('--append-system-prompt'))
+      // The app keeps its state for the session, and logs what it sent.
+      await app.waitFor(() => app.read('home/.clued/sessions/s1.json').includes('"T1"'))
+      assert.match(app.read('home/.clued/sent.log'), /sent \{"session":"s1","topic":"T1","text":"hello there"/)
+    }))
+
+  test('a reply in two parts with <<reply T1>>: one bubble each, quoting its own message', () =>
+    withApp({ unfocused: true }, async app => {
+      await app.send('first message')
+      await app.waitFor('Echo: first message')
+      await app.send('please split')
+      const s = await app.waitFor('And this part answers the split request.')
+      const lines = s.split('\n')
+      const one = lines.findIndex(l => l.includes('More about your first message: part one.'))
+      const two = lines.findIndex(l => l.includes('And this part answers the split request.'))
+      assert.ok(one > 0 && two > one)
+      assert.ok(lines[one - 1]!.includes('↩ “first message”'), 'part one quotes the first message')
+      assert.ok(lines[two - 1]!.includes('↩ “please split”'), 'part two quotes the second')
+      assert.ok(!s.includes('<<reply'), 'the marks are not shown')
+      assert.match(s, /3 next ▸/)
+      // The first message now has a chain: its own reply and the part answering it later.
+      assert.match(rowOf(s, '⛓ chain'), /● answered {2}⛓ chain · 2/)
+    }))
+
+  test('streams the reply as it is written, with a caret, then the final bubble', () =>
+    withApp({}, async app => {
+      await app.send('stream it')
+      let s = await app.waitFor('Streaming the answer slowly▍')
+      assert.match(s, /Claude is typing…/)
+      assert.match(s, /● working/)
+      assert.match(s, /Claude is working… you can still send a message \(Esc to interrupt\)/)
+      assert.ok(rowOf(s, '╭─ ↩ “stream it”'), 'the live bubble quotes the message')
+      app.release('stream')
+      s = await app.waitFor('Streaming the answer slowly, now finished.')
+      assert.ok(!s.includes('▍'), 'no caret once it is done')
+      assert.match(s, /○ idle/)
+    }))
+
+  test('tool steps fold into one line; Ctrl+O and a click open them', () =>
+    withApp({}, async app => {
+      await app.send('run a tool')
+      let s = await app.waitFor('Ran the tools.')
+      assert.match(s, /⚙ 9 steps · ran 1 command · read 1 file · 3 searches · \d+s {2}▸ show/)
+      assert.ok(!s.includes('Say hi'))
+      app.keys('C-o')
+      s = await app.waitFor('$ Say hi ▸')
+      assert.match(s, /▾ hide/)
+      assert.match(s, /└ hi there/)
+      assert.match(s, /Now reading the readme\./)
+      assert.match(s, /◔ Read README\.md ▸/)
+      assert.match(s, /└ no matches/)
+      for (const step of ['Found files **/*.ts', 'Fetched https://example.com', 'Searched the web for clued', 'Updated the plan', 'Skill review', 'github: get_issue'])
+        assert.ok(s.includes(step), step)
+      // One step opened shows its command, with a copy button, and its output.
+      await app.click('$ Say hi', { area: 'chat' })
+      s = await app.waitFor('$ ⧉ copy')
+      assert.match(s, /echo hi\n.*echo there/)
+      await app.click('⧉ copy', { area: 'chat' })
+      await app.waitClipboard('echo hi\necho there')
+      // The folded line closes it again.
+      await app.click('▾ hide', { area: 'chat' })
+      await app.waitGone('$ Say hi')
+      app.keys('C-o')
+      await app.waitFor('$ Say hi')
+      app.keys('C-o')
+      await app.waitGone('$ Say hi')
+    }))
+
+  test('/work edits shows file changes as diffs; /work all shows every step; /work goes round', () =>
+    withApp({ height: 60 }, async app => {
+      await app.send('/work edits')
+      await app.waitFor("Claude's work: file changes shown as diffs.")
+      await app.send('edit a file')
+      let s = await app.waitFor('Edited the files.')
+      assert.match(s, /✎ Edited notes\.txt ▾/)
+      assert.match(s, /- old line/)
+      assert.match(s, /\+ new line/)
+      assert.match(s, /  keep me/)
+      assert.match(s, /✎ Wrote fresh\.txt ▾\n.*\+ brand new file/)
+      assert.match(s, /✎ Edited multi\.txt ▾\n.*- a\n.*\+ b\n.*⋯\n.*- c\n.*\+ d/)
+      assert.match(s, /✎ Edited nb\.ipynb ▾\n.*\+ print\(1\)/)
+      assert.ok(!s.includes('Count to sixty'), 'edits lists only the file changes')
+      // The panel's work row switches too.
+      await app.click(' all ', { area: 'panel', nth: 1 })
+      s = await app.waitFor('Count to sixty ▾')
+      assert.match(s, /… 22 more lines, show all/)
+      await app.click('… 22 more lines, show all', { area: 'chat' })
+      s = await app.waitGone('more lines, show all')
+      assert.match(s, /line 59/)
+      await app.send('/work')
+      s = await app.waitFor("Claude's work: folded into one line.")
+      assert.match(s, /⚙ 5 steps · edited 4 files · ran 1 command · \d+s {2}▸ show/)
+      // A diff can be folded by a click on its step.
+      await app.click('▸ show', { area: 'chat' })
+      await app.click('✎ Edited notes.txt', { area: 'chat' })
+      await app.waitFor('- old line')
+    }))
+
+  test('an early reply shows at once, before the work ends, and keeps its place', () =>
+    withApp({}, async app => {
+      await app.send('early reply')
+      const s = await app.waitFor('All finished after the early answer.')
+      const lines = s.split('\n')
+      const early = lines.findIndex(l => l.includes('Here is an early answer.'))
+      const last = lines.findIndex(l => l.includes('All finished after the early answer.'))
+      assert.ok(early > 0 && last > early)
+      assert.match(s, /⚙ 1 step · ran 1 command/)
+    }))
+
+  test('Markdown in a reply: headings, lists, quotes, code with copy, tables', () =>
+    withApp({ height: 50 }, async app => {
+      await app.send('long answer')
+      const s = await app.waitFor('The end.')
+      for (const bit of ['A heading', 'Some bold, italic, code and a link (https://example.com).', '• one', '◦ nested', '1. first', '☑ done item', '▎ a quote more quote', ' ts', 'const x = 1', 'a   │ b', '────'])
+        assert.ok(s.includes(bit), bit)
+      await app.click('⧉ copy', { area: 'chat' })
+      await app.waitClipboard('const x = 1')
+      await app.waitFor('Copied.')
+    }))
+
+  test('a failed turn says so; when Claude Code stops, the next message starts it again', () =>
+    withApp({}, async app => {
+      await app.send('please fail')
+      let s = await app.waitFor('✕ Something went wrong on purpose')
+      assert.match(rowOf(s, 'please fail'), /please fail/)
+      await app.send('crash now')
+      s = await app.waitFor('✕ Claude Code stopped (exit 3): fatal: fake crash. Send a message to start it')
+      assert.match(s, /✕ crash now/)
+      await app.send('hello again')
+      await app.waitFor('Echo: hello again')
+      const starts = app.claudeLog().filter(e => e.args)
+      assert.equal(starts.length, 2, 'a second claude was started')
+      // On the same session.
+      assert.deepEqual(starts[1].args.slice(-2), ['--resume', 's1'])
+    }))
+
+  test('Claude reacts to a message from its tag', () =>
+    withApp({}, async app => {
+      await app.send('react to this')
+      const s = await app.waitFor('✅ Claude')
+      assert.match(rowOf(s, '✅ Claude'), /✅ Claude {2}↪? ?[●↪] answered/)
+    }))
+
+  test('a message sent while Claude works is queued, then answered with the work', () =>
+    withApp({}, async app => {
+      await app.send('hold on')
+      await app.waitFor('Slow work')
+      await app.send('and another thing')
+      let s = await app.waitFor('⏸ queued: Claude reads it at its next step')
+      assert.match(s, /Claude is working… your next message is queued ↓/)
+      app.release('slow')
+      s = await app.waitFor('Also got: and another thing')
+      assert.match(s, /The slow work is done\./)
+      assert.ok(!s.includes('⏸ queued'))
+      // Both messages are answered.
+      assert.match(s, /✓ and another thing/)
+      assert.match(s, /✓ hold on/)
+    }))
+
+  test('Esc interrupts Claude while it works', () =>
+    withApp({}, async app => {
+      await app.send('hold on')
+      await app.waitFor('Slow work')
+      app.keys('Escape')
+      await app.waitFor('Interrupted.')
+      await app.waitLog(e => e.type === 'control_request' && e.request?.subtype === 'interrupt')
+      await app.waitFor('○ idle')
+      // Ctrl+C interrupts too, while it works.
+      await app.send('hold on again')
+      await app.waitFor('● working')
+      app.keys('C-c')
+      await app.waitFor(() => app.claudeLog().filter(e => e.request?.subtype === 'interrupt').length === 2)
+    }))
+
+  test('a message Claude tags as about an earlier one is linked to it', () =>
+    withApp({}, async app => {
+      await app.send('the original question')
+      await app.waitFor('Echo: the original question')
+      await app.send('about earlier')
+      // The toast and the link can land on different frames.
+      await app.waitFor('Linked to your earlier message.')
+      await app.waitFor('↩ about: “the original question”')
+    }))
+
+  test('a reply that never arrived is flagged, and can be asked for again', () =>
+    withApp({}, async app => {
+      await app.send('lose my reply')
+      let s = await app.waitFor('⚠ no reply arrived · ↻ ask again')
+      assert.match(s, /⚠ lose my reply +reply lost/)
+      await app.click('↻ ask again', { area: 'chat' })
+      s = await app.waitFor('never reached the app')
+      const last = app.sent().at(-1)!
+      assert.match(last.text, /^Your reply to this message \(T1\) never reached the app: .* starting with <<reply T1>>\.$/)
+      assert.match(last.note, /The user is replying to their own message:\n> lose my reply/)
+    }))
+
+  test('/results hides the work; the panel switch does the same', () =>
+    withApp({}, async app => {
+      await app.send('run a tool')
+      await app.waitFor('⚙ 9 steps')
+      await app.send('/results')
+      await app.waitGone('⚙ 9 steps')
+      await app.click(' all ', { area: 'panel' })
+      await app.waitFor('⚙ 9 steps')
+      await app.click(' results ', { area: 'panel' })
+      await app.waitGone('⚙ 9 steps')
+    }))
+})

@@ -1,6 +1,6 @@
 // Pure topic/thread logic: no $, so it is easy to test and reason about.
 
-import type { Answer, Board, Thread, Topic, TopicStatus } from '../types'
+import type { Answer, Board, Thread, Topic, TopicStatus } from '../types/index.d.ts'
 
 export const TOPICS_PER_THREAD = 3
 /** Threads Claude may sort a Main message into: active within this window. */

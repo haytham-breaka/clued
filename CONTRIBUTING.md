@@ -26,7 +26,7 @@ cd clued
 bin/clued            # the app, on this folder
 ```
 
-There's no build step and there are no dependencies. Every file under `app/` is TypeScript that Node runs directly, so an edit shows up on the next start, or after `/reload` inside the app.
+There's no build step and there are no dependencies to run it (`npm ci` only installs the test tools). Every file under `app/` is TypeScript that Node runs directly, so an edit shows up on the next start, or after `/reload` inside the app.
 
 ```
 bin/clued          launcher: starts the app and restarts it on /reload
@@ -48,10 +48,16 @@ docs/classic.md    the older tmux layout and its Claude Code mod
 ### Checks
 
 ```bash
-claude plugin test .     # the classic mod's tests, which also cover the shared tag model
+npm ci && npm test && npm run coverage
 ```
 
-To type-check, install `typescript@5` and `@types/node@22` somewhere outside the repo, then run `tsc --noEmit --strict --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2023 --skipLibCheck app/main.ts`.
+`npm ci` installs the dev-only test tools: c8 for coverage, and TypeScript with Node's types. `npm test` runs the unit tests (`tests/unit/`) and the end-to-end tests (`tests/e2e/`). The end-to-end tests drive the real app in tmux, so tmux must be installed. They run it against a fake `claude` that plays scripted scenarios, with HOME set to a temporary folder, and fake notification and clipboard tools, so they need no Claude Code, no network, and never touch your own `~/.clued` or `~/.claude`. `npm run coverage` runs the same tests and fails below 80% of lines, branches or functions covered in `app/` and `hooks/model.ts`. `npm run typecheck` type-checks the app and the tests. The same checks run on every pull request and every push to `main`.
+
+If a step times out on a slow machine, `E2E_WAIT_MS=30000 npm test` gives each wait in the end-to-end tests longer (the default is 15000).
+
+```bash
+claude plugin test .     # the classic mod's tests, which also cover the shared tag model
+```
 
 ### The privacy check
 

@@ -2,6 +2,7 @@
 
 **Never lose track of what you asked Claude.** clued is a chat app for the terminal that runs on top of a real Claude Code session. Every message you send is tracked until it's answered, every reply says which of your messages it answers, and a side panel shows what Claude is working on and what is waiting on you. Send five things while Claude is busy, and you can still see, for each one, whether it was answered and where.
 
+[![Tests](https://github.com/haytham-breaka/clued/actions/workflows/test.yml/badge.svg)](https://github.com/haytham-breaka/clued/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node ≥ 22.18](https://img.shields.io/badge/node-%E2%89%A5%2022.18-brightgreen.svg)](#install)
 [![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-informational.svg)](.claude-plugin/plugin.json)
@@ -33,6 +34,7 @@ clued makes no API calls of its own. Claude Code runs underneath, headless, with
 Requires:
 - [Claude Code](https://claude.com/claude-code), installed and logged in. `claude` must be on your PATH.
 - **Node 22.18 or later.** clued runs its TypeScript directly, with no build step and no dependencies.
+  The `package.json` lists only the tools for its tests (c8 and TypeScript, as dev dependencies); running clued needs none of them.
 - macOS, Linux or Windows through WSL. The launcher is a bash script. It's tested in iTerm2 and in Windows Terminal with WSL.
 
 ```bash

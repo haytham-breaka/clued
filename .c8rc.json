@@ -1,0 +1,7 @@
+{
+  "all": true,
+  "include": ["app/**/*.ts", "hooks/model.ts"],
+  "exclude": ["tests/**", "hooks/register.tsx", "hooks/bridge.ts", "hooks/replybar.tsx", "panel/main.ts", "bin/clued-classic", "tests/clued.test.tsx"],
+  "reporter": ["text", "text-summary", "json-summary"],
+  "report-dir": "coverage"
+}

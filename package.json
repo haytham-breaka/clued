@@ -1,0 +1,21 @@
+{
+  "name": "clued",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A chat app for the terminal on top of a real Claude Code session",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=4 \"tests/unit/*.test.ts\" \"tests/e2e/*.test.ts\"",
+    "coverage": "c8 --check-coverage --lines 80 --branches 80 --functions 80 npm test",
+    "typecheck": "tsc --noEmit --strict --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2023 --skipLibCheck app/main.ts hooks/model.ts tests/unit/*.ts tests/e2e/*.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.6",
+    "c8": "^12.0.0",
+    "typescript": "^5.9.3"
+  }
+}
