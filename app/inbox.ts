@@ -224,15 +224,20 @@ export function inbox(turns: Turn[], board: Board, read: ReadonlySet<string>, li
     const isBusy = live.busy.has(turn.key)
     // "claude" after a settled tag means Claude still owes work: an "OK, I'll do it" is not done.
     const owes = !!topic && !topic.isProvisional && topic.status === 'claude'
+    const reply = replyId ? parts.find(p => p.id === replyId) : undefined
+    // A follow-up merged into a topic that waits on you waits too only if its own latest reply asks
+    // something: the question may be about the first message, already settled for this one.
+    const merged = !!topicId && !!topic && topic.id !== topicId
+    const waitsOnYou = topic?.status === 'me' && (!merged || !!(reply && questionOf(reply.part.text)))
     const state: MessageState = replyId
-      ? topic?.status === 'me' ? 'me' : owes || isBusy ? 'progress' : 'done'
+      ? waitsOnYou ? 'me' : owes || isBusy ? 'progress' : 'done'
       : turns.slice(i).some(t => !t.isDone) ? 'claude' : isBusy ? 'progress' : turn.error ? 'failed'
       // A reaction can be the whole reply (✅ done); a topic Claude's tag settled had a reply that got lost.
       : live.reacted?.has(turn.key) ? 'done' : topic && !topic.isProvisional ? 'lost' : 'none'
     const stale = state === 'progress' && !live.isWorking && !isBusy && live.now - (topic?.updatedAt ?? turn.at) > STALE_MS
     const active = (state === 'claude' && live.isWorking) || (state === 'progress' && isBusy)
     // The reply lands when its turn ends; the status moves when the topic does.
-    const replyTurn = replyId ? parts.find(p => p.id === replyId)?.turn : undefined
+    const replyTurn = reply?.turn
     const repliedAt = replyTurn ? replyTurn.at + (replyTurn.durationMs ?? 0) : 0
     const statusAt = topic?.updatedAt ?? 0
     const updatedAt = Math.max(turn.at, repliedAt, statusAt)

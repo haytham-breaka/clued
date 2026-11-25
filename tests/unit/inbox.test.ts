@@ -209,3 +209,16 @@ describe('inbox', () => {
     assert.equal(box.messages.find(m => m.turn === b)!.replyId, b.parts![0]!.id)
   })
 })
+
+describe('a follow-up merged into a topic that waits on you', () => {
+  test('waits too only when its own latest reply asks something', () => {
+    const first = turn('Add a reorder check; ask me the threshold first.', { topicId: 'T1', answer: 'Which threshold?', parts: [{ to: ['T1'], text: 'Which threshold should it use?' }] })
+    const follow = (text: string) => turn('Meanwhile, which host does the server bind to?', { topicId: 'T2', answer: text, parts: [{ to: ['T2'], text }] })
+    // Claude's tag merged T2 into T1, whose question is still open.
+    const board = boardOf(topic('T1', [first.key, keyOf('Meanwhile, which host does the server bind to?')], 'me'))
+    const state = (ts: Turn[]) => Object.fromEntries(inbox(ts, board, new Set()).messages.map(m => [m.turn.text.slice(0, 5), m.state]))
+    assert.deepEqual(state([first, follow('It binds to 127.0.0.1.')]), { 'Add a': 'me', Meanw: 'done' })
+    // Its own reply asks something: it waits on you as well.
+    assert.deepEqual(state([first, follow('There are two hosts. Which one do you mean?')]), { 'Add a': 'me', Meanw: 'me' })
+  })
+})

@@ -12,7 +12,7 @@
 // against rules built from the scenario facts. The deterministic half is in visibility-core.ts.
 //
 //   node --no-warnings eval/visibility.ts [--in eval/results/hard] [--raw <dir>] [--out eval/results/visibility]
-//        [--truth-judge] [--glance] [--full] [--budget 3] [--dry] [--run <scenario>-<arm>-r<rep> [--screens]]
+//        [--truth-judge | --truth-from <results.json>] [--glance] [--full] [--budget 3] [--dry] [--run <scenario>-<arm>-r<rep> [--screens]]
 //
 // See eval/README.md ("Visibility") and eval/RESULTS.md ("Can you see what was answered?").
 
@@ -267,6 +267,24 @@ async function main() {
       }
       p.truth = judged
     })
+  // Or the truth saved by an earlier run (its ids; the times come from the blocks): scoring a change
+  // to the app again with no model calls.
+  const truthFrom = get('--truth-from')
+  if (truthFrom) {
+    const savedTruth = JSON.parse(readFileSync(resolve(truthFrom), 'utf8')).truth as Record<string, { id: string; answeredIn?: string; asksIn?: string; resolvedBy?: string; source: 'judge' | 'rules' }[]>
+    for (const p of prepared) {
+      const ts = savedTruth[keyOf(p.run)]
+      if (!ts) continue
+      const at = (id?: string) => (id ? p.blocks.find(b => b.id === id) : undefined)
+      const sentAt = (id?: string) => (id ? p.run.sent[Number(id.slice(1)) - 1]?.t : undefined)
+      p.truth = ts.map(x => {
+        const a = at(x.answeredIn)
+        const q = at(x.asksIn)
+        const r = sentAt(x.resolvedBy)
+        return { id: x.id, ...(a ? { answeredIn: a.id, answeredAt: a.t } : {}), ...(q ? { asksIn: q.id, asksAt: q.t } : {}), ...(q && r != null ? { resolvedBy: x.resolvedBy!, resolvedAt: r } : {}), source: x.source }
+      })
+    }
+  }
   console.log(`truth: the judge and the rules name the same answering block for ${agree.same}/${agree.msgs} messages; spent $${budget.spent.toFixed(4)}`)
 
   // 2. Pairs (frame × message) with their truth, and arm A's panel read directly (no model).

@@ -10,7 +10,10 @@ The first evaluation compared answers. This one asks what clued is for: for each
 - **What is still open: no clear win.** clued scores higher only if Claude's offers ("I can change that if you like") count as waiting on you. Leave offers out and the two arms tie (−1 pt, p = 0.49). The panel also makes two mistakes of its own; see below.
 - **An unanswered message that looked answered:** 0 of 141 on clued's panel, and 4 of 135 for a reader of plain Claude Code. That gap isn't significant (p = 0.22).
 
+**Since then (panel fix).** The panel showed ✋ on follow-ups that Claude's tag merged into a topic whose question was still open, though the follow-up itself was settled. A merged follow-up now waits on you only if its own latest reply asks something. Re-scored with the saved truth and no model calls (`--truth-from`): the panel's still-open accuracy went from 92.8% to 93.4%, and the false ✋ marks from 27 to 21, with nothing newly wrong. The other error, ✓ where Claude asked something but its tag said done, stays at 45. A rule that marked any reply ending on a question as waiting fixed 7 of those but broke 16 others: replies to one message often end by asking again about another, so it was dropped.
+
 ### Method
+
 
 **Data.** It re-uses the 130 recorded runs of the bigger run below (`results/hard/results.json` and `raw/*.jsonl`). No session was run again.
 
