@@ -25,6 +25,8 @@ describe('chat', () => {
       const start = app.claudeLog()[0]
       assert.deepEqual(start.args.slice(0, 5), ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'])
       assert.ok(start.args.includes('--append-system-prompt'))
+      // The guide tells Claude to keep long waits off the turn, so the user's messages get answered meanwhile.
+      assert.match(start.args[start.args.indexOf('--append-system-prompt') + 1]!, /Never wait on anything long in the foreground \(CI runs, merges, polling loops.*run it in the background \(Bash with run_in_background, or an agent\)/)
       // The app keeps its state for the session, and logs what it sent.
       await app.waitFor(() => app.read('home/.clued/sessions/s1.json').includes('"T1"'))
       assert.match(app.read('home/.clued/sent.log'), /sent \{"session":"s1","topic":"T1","text":"hello there"/)
