@@ -225,6 +225,10 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (e.type === 'control_request') {
     if (e.request?.subtype === 'interrupt') interrupted = true
+    if (e.request?.subtype === 'set_permission_mode') {
+      out({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response: { mode: e.request.mode } } })
+      out({ type: 'system', subtype: 'status', status: null, permissionMode: e.request.mode })
+    }
     return
   }
   if (e.type !== 'user') return

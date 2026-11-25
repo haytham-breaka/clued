@@ -36,7 +36,7 @@ import { Claude } from './claude.ts'
 import type { ClaudeEvent, Usage } from './claude.ts'
 import { FOLDED, MIN_FULL, RECENT_ROWS, panelLines, who } from './panel.ts'
 import type { PanelList } from './panel.ts'
-import { lastUsage, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
+import { lastCwd, lastUsage, listSessions, loadHistory, loadKept, newTurn, saveKept } from './session.ts'
 import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
@@ -668,6 +668,7 @@ function onEvent(e: ClaudeEvent) {
       S.model = e.model
       S.commands = e.commands
       S.permissionMode = e.permissionMode
+      if (e.permissionMode) seenModes.add(e.permissionMode)
       break
     case 'text-delta':
       if (t) t.live += e.text
@@ -828,6 +829,11 @@ function onEvent(e: ClaudeEvent) {
       S.permissions.push({ requestId: e.requestId, tool: e.tool, input: e.input })
       if (notifyMode === 'always' || (notifyMode === 'on' && !S.isFocused))
         notify(`Claude wants to use ${e.tool} · ${cwd.split('/').pop() || cwd}`, preview(String(e.input.description ?? e.input.command ?? e.input.file_path ?? e.input.url ?? ''), 200))
+      break
+    case 'mode':
+      S.permissionMode = e.mode
+      seenModes.add(e.mode)
+      statusSoon()
       break
     case 'status':
       if (e.text === 'compacting') toast('Compacting the conversation…')
@@ -1164,6 +1170,33 @@ function statusSoon() {
 }
 // And now and then with nothing happening, for the clock and the "ago" times it shows.
 setInterval(() => refreshStatus(), 15_000).unref()
+// ---- Permission mode ------------------------------------------------------------------
+
+/** The modes Shift+Tab goes through: Claude Code's three, plus any it started in or reported (bypass, auto…). */
+const seenModes = new Set<string>()
+const MODE_ORDER = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions', 'dontAsk']
+const MODES: Record<string, { label: string; fg: number }> = {
+  default: { label: '⏵ default mode: asks before edits and commands', fg: C.gray },
+  acceptEdits: { label: '⏵⏵ accept edits on', fg: C.magenta },
+  plan: { label: '⏸ plan mode on', fg: C.cyan },
+  auto: { label: '⏵⏵ auto mode on', fg: C.yellow },
+  bypassPermissions: { label: '⏵⏵ bypass permissions on', fg: C.red },
+  dontAsk: { label: '⏵⏵ don\'t ask on', fg: C.red },
+}
+function cycleMode() {
+  if (!S.claude) return toast('Claude Code is not running.')
+  const modes = MODE_ORDER.filter(m => ['default', 'acceptEdits', 'plan'].includes(m) || seenModes.has(m))
+  const next = modes[(modes.indexOf(S.permissionMode || 'default') + 1) % modes.length]!
+  S.claude.setMode(next)
+}
+/** The line under the status line, as in Claude Code: the permission mode, and how to change it. */
+function modeRow(width: number): string {
+  const m = MODES[S.permissionMode || 'default'] ?? { label: `⏵⏵ ${S.permissionMode} mode on`, fg: C.yellow }
+  // Never wider than the chat: a wrapped last row would scroll the whole screen.
+  const label = clip(` ${m.label}`, width)
+  return `${sgr({ fg: m.fg })}${label}${sgr({ fg: C.faint })}${clip(' (shift+tab to cycle)', width - cells(label))}${sgr()}`
+}
+
 function refreshStatus() {
   if (!statusCommand) return
   if (statusBusy) {
@@ -1174,11 +1207,13 @@ function refreshStatus() {
   // What Claude Code reports; before the first reply, a guess from the model's name.
   const size = S.contextWindow || knownWindows[S.model] || (/\[1m\]|1m/.test(S.model) ? 1_000_000 : 200_000)
   const used = (S.usage.input_tokens ?? 0) + (S.usage.cache_read_input_tokens ?? 0) + (S.usage.cache_creation_input_tokens ?? 0)
+  // Where Claude Code is working now (its shell's cd moves it), as Claude Code tells its status line.
+  const here = (S.sessionId && lastCwd(cwd, S.sessionId)) || cwd
   const payload = {
     session_id: S.sessionId || 'new',
     prompt_id: S.turns.at(-1)?.key,
-    cwd,
-    workspace: { current_dir: cwd, project_dir: cwd },
+    cwd: here,
+    workspace: { current_dir: here, project_dir: cwd },
     model: { id: S.model, display_name: modelName(S.model) },
     ...(effortLevel ? { effort: { level: effortLevel } } : {}),
     context_window: { used_percentage: used ? Math.round((used / size) * 100) : 0, context_window_size: size, current_usage: S.usage },
@@ -1705,7 +1740,7 @@ function paint() {
   }
 
   // Right, bottom up: status line, input, reply bar, prompts; the chat above.
-  const status = S.statusRows.length ? S.statusRows : [`${sgr({ fg: C.gray })} ${modelName(S.model)}  ${S.sessionId ? S.sessionId.slice(0, 8) : 'new session'}${sgr()}`]
+  const status = [...(S.statusRows.length ? S.statusRows : [`${sgr({ fg: C.gray })} ${modelName(S.model)}  ${S.sessionId ? S.sessionId.slice(0, 8) : 'new session'}${sgr()}`]), modeRow(cw - 1)]
   const bottom = bottomLines(cw - 1)
   // Inside an agent: a pinned banner says so, with the message it works on and the way back.
   const inside = S.agentView === MAIN ? mainAgent() : S.agentView ? S.agents.get(S.agentView) : undefined
@@ -2154,6 +2189,10 @@ function key(k: string) {
         if (S.historyAt >= S.history.length) S.historyAt = -1
         S.cursor = S.text.length
       }
+      break
+    case '\x1b[Z':
+      // Shift+Tab: the next permission mode, as in Claude Code.
+      cycleMode()
       break
     case '\t':
       if (items.length) {

@@ -66,7 +66,7 @@ The panel on the left has these sections:
 - **Agents:** Claude first, then each agent it started, by name and role (`James (implementer)`, `Jake (explorer)`), running or just finished, with the message it is working on. Click one to open its live view. Claude is told the names too, so you can write "ask Jake to check the tests".
 - **Your recent messages:** each with its mark, latest activity first. Press `?` for what the marks mean and `⌕` to search.
 
-Drag the divider to resize the panel, and click `☰` to fold it to icons. Your own status line command runs at the bottom, fed what Claude Code would feed it.
+Drag the divider to resize the panel, and click `☰` to fold it to icons. Your own status line command runs at the bottom, fed what Claude Code would feed it (the folder is the one Claude is working in now), with the permission mode under it, as in Claude Code.
 
 ### Keys
 
@@ -80,6 +80,7 @@ Drag the divider to resize the panel, and click `☰` to fold it to icons. Your 
 | Ctrl+F | search your messages |
 | Ctrl+N | next unread reply |
 | Ctrl+O | show or hide Claude's steps |
+| Shift+Tab | next permission mode (default, accept edits, plan, and bypass or auto when you started in it), shown under the status line |
 | ↑ / ↓ | move between rows of a long message; from the top row, earlier messages |
 | Ctrl+← / Ctrl+→ | jump words |
 | Ctrl+Backspace / Alt+Backspace (⌥⌫) | delete the word before the cursor (Ctrl+W: up to the last space) |

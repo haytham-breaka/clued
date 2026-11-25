@@ -405,6 +405,40 @@ describe('app', () => {
       s = app.screen()
     }))
 
+  test('the permission mode shows under the status line, and Shift+Tab cycles it', () =>
+    withApp({}, async app => {
+      await app.waitFor('default mode: asks before edits and commands (shift+tab to cycle)')
+      app.keys('BTab')
+      await app.waitFor('⏵⏵ accept edits on (shift+tab to cycle)')
+      app.keys('BTab')
+      await app.waitFor('⏸ plan mode on')
+      // Only the modes Claude Code started in or reported join the cycle: back to the default.
+      app.keys('BTab')
+      await app.waitFor('default mode: asks before edits')
+      assert.match(app.read('claude.log'), /"subtype":"set_permission_mode","mode":"plan"/)
+    }))
+
+  test('the status line gets the folder Claude Code is in now, and the project folder', () =>
+    withApp({
+      setup: ({ home, work, dir }) => {
+        mkdirSync(join(home, '.claude'), { recursive: true })
+        writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command: `cat > '${dir}/status-in.json'; echo STATUS` } }))
+        // Claude Code's session file: its shell moved to a subfolder; an agent works somewhere else.
+        writeSession(home, work, 's1', [
+          { type: 'user', cwd: work, message: { content: 'hi' } },
+          { type: 'assistant', cwd: `${work}/sub`, message: { content: [{ type: 'text', text: 'moved' }] } },
+          { type: 'assistant', cwd: '/tmp/agent-elsewhere', isSidechain: true, message: { content: [{ type: 'text', text: 'agent' }] } },
+        ])
+      },
+      ready: 'STATUS',
+    }, async app => {
+      await app.send('hello')
+      await app.waitFor(() => app.read('status-in.json').includes('/sub"'), 20_000)
+      const input = JSON.parse(app.read('status-in.json'))
+      assert.equal(input.cwd, `${app.work}/sub`)
+      assert.deepEqual(input.workspace, { current_dir: `${app.work}/sub`, project_dir: app.work })
+    }))
+
   test('/exit quits and says how to resume; /reload exits 75 for the launcher to restart', async () => {
     await withApp({}, async app => {
       await app.send('hello')

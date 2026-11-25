@@ -1,7 +1,7 @@
 // The conversation as the app draws it: turns of (your message, Claude's steps, Claude's answer),
 // plus what the app keeps beside Claude Code's own session file (threads, reactions, links).
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { emptyBoard, keyOf, reactionText, stripTag } from '../hooks/model.ts'
 import type { Board } from '../types/index.d.ts'
@@ -261,6 +261,31 @@ export function loadHistory(cwd: string, sessionId: string): Turn[] {
 }
 
 /** The token usage of a session's last main-agent reply (what its context holds), from its file. */
+/**
+ * The folder Claude Code is working in now (it moves with cd in its shell): the cwd of the
+ * session file's last entry. Only the file's tail is read.
+ */
+export function lastCwd(cwd: string, sessionId: string): string | undefined {
+  try {
+    const fd = openSync(`${projectDir(cwd)}/${sessionId}.jsonl`, 'r')
+    try {
+      const size = fstatSync(fd).size
+      const len = Math.min(size, 256 * 1024)
+      const buf = Buffer.alloc(len)
+      readSync(fd, buf, 0, len, size - len)
+      const lines = buf.toString('utf8').trimEnd().split('\n')
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i]!.includes('"isSidechain":true')) continue // an agent may work elsewhere
+        const m = lines[i]!.match(/"cwd":"((?:[^"\\]|\\.)*)"/)
+        if (m) return JSON.parse(`"${m[1]}"`) as string
+      }
+    } finally {
+      closeSync(fd)
+    }
+  } catch {}
+  return undefined
+}
+
 export function lastUsage(cwd: string, sessionId: string): Record<string, number> | undefined {
   try {
     const lines = readFileSync(`${projectDir(cwd)}/${sessionId}.jsonl`, 'utf8').trimEnd().split('\n')

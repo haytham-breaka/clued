@@ -15,6 +15,7 @@ export type ClaudeEvent =
   | { kind: 'tool'; tool: ToolUse }
   | { kind: 'tool-result'; id: string; text: string; isError: boolean }
   | { kind: 'status'; text: string }
+  | { kind: 'mode'; mode: string }
   | { kind: 'result'; text: string; isError: boolean; usage: Usage; costUsd: number; durationMs: number; sessionId: string; contextWindow?: number }
   | { kind: 'rate'; info: Record<string, unknown> }
   | { kind: 'usage'; usage: Usage }
@@ -80,6 +81,11 @@ export class Claude {
     this.write({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' })
   }
 
+  /** default, acceptEdits, plan, bypassPermissions…: Claude Code answers with a status event. */
+  setMode(mode: string) {
+    this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'set_permission_mode', mode } })
+  }
+
   interrupt() {
     this.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'interrupt' } })
   }
@@ -130,7 +136,11 @@ export class Claude {
             commands: (e.slash_commands ?? []).map(String),
             permissionMode: e.permissionMode ?? '',
           })
-        else if (e.subtype === 'status' && typeof e.status === 'string') emit({ kind: 'status', text: e.status })
+        else if (e.subtype === 'status') {
+          if (typeof e.status === 'string') emit({ kind: 'status', text: e.status })
+          // The permission mode changed: Shift+Tab here, or Claude entering or leaving plan mode.
+          if (typeof e.permissionMode === 'string') emit({ kind: 'mode', mode: e.permissionMode })
+        }
         else if (e.subtype === 'compact_boundary') emit({ kind: 'status', text: 'compacted' })
         else if (e.subtype === 'task_started' || e.subtype === 'task_progress' || e.subtype === 'task_notification')
           emit({
