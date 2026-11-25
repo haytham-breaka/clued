@@ -75,10 +75,10 @@ describe('chat', () => {
       assert.match(s, /└ no matches/)
       for (const step of ['Found files **/*.ts', 'Fetched https://example.com', 'Searched the web for clued', 'Updated the plan', 'Skill review', 'github: get_issue'])
         assert.ok(s.includes(step), step)
-      // One step opened shows its command, with a copy button, and its output.
+      // One step opened shows a bash block: a header with a copy button, the command, and its output.
       await app.click('$ Say hi', { area: 'chat' })
-      s = await app.waitFor('$ ⧉ copy')
-      assert.match(s, /echo hi\n.*echo there/)
+      s = await app.waitFor(/bash +⧉ copy/)
+      assert.match(s, /\$ echo hi\n.*echo there\n.*hi\n.*there/)
       await app.click('⧉ copy', { area: 'chat' })
       await app.waitClipboard('echo hi\necho there')
       // The folded line closes it again.
@@ -100,9 +100,11 @@ describe('chat', () => {
       assert.match(s, /- old line/)
       assert.match(s, /\+ new line/)
       assert.match(s, /  keep me/)
-      assert.match(s, /✎ Wrote fresh\.txt ▾\n.*\+ brand new file/)
-      assert.match(s, /✎ Edited multi\.txt ▾\n.*- a\n.*\+ b\n.*⋯\n.*- c\n.*\+ d/)
-      assert.match(s, /✎ Edited nb\.ipynb ▾\n.*\+ print\(1\)/)
+      // Each change has a header row: the path and how many lines it adds and removes.
+      assert.match(s, /✎ Edited notes\.txt ▾\n.*notes\.txt +\+1 −1\n.*- old line/)
+      assert.match(s, /✎ Wrote fresh\.txt ▾\n.*fresh\.txt +\+1\n.*1 \+ brand new file/)
+      assert.match(s, /✎ Edited multi\.txt ▾\n.*multi\.txt +\+2 −2\n.*- a\n.*\+ b\n.*⋯\n.*- c\n.*\+ d/)
+      assert.match(s, /✎ Edited nb\.ipynb ▾\n.*nb\.ipynb +\+1\n.*1 \+ print\(1\)/)
       assert.ok(!s.includes('Count to sixty'), 'edits lists only the file changes')
       // The panel's work row switches too.
       await app.click(' all ', { area: 'panel', nth: 1 })

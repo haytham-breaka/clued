@@ -1326,10 +1326,12 @@ function selectedText(): string {
     lines = lines
       .map(l => l.replace(/^\s*[│┃▎]\s?/, '').replace(/\s?[│┃]\s*$/, '').replace(/\s+$/, ''))
       .filter(l => !l || !(/^[\s─╭╮╰╯]*$/.test(l) || /^\s*[╭╰]─/.test(l)))
-    // The common indent, not counting a first line that starts mid-row.
-    const rest = p.col > 0 ? lines.slice(1) : lines
+    // The common indent, not counting a first line that starts mid-row (past text it copies: a code
+    // block's gutter is not copied, so a selection from there takes whole lines).
+    const isMidRow = p.col > 0 && cellText(S.chatLines[p.line] ?? [], 0, p.col) !== ''
+    const rest = isMidRow ? lines.slice(1) : lines
     const indent = Math.min(...rest.filter(l => l.trim()).map(l => l.match(/^ */)![0].length))
-    if (Number.isFinite(indent)) lines = lines.map((l, i) => (i === 0 && p.col > 0 ? l : l.slice(indent)))
+    if (Number.isFinite(indent)) lines = lines.map((l, i) => (i === 0 && isMidRow ? l : l.slice(indent)))
   }
   while (lines.length && !lines[0]!.trim()) lines.shift()
   while (lines.length && !lines.at(-1)!.trim()) lines.pop()

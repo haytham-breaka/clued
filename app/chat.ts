@@ -4,7 +4,8 @@
 import { firstLine, stripTag } from '../hooks/model.ts'
 import { markdown } from './markdown.ts'
 import { preview, questionsOf, splitAnswer, stripMarks } from './inbox.ts'
-import { lineDiff } from './diff.ts'
+import { block, codeRows, diffHead, diffRows, hunkGap, K, langOf, readRows, shellRows } from './code.ts'
+import type { Lang, Row } from './code.ts'
 import type { Kept, Step, Turn, Work } from './session.ts'
 import { roleOf } from './panel.ts'
 import type { Agent } from './panel.ts'
@@ -145,51 +146,90 @@ export const isEdit = (s: Step) => EDITS.has(s.tool.name)
 /** Rows of one step's details before "… N more lines". */
 const DETAIL_ROWS = 40
 
+/** A tool's input as `key: value` lines: strings as they are, other values as short JSON. */
+export function fieldLines(input: Record<string, unknown>, width: number): Line[] {
+  const rows: Line[] = []
+  let budget = 2000
+  for (const [k, v] of Object.entries(input)) {
+    if (v == null || v === '' || budget <= 0) continue
+    let text = typeof v === 'string' ? v : JSON.stringify(v)
+    if (text.length > budget) text = text.slice(0, budget) + '…'
+    budget -= text.length
+    const key: Span = { text: `${k}: `, style: { fg: C.gray } }
+    const val: Style = { fg: typeof v === 'string' ? C.white : typeof v === 'object' ? C.gray : K.number }
+    const lines = text.split('\n')
+    if (lines.length === 1) rows.push(...wrap([key, { text: text.replace(/\t/g, '  '), style: val }], width, [pad(2)]))
+    else {
+      rows.push([key])
+      for (const l of lines) rows.push(...wrap([{ text: l.replace(/\t/g, '  ') || ' ', style: val }], width - 2, [pad(2)]).map(r => [pad(2), ...r]))
+    }
+  }
+  return rows
+}
+
 /** What a step did, exactly: an edit as a diff, a new file's text, a command and its output. */
-function stepDetail(s: Step, width: number, left: number, ctx: ChatCtx): Line[] {
+export function stepDetail(s: Step, width: number, left: number, ctx: ChatCtx): Line[] {
   const i = s.tool.input
   const rows: Line[] = []
-  const code = (text: string, style: Style, mark = '  ') => {
-    for (const l of wrap([{ text: text.replace(/\t/g, '  ') || ' ', style }], width - 2)) rows.push([{ text: mark, style }, ...l])
+  const path = rel(i.file_path ?? i.notebook_path, ctx.cwd)
+  const plain = (text: string, style: Style) => {
+    for (const l of wrap([{ text: text.replace(/\t/g, '  ') || ' ', style }], width - 2)) rows.push([pad(2), ...l])
   }
-  const diff = (before: string, after: string) => {
-    for (const d of lineDiff(before, after))
-      code(d.text, d.kind === '-' ? { fg: C.red, bg: 52 } : d.kind === '+' ? { fg: C.green, bg: 22 } : { fg: C.gray }, `${d.kind} `)
+  const edits = (list: { old_string?: unknown; new_string?: unknown }[]) => {
+    const all = list.map(e => diffRows(String(e.old_string ?? ''), String(e.new_string ?? '')))
+    const body: Row[] = []
+    all.forEach((d, n) => body.push(...(n ? [hunkGap()] : []), ...d.rows))
+    rows.push(...block(body, width, diffHead(path, all.reduce((n, d) => n + d.added, 0), all.reduce((n, d) => n + d.removed, 0))))
+  }
+  const written = (text: string, lang: Lang | undefined) => {
+    const lines = text.replace(/\n$/, '').split('\n')
+    rows.push(...block(codeRows(lines, lang, 1, { fg: K.addSign, bg: K.addBg }, '+'), width, diffHead(path, lines.length, 0)))
   }
   switch (s.tool.name) {
     case 'Edit':
-      diff(String(i.old_string ?? ''), String(i.new_string ?? ''))
+      edits([i as { old_string?: unknown; new_string?: unknown }])
       break
     case 'MultiEdit':
-      for (const [n, e] of ((i.edits ?? []) as { old_string?: string; new_string?: string }[]).entries()) {
-        if (n) rows.push([{ text: '  ⋯', style: { fg: C.faint } }])
-        diff(String(e.old_string ?? ''), String(e.new_string ?? ''))
-      }
+      edits((i.edits ?? []) as { old_string?: unknown; new_string?: unknown }[])
       break
     case 'Write':
-      for (const l of String(i.content ?? '').split('\n')) code(l, { fg: C.green }, '+ ')
+      written(String(i.content ?? ''), langOf(String(i.file_path ?? '')))
       break
     case 'NotebookEdit':
-      for (const l of String(i.new_source ?? '').split('\n')) code(l, { fg: C.green }, '+ ')
+      written(String(i.new_source ?? ''), i.cell_type === 'markdown' ? 'md' : 'py')
       break
+    case 'Read': {
+      const r = s.result != null && !s.isError ? readRows(s.result, langOf(String(i.file_path ?? ''))) : []
+      const range = [i.offset != null ? `from line ${i.offset}` : '', i.limit != null ? `${i.limit} lines` : ''].filter(Boolean).join(', ')
+      if (range) rows.push([pad(2), { text: range, style: { fg: C.faint } }])
+      if (r.length) rows.push(...block(r, width))
+      else if (s.result) plain(s.result.replace(/<\/?system-reminder>/g, '').trim(), { fg: s.isError ? C.red : C.faint })
+      break
+    }
     case 'Bash': {
       const cmd = String(i.command ?? '')
-      rows.push([
-        { text: '$ ', style: { fg: C.cyan, bold: true } },
-        { text: '⧉ copy', style: { fg: C.gray }, action: () => ctx.copy(cmd) },
-      ])
-      for (const l of cmd.split('\n')) code(l, { fg: C.white })
-      if (s.result) for (const l of s.result.replace(/\s+$/, '').split('\n')) code(l, { fg: s.isError ? C.red : C.gray })
+      rows.push(...block(shellRows(cmd, s.result, s.isError), width, { left: [{ text: ' bash', style: { fg: C.gray, italic: true } }], right: [{ text: '⧉ copy ', style: { fg: C.cyan }, action: () => ctx.copy(cmd) }] }))
       break
     }
+    case 'TodoWrite':
+      for (const t of (i.todos ?? []) as { content?: string; status?: string }[]) {
+        const mark = t.status === 'completed' ? '☑ ' : t.status === 'in_progress' ? '◐ ' : '☐ '
+        const style: Style = t.status === 'completed' ? { fg: C.gray } : t.status === 'in_progress' ? { fg: C.cyan } : {}
+        for (const [n, l] of wrap([{ text: String(t.content ?? '') }], width - 4).entries()) rows.push([pad(2), { text: n ? '  ' : mark, style: { fg: C.cyan } }, ...l.map(x => ({ ...x, style }))])
+      }
+      break
     default: {
-      const input = JSON.stringify(i, null, 1)
-      for (const l of (input.length > 2000 ? input.slice(0, 2000) + '…' : input).split('\n')) code(l, { fg: C.gray })
-      if (s.result) for (const l of s.result.replace(/\s+$/, '').split('\n')) code(l, { fg: s.isError ? C.red : C.faint })
+      for (const l of fieldLines(i, width - 2)) rows.push([pad(2), ...l])
+      // What an agent hands back is markdown, with code in it.
+      if (s.result && (s.tool.name === 'Agent' || s.tool.name === 'Task') && !s.isError) for (const l of markdown(s.result, width - 2, ctx.copy)) rows.push([pad(2), ...l])
+      else if (s.result) plain(s.result.replace(/\s+$/, ''), { fg: s.isError ? C.red : C.faint })
     }
   }
+  // An edit that failed says why (the text to replace was not found, the file changed).
+  if (s.isError && s.result && isEdit(s)) plain(s.result.replace(/\s+$/, ''), { fg: C.red })
   const shown = s.isFull ? rows : rows.slice(0, DETAIL_ROWS)
-  const out = shown.map(l => [pad(left), ...l])
+  // A code row's indent is not copied either, as its gutter is not: a copy holds the code alone.
+  const out = shown.map(l => [{ ...pad(left), ...(l[0]?.noCopy ? { noCopy: true } : {}) }, ...l])
   if (shown.length < rows.length)
     out.push([pad(left), { text: `… ${rows.length - shown.length} more lines, show all`, style: { fg: C.cyan }, action: () => { s.isFull = true; ctx.poke() } }])
   return out

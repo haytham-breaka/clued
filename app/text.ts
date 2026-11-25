@@ -10,7 +10,8 @@ export type Style = {
   fg?: number
   bg?: number
 }
-export type Span = { text: string; style?: Style; action?: () => void }
+/** `noCopy`: drawn but left out of a copied selection (a code block's line numbers, a diff's + and −). */
+export type Span = { text: string; style?: Style; action?: () => void; noCopy?: boolean }
 export type Line = Span[]
 
 export const C = {
@@ -180,6 +181,12 @@ export function markCells(line: Line, from: number, to: number): Line {
   for (const sp of line) {
     let cur = ''
     let isCur: boolean | undefined
+    if (sp.noCopy) {
+      // Not part of what a selection copies, so not drawn as selected either.
+      out.push(sp)
+      at += cells(sp.text)
+      continue
+    }
     const flush = () => {
       if (cur) out.push({ ...sp, text: cur, style: isCur ? { ...sp.style, inverse: !sp.style?.inverse } : sp.style })
       cur = ''
@@ -202,7 +209,7 @@ export function cellText(line: Line, from: number, to: number): string {
   let at = 0
   for (const sp of line)
     for (const ch of sp.text) {
-      if (at >= from && at < to) s += ch
+      if (at >= from && at < to && !sp.noCopy) s += ch
       at += charCells(ch)
     }
   return s

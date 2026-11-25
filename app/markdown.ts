@@ -3,6 +3,7 @@
 
 import { C, cells, clipLine, lineCells, pad, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
+import { clean, hardWrap, highlight, K, langOf } from './code.ts'
 
 /**
  * Whether a block is worth a copy button: a labelled code block always is; an unlabelled one or a
@@ -99,33 +100,26 @@ function render(src: string, width: number, copy?: (text: string) => void): Line
       gap()
       const code: string[] = []
       for (i++; i < lines.length && !lines[i]!.trim().startsWith(fence[1]!); i++) code.push(lines[i]!)
-      const w = Math.min(width, Math.max(20, ...code.map(c => cells(c) + 2)))
+      // Drawn without tabs and terminal codes; copied as written.
+      const shown = code.map(clean)
+      const w = Math.min(width, Math.max(20, ...shown.map(c => cells(c) + 2)))
       // The block's header: its language, and ⧉ copy on the right.
       const lang = fence[2] ? ` ${fence[2]}` : ''
       const whole = code.join('\n')
       const canCopy = !!copy && isCopyable(whole, fence[2])
       const btn = canCopy ? '⧉ copy ' : ''
       out.push([
-        { text: lang, style: { fg: C.gray, bg: C.codeBg, italic: true } },
-        pad(w - cells(lang) - cells(btn), { bg: C.codeBg }),
-        ...(canCopy ? [{ text: btn, style: { fg: C.cyan, bg: C.codeBg }, action: () => copy!(whole) }] : []),
+        { text: lang, style: { fg: C.gray, bg: K.headBg, italic: true } },
+        pad(w - cells(lang) - cells(btn), { bg: K.headBg }),
+        ...(canCopy ? [{ text: btn, style: { fg: C.cyan, bg: K.headBg }, action: () => copy!(whole) }] : []),
       ])
-      for (const c of code) {
-        // Long lines wrap (never cut, so a command can be read and copied whole).
-        let rest = c.replace(/\t/g, '  ')
-        do {
-          let piece = ''
-          let pw = 0
-          for (const ch of rest) {
-            const cw = cells(ch)
-            if (pw + cw > w - 1) break
-            piece += ch
-            pw += cw
-          }
-          rest = rest.slice(piece.length)
-          out.push([{ text: ' ' + piece, style: { fg: C.white, bg: C.codeBg } }, pad(w - 1 - pw, { bg: C.codeBg })])
-        } while (rest.length)
-      }
+      // Highlighted by its language; long lines wrap (never cut, so a command can be read and copied whole).
+      highlight(shown, langOf(fence[2])).forEach(spans => {
+        for (const piece of hardWrap(spans, w - 1)) {
+          const pw = lineCells(piece)
+          out.push([{ text: ' ', style: { bg: C.codeBg } }, ...piece.map(sp => ({ ...sp, style: { fg: C.white, ...sp.style, bg: C.codeBg } })), pad(w - 1 - pw, { bg: C.codeBg })])
+        }
+      })
       blank = false
       gap()
       continue
