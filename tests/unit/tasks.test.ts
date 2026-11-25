@@ -106,9 +106,9 @@ describe('tasks: states', () => {
     const b = agent()
     const u = sendTask(b, { message: 'Also that.' }, NOW + 1, ['k1'])
     endRun(b, 'stopped', NOW + 2)
-    assert.deepEqual(b.tasks.map(x => x.state), ['failed', 'queued'])
+    assert.deepEqual(b.tasks.map(x => x.state), ['stopped', 'queued'])
     taskArrived(b, 'Also that.')
-    assert.equal(u.state, 'failed')
+    assert.equal(u.state, 'stopped')
   })
   test('the agent continued with a queued task: resume starts it', () => {
     const a = agent()
@@ -213,10 +213,10 @@ describe('tasks: from the session file', () => {
     assert.deepEqual([look!.state, look!.result, look!.taskId], ['done', 'Found it.\nagentId: fg-1', 'fg-1'])
     assert.deepEqual([plan!.state, plan!.name, plan!.tasks[0]!.state], ['failed', 'Plan', 'failed'])
     // Stopped by Claude (killed): not by an exit, so nothing to continue.
-    assert.deepEqual([long!.state, long!.tasks[0]!.state, long!.cut], ['stopped', 'failed', undefined])
+    assert.deepEqual([long!.state, long!.tasks[0]!.state, long!.cut], ['stopped', 'stopped', undefined])
     assert.equal(canContinue(long!), false)
     // Still running when the session ended: Claude Code's exit stopped it, and it can go on.
-    assert.deepEqual([open!.state, open!.cut, open!.endedAt, open!.tasks.map(x => x.state)], ['stopped', 'exit', NOW + 100, ['failed', 'failed']])
+    assert.deepEqual([open!.state, open!.cut, open!.endedAt, open!.tasks.map(x => x.state)], ['stopped', 'exit', NOW + 100, ['stopped', 'stopped']])
     assert.equal(cutLabel(open!), 'stopped when Claude Code exited')
     assert.equal(canContinue(open!), true)
     open!.cut = 'reload'
@@ -282,15 +282,18 @@ describe('tasks: drawn', () => {
     const { a, turns } = threeTasks()
     a.tasks[0]!.state = 'done'
     a.tasks.push({ ...a.tasks[2]!, title: 'Broke', state: 'failed', for: [] })
+    a.tasks.push({ ...a.tasks[2]!, title: 'Cut off', state: 'stopped', for: [] })
     const jumped: string[] = []
     const opened: Turn[] = []
     const lines = tasksBlock(a, ctx(turns, { jump: x => jumped.push(x), openMessage: t => opened.push(t) }), 80)
     const text = lines.map(plain)
-    assert.match(text[1]!, /^ {2}Tasks {2}4 · 1 running · 1 queued · 1 done · 1 failed$/)
+    assert.match(text[1]!, /^ {2}Tasks {2}5 · 1 running · 1 queued · 1 done · 1 stopped · 1 failed$/)
     assert.match(text[2]!, /^ {4}✓ 1\. Fix the build {2}\d\d:\d\d · T1$/)
     assert.match(text[3]!, /^ {4}⠋ 2\. Lint it {2}\d\d:\d\d · T1 T2$/)
     assert.match(text[4]!, /^ {4}◌ 3\. Then the notes\. {2}\d\d:\d\d$/)
     assert.match(text[5]!, /^ {4}✕ 4\. Broke/)
+    // Cut off by a reload or an exit: stopped, not failed.
+    assert.match(text[6]!, /^ {4}■ 5\. Cut off/)
     assert.equal(lines[2]![1]!.style?.fg, C.green)
     lines[3]!.find(s => s.text === 'Lint it')!.action!()
     lines[3]!.find(s => s.text === 'T2')!.action!()

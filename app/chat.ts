@@ -651,7 +651,7 @@ export function tasksBlock(a: Agent, ctx: ChatCtx, width: number): Line[] {
   const tasks = a.tasks
   if (tasks.length < 2) return []
   const n = currentTask(a)
-  const counts = (['running', 'queued', 'done', 'failed'] as const).map(s => [s, tasks.filter(t => t.state === s).length] as const).filter(([, k]) => k)
+  const counts = (['running', 'queued', 'done', 'stopped', 'failed'] as const).map(s => [s, tasks.filter(t => t.state === s).length] as const).filter(([, k]) => k)
   const out: Line[] = [[], [
     pad(2),
     { text: 'Tasks', style: { bold: true } },
@@ -662,6 +662,7 @@ export function tasksBlock(a: Agent, ctx: ChatCtx, width: number): Line[] {
     const mark: Span = t.state === 'done' ? { text: '✓ ', style: { fg: C.green } }
       : t.state === 'running' ? { text: `${ctx.spin} `, style: { fg: C.cyan } }
       : t.state === 'failed' ? { text: '✕ ', style: { fg: C.red } }
+      : t.state === 'stopped' ? { text: '■ ', style: { fg: C.gray } }
       : { text: '◌ ', style: { fg: C.gray } }
     const go = () => ctx.jump(`task:${i}`)
     // Right of the title: when it was sent, and which of your messages it is for.

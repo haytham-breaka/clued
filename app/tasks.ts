@@ -7,7 +7,7 @@ import { preview } from './inbox.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Turn } from './session.ts'
 
-export type TaskState = 'queued' | 'running' | 'done' | 'failed'
+export type TaskState = 'queued' | 'running' | 'done' | 'failed' | 'stopped'
 
 export type AgentTask = {
   title: string
@@ -144,11 +144,11 @@ export const isQuiet = (a: Agent, now: number) => a.state === 'running' && a.isB
 export const nudgeText = (a: Agent, name: string, quietFor: string) =>
   `${name} (agent ${a.taskId}) seems to have gone quiet: no new steps for ${quietFor}. Check on it, and if it has stopped, use SendMessage to it to continue its work.`
 
-/** A run ended: the tasks it covered (the running ones) are done, or failed with it. */
+/** A run ended: the tasks it covered (the running ones) are done, failed, or stopped with it (not failed: cut off). */
 export function endRun(a: Agent, state: 'done' | 'failed' | 'stopped', at: number) {
   a.state = state
   a.endedAt = at
-  for (const t of a.tasks) if (t.state === 'running') t.state = state === 'done' ? 'done' : 'failed'
+  for (const t of a.tasks) if (t.state === 'running') t.state = state
 }
 
 /** The SendMessage that sent a task failed: the task failed, and an agent it alone was running for ends again. */
@@ -174,7 +174,7 @@ export function taskArrived(a: Agent, text: string): AgentTask | undefined {
   if (!task) return undefined
   task.isSeen = true
   task.logAt = a.log.length
-  if (task.state === 'queued') task.state = a.state === 'running' ? 'running' : a.state === 'done' ? 'done' : 'failed'
+  if (task.state === 'queued') task.state = a.state
   return task
 }
 
@@ -249,7 +249,7 @@ export function agentsFromTurns(turns: Turn[]): Agent[] {
   // agent at its next step.
   const ended = (a: Agent, state: 'done' | 'failed' | 'stopped', at: number) => {
     endRun(a, state, at)
-    for (const t of a.tasks) if (t.state === 'queued') t.state = state === 'done' ? 'done' : 'failed'
+    for (const t of a.tasks) if (t.state === 'queued') t.state = state
   }
   for (const t of turns) {
     const forKeys = t.followUp ?? [t.key]
