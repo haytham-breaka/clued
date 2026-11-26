@@ -55,8 +55,11 @@ export type Hello = {
   account?: { email?: string; subscriptionType?: string; apiProvider?: string; organization?: string; tokenSource?: string; apiKeySource?: string }
   claude_code_version?: string
   output_style?: string
-  models?: { value: string; resolvedModel?: string; displayName?: string; description?: string }[]
+  models?: { value: string; resolvedModel?: string; displayName?: string; description?: string; supportsEffort?: boolean; supportedEffortLevels?: string[] }[]
 }
+
+/** A control request's answer: Claude Code's response, or why there is none (`code`: Claude Code's error_code). */
+export type Answer = { ok: true; response: any } | { ok: false; error: string; code?: string }
 
 export type Usage = { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
 
@@ -171,6 +174,40 @@ export class Claude {
     setTimeout(() => end({ ok: false, error: 'no answer from Claude Code' }), 30_000).unref()
     if (!this.proc.stdin.writable) return end({ ok: false, error: 'Claude Code is not running' })
     this.write({ type: 'control_request', request_id: id, request: { subtype: 'reload_plugins' } })
+  }
+
+  /**
+   * Switches the model on the running Claude Code (set_model, as the Agent SDK's setModel): the
+   * conversation goes on, the next request on the new model. Its answer holds the model id it runs.
+   */
+  setModel(model: string, done: (r: Answer) => void) {
+    this.control({ subtype: 'set_model', model }, 10_000, done)
+  }
+
+  /** The effort level from now on (low…max), as a flag setting: it lasts as long as this Claude Code. */
+  setEffort(level: string, done: (r: Answer) => void) {
+    this.control({ subtype: 'apply_flag_settings', settings: { effortLevel: level } }, 10_000, done)
+  }
+
+  /** Claude Code's settings: `applied` holds the model and effort it runs with now. */
+  settings(done: (r: Answer) => void) {
+    this.control({ subtype: 'get_settings' }, 10_000, done)
+  }
+
+  /** A control request of the app's own; `done` once, with the answer or the error (gone, or no answer in `ms`). */
+  private control(request: Record<string, unknown>, ms: number, done: (r: Answer) => void) {
+    const id = randomUUID()
+    let isOver = false
+    const end = (r: Answer) => {
+      if (isOver) return
+      isOver = true
+      this.answers.delete(id)
+      done(r)
+    }
+    this.answers.set(id, r => end(r?.subtype === 'success' ? { ok: true, response: r.response ?? {} } : { ok: false, error: String(r?.error ?? 'Claude Code refused'), ...(r?.error_code ? { code: String(r.error_code) } : {}) }))
+    setTimeout(() => end({ ok: false, error: 'no answer from Claude Code' }), ms).unref()
+    if (!this.proc.stdin.writable) return end({ ok: false, error: 'Claude Code is not running' })
+    this.write({ type: 'control_request', request_id: id, request })
   }
 
   interrupt() {

@@ -91,7 +91,8 @@ describe('/branch and /add-dir', () => {
     }))
 
   test('/add-dir starts Claude Code again with the folder, and every restart of the session keeps it', () =>
-    withApp({ env: { FAKE_LATE_INIT: '1' }, ready: false, setup: ({ dir }) => (mkdirSync(join(dir, 'extra')), mkdirSync(join(dir, 'more'))) }, async app => {
+    // A Claude Code without set_model: /model starts it again (one with set_model switches in place).
+    withApp({ env: { FAKE_LATE_INIT: '1', FAKE_NO_SET_MODEL: '1' }, ready: false, setup: ({ dir }) => (mkdirSync(join(dir, 'extra')), mkdirSync(join(dir, 'more'))) }, async app => {
       await app.waitFor('Message Claude')
       const extra = join(app.dir, 'extra')
       // Before the session has an id (a real Claude Code gives it with the first message).

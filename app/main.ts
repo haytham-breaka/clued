@@ -42,6 +42,8 @@ import type { Job } from './scheduled.ts'
 import { assignParts, deletedPrompt, hasMarks, inbox, lostRepliesPrompt, matches, partId, partPrints, questionsOf, readByTime, REPLY_GUIDE, stripMarks } from './inbox.ts'
 import type { Inbox, PartRef } from './inbox.ts'
 import { Claude } from './claude.ts'
+import { choice, currentAt, effortLabel, move, newPicker, parseModels, pickerLines, shiftEffort } from './models.ts'
+import type { Model, Picker } from './models.ts'
 import { imageSpans, openerFor } from './images.ts'
 import { InlineImages } from './inline-images.ts'
 import { cleanImages, limits, trimLogFile } from './retention.ts'
@@ -151,6 +153,9 @@ const S = {
   /** Claude's multiple-choice questions (AskUserQuestion) waiting for an answer, first one on the card. */
   asks: [] as Ask[],
   picker: null as { sessions: SessionInfo[]; at: number } | null,
+  /** Claude Code's models (its answer to initialize), and the /model card while it is open. */
+  models: [] as Model[],
+  modelPicker: null as Picker | null,
   menuAt: 0,
   toast: '' as string,
   toastTimer: undefined as ReturnType<typeof setTimeout> | undefined,
@@ -1074,6 +1079,9 @@ function start(resume?: string) {
   // Only the Claude Code running now is heard: the one before (a /model, /branch or /add-dir restart)
   // still exits after this, and its exit would say this one stopped.
   claudeAt = Date.now()
+  // The model and effort /model chose for this session: Claude Code starts with them again (a /reload).
+  if (resume && S.kept.model) setFlag('--model', S.kept.model)
+  if (resume && S.kept.effort) setFlag('--effort', S.kept.effort)
   const claude: Claude = new Claude({ args: [...(resume ? ['--resume', resume] : []), ...passArgs, ...local.dirArgs(resume, S.kept)], cwd, appendSystemPrompt: APP_GUIDE }, e => {
     if (S.claude === claude) onEvent(e)
   })
@@ -1181,6 +1189,17 @@ function onEvent(e: ClaudeEvent) {
       }
       break
     }
+    case 'hello':
+      S.models = parseModels(e.info.models)
+      // The effort Claude Code runs with (a flag, your settings or its default), for /model and the status line.
+      S.claude?.settings(r => {
+        const level = r.ok ? r.response?.applied?.effort : undefined
+        if (typeof level === 'string' && level && level !== effortLevel) {
+          effortLevel = level
+          refreshStatus()
+        }
+      })
+      break
     case 'init':
       if (!S.sessionId) {
         S.sessionId = e.sessionId
@@ -2146,13 +2165,18 @@ function jump(anchor: string) {
 
 // ---- Status line (your own statusLine command, fed what Claude Code would feed it) --------
 
-/** The statusLine command and effort level from your settings (the nearest file that sets each). */
+/**
+ * The statusLine command, effort level and model from your settings (the nearest file that sets
+ * each). The effort is Claude Code's own once it says (get_settings), and what /model sets after.
+ */
 let effortLevel = ''
+let settingsModel = ''
 const statusCommand = (() => {
   for (const f of [`${cwd}/.claude/settings.local.json`, `${cwd}/.claude/settings.json`, `${homedir()}/.claude/settings.json`]) {
     try {
       const s = JSON.parse(readFileSync(f, 'utf8'))
       if (!effortLevel && typeof s.effortLevel === 'string') effortLevel = s.effortLevel
+      if (!settingsModel && typeof s.model === 'string') settingsModel = s.model
     } catch {}
   }
   for (const f of [`${cwd}/.claude/settings.local.json`, `${cwd}/.claude/settings.json`, `${homedir()}/.claude/settings.json`]) {
@@ -2611,6 +2635,9 @@ function imagePath(text: string): string | undefined {
 
 function menuItems(): string[] {
   if (S.search) return []
+  // /model's argument: the models Claude Code listed, once you start typing one.
+  const arg = S.text.match(/^\/model (\S+)$/)
+  if (arg) return S.models.map(x => `model ${x.value}`).filter(c => c.startsWith(`model ${arg[1]}`)).slice(0, 8)
   const m = S.text.match(/^\/(\S*)$/)
   if (!m) return []
   const all = [...new Set([...OUR_COMMANDS, ...S.commands, ...LOCAL_COMMANDS, ...PLUGIN_COMMANDS])]
@@ -2642,13 +2669,35 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   // Claude's question
   const ask = perm ? undefined : S.asks[0]
   if (ask) L.push(...askLines(ask, w, { pick: n => pickAsk(n), send: () => sendAsk(), dismiss: () => dismissAsk() }))
+  // /model's card
+  if (S.modelPicker) {
+    const p = S.modelPicker
+    L.push(...pickerLines(p, w, Math.max(3, Math.floor(height() / 2) - 6), {
+      choose: i => {
+        move(p, 0, i)
+        choosePicked()
+      },
+      effort: level => {
+        p.effort = level
+        draw()
+      },
+      cancel: () => {
+        S.modelPicker = null
+        draw()
+      },
+    }))
+  }
   // Slash menu
   const items = menuItems()
   if (items.length && !perm) {
     S.menuAt = Math.min(S.menuAt, items.length - 1)
-    items.forEach((c, i) =>
-      L.push([{ text: ` /${c} `, style: i === S.menuAt ? { inverse: true, fg: C.cyan } : { fg: C.gray }, action: () => { S.text = `/${c} `; S.cursor = S.text.length; draw() } }]),
-    )
+    items.forEach((c, i) => {
+      const model = c.startsWith('model ') ? S.models.find(x => `model ${x.value}` === c) : undefined
+      L.push([
+        { text: ` /${c} `, style: i === S.menuAt ? { inverse: true, fg: C.cyan } : { fg: C.gray }, action: () => { S.text = `/${c} `; S.cursor = S.text.length; draw() } },
+        ...(model ? [{ text: clip(`  ${model.name}${model.about ? ` · ${model.about}` : ''}`, Math.max(0, w - cells(c) - 3)), style: { fg: C.faint } }] : []),
+      ])
+    })
   }
   if (S.toast) L.push([{ text: ` ${S.toast}`, style: { fg: C.yellow } }])
   // Reply bar
@@ -3224,6 +3273,103 @@ function localCtx(): LocalCtx {
   }
 }
 
+// ---- /model: switching model and effort on the running Claude Code -----------------------
+
+/** One of Claude Code's flags as the app passes it (the last one given), or undefined. */
+function flagOf(flag: string): string | undefined {
+  const i = passArgs.lastIndexOf(flag)
+  return i >= 0 ? passArgs[i + 1] : undefined
+}
+
+/** A flag for each Claude Code the app starts from now on, in place of any given before. */
+function setFlag(flag: string, value: string) {
+  for (let i = passArgs.indexOf(flag); i >= 0; i = passArgs.indexOf(flag)) passArgs.splice(i, 2)
+  passArgs.push(flag, value)
+}
+
+/** Claude Code again on this session (it takes the flags set): what the app keeps is written first, as start reads it. */
+function restartHere() {
+  if (S.sessionId) saveKept(S.sessionId, S.kept, true)
+  start(S.sessionId || undefined)
+}
+
+/**
+ * Switches model, and the effort with it when given: the running Claude Code changes (set_model) and
+ * the conversation goes on. One that can't is started again on this session with --model, as before.
+ * Either way the choice holds for this session: each start from now on, and after a /reload.
+ */
+function switchModel(value: string, effort?: string) {
+  const remember = () => {
+    setFlag('--model', value)
+    S.kept.model = value
+    keep()
+  }
+  const claude = S.claude
+  const restart = () => {
+    remember()
+    if (effort) rememberEffort(effort)
+    restartHere()
+    const m = S.models.find(x => x.value === value)
+    toast(`Model: ${modelName(m?.resolved ?? value)}${effort ? ` · ${effortLabel(effort).toLowerCase()}` : ''}`)
+  }
+  if (!claude) return restart()
+  claude.setModel(value, r => {
+    if (S.claude !== claude) return
+    if (!r.ok && r.code === 'not_found') return toast(`Claude Code has no model “${value}”: ${r.error}`)
+    if (!r.ok) return restart()
+    if (typeof r.response?.model === 'string' && r.response.model) S.model = r.response.model
+    remember()
+    if (effort) return switchEffort(effort, modelName(S.model))
+    refreshStatus()
+    toast(`Model: ${modelName(S.model)}`)
+  })
+}
+
+function rememberEffort(level: string) {
+  setFlag('--effort', level)
+  S.kept.effort = level
+  effortLevel = level
+  keep()
+}
+
+/** The effort level from now on (apply_flag_settings); a Claude Code that can't is started again with --effort. */
+function switchEffort(level: string, model = '') {
+  const say = () => toast(`${model ? `Model: ${model} · ${effortLabel(level).toLowerCase()}` : effortLabel(level)}`)
+  const claude = S.claude
+  if (!claude) return rememberEffort(level), say()
+  claude.setEffort(level, r => {
+    if (S.claude !== claude) return
+    rememberEffort(level)
+    if (!r.ok) restartHere()
+    refreshStatus()
+    say()
+  })
+}
+
+/** Enter (or a click) on the /model card: what changed switches, and the card closes. */
+function choosePicked() {
+  const p = S.modelPicker
+  if (!p) return
+  S.modelPicker = null
+  const c = choice(p)
+  if (c.model) switchModel(c.model.value, c.effort)
+  else if (c.effort) switchEffort(c.effort)
+  else toast(`Kept ${p.models[p.at]?.name ?? 'the model'}.`)
+  draw()
+}
+
+/** Keys while the /model card is open: it takes them all. */
+function pickerKey(k: string) {
+  const p = S.modelPicker!
+  if (k === '\x1b[A') move(p, -1)
+  else if (k === '\x1b[B') move(p, 1)
+  else if (k === '\x1b[D' || k === '\x1b[C') shiftEffort(p, k === '\x1b[C' ? 1 : -1)
+  else if (/^[1-9]$/.test(k)) move(p, 0, Number(k) - 1)
+  else if (k === '\r') return choosePicked()
+  else if (k === '\x1b' || k === '\x03') S.modelPicker = null
+  draw()
+}
+
 function runCommand(text: string): boolean {
   const [cmd, ...rest] = text.slice(1).split(/\s+/)
   const arg = rest.join(' ').trim()
@@ -3248,11 +3394,12 @@ function runCommand(text: string): boolean {
       draw()
       return true
     case 'model':
-      if (!arg) return toast('Usage: /model opus | sonnet | haiku | <model id>'), true
-      for (let i = passArgs.indexOf('--model'); i >= 0; i = passArgs.indexOf('--model')) passArgs.splice(i, 2)
-      passArgs.push('--model', arg)
-      start(S.sessionId || undefined)
-      toast(`Model: ${arg}`)
+      if (arg) switchModel(arg)
+      else if (!S.models.length) toast('Claude Code has not listed its models yet. /model <name> switches: opus, sonnet, haiku or a model id.')
+      else {
+        S.modelPicker = newPicker(S.models, currentAt(S.models, flagOf('--model') ?? settingsModel, S.model), effortLevel)
+        draw()
+      }
       return true
     case 'results':
       S.isResultsOnly = !S.isResultsOnly
@@ -3411,6 +3558,7 @@ function key(k: string) {
     }
     return draw()
   }
+  if (S.modelPicker) return pickerKey(k)
   if (S.permissions.length && (k === 'y' || k === 'Y' || k === 'n' || k === 'N')) return answerPermission(k.toLowerCase() === 'y')
   // Claude's question: a number picks an option, unless you are typing your own answer.
   const asking = !S.permissions.length && S.asks.length > 0 && !S.search

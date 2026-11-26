@@ -69,6 +69,21 @@ const sessionFile = (id: string) => `${process.env.HOME}/.claude/projects/${proc
 if (isFork && !args.includes('--no-session-persistence') && existsSync(sessionFile(resumed)))
   writeFileSync(sessionFile(sessionId), readFileSync(sessionFile(resumed), 'utf8').replaceAll(`"sessionId":"${resumed}"`, `"sessionId":"${sessionId}"`))
 const MODEL = 'claude-fake-1-0'
+/**
+ * The models it lists (initialize's `models`), as a real Claude Code does: Default runs the same model
+ * as Fake; Quick has no effort levels. --model and set_model switch among them (an id works too);
+ * FAKE_NO_SET_MODEL=1 plays a Claude Code without set_model or apply_flag_settings.
+ */
+const MODELS = [
+  { value: 'default', resolvedModel: MODEL, displayName: 'Default (recommended)', description: 'Fake 1.0 · for tests', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'max'] },
+  { value: 'fake', resolvedModel: MODEL, displayName: 'Fake 1.0', description: 'For everyday tests', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'max'] },
+  { value: 'opal', resolvedModel: 'claude-opal-2-0', displayName: 'Opal 2.0', description: 'For the hardest tests', supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'max'] },
+  { value: 'quick', resolvedModel: 'claude-quick-1-5', displayName: 'Quick 1.5', description: 'Fastest for quick answers' },
+]
+const modelOf = (name: string) => MODELS.find(m => m.value === name || m.resolvedModel === name)?.resolvedModel
+const flag = (name: string) => (args.includes(name) ? args[args.lastIndexOf(name) + 1] : undefined)
+let model = modelOf(flag('--model') ?? 'default') ?? flag('--model')!
+let effort = flag('--effort') ?? 'high'
 log({ args, cwd: process.cwd() })
 // A side question's Claude Code says when it ends (the app closes it once it has answered).
 if (isSide) process.on('exit', code => log({ exit: code }))
@@ -136,7 +151,7 @@ const toolResult = (id: string, content: unknown, isError = false, parent?: stri
 const VERSION = '9.9.9-fake'
 const init = () =>
   out({
-    type: 'system', subtype: 'init', session_id: sessionId, model: MODEL, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default',
+    type: 'system', subtype: 'init', session_id: sessionId, model, cwd: process.cwd(), tools: [], slash_commands: ['compact', 'cost'], permissionMode: 'default',
     claude_code_version: VERSION, apiKeySource: 'none', output_style: 'default',
     mcp_servers: [{ name: 'fake-docs', status: 'connected' }, { name: 'fake-mail', status: 'needs-auth' }],
   })
@@ -150,12 +165,13 @@ const hello = {
   account: { email: 'you@example.com', subscriptionType: 'Claude Max', apiProvider: 'firstParty' },
   claude_code_version: VERSION,
   output_style: 'default',
-  models: [{ value: 'default', resolvedModel: MODEL, displayName: 'Default', description: 'Fake 1.0 · for tests' }],
+  // FAKE_NO_MODELS=1: an older Claude Code, that lists none.
+  ...(process.env.FAKE_NO_MODELS ? {} : { models: MODELS }),
 }
 const hhmm = (at: number) => new Date(at).toTimeString().slice(0, 5)
 const result = (extra: Record<string, unknown> = {}) => {
   echoJoined()
-  out({ type: 'result', subtype: 'success', is_error: false, result: '', usage, total_cost_usd: 0.0123, duration_ms: 1500, session_id: sessionId, modelUsage: { [MODEL]: { contextWindow: 200_000 } }, ...extra })
+  out({ type: 'result', subtype: 'success', is_error: false, result: '', usage, total_cost_usd: 0.0123, duration_ms: 1500, session_id: sessionId, modelUsage: { [model]: { contextWindow: 200_000 } }, ...extra })
 }
 
 let previous = ''
@@ -889,6 +905,23 @@ createInterface({ input: process.stdin }).on('line', line => {
       }
       out({ type: 'control_response', response: process.env.FAKE_NO_CANCEL ? { subtype: 'error', request_id: e.request_id, error: 'cancel_async_message is not supported' } : { subtype: 'success', request_id: e.request_id, response: can ? { cancelled: true, message_uuid: uuid } : { cancelled: false } } })
     }
+    const answer = (response: Record<string, unknown>) => out({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response } })
+    const refuse = (error: string, code?: string) => out({ type: 'control_response', response: { subtype: 'error', request_id: e.request_id, error, ...(code ? { error_code: code } : {}) } })
+    const isOld = !!process.env.FAKE_NO_SET_MODEL
+    if (e.request?.subtype === 'set_model') {
+      const to = modelOf(e.request.model ?? 'default')
+      if (isOld) refuse('Unsupported control request subtype: set_model')
+      else if (!to) refuse(`Model '${e.request.model}' not found`, 'not_found')
+      else answer({ model: (model = to) })
+    }
+    if (e.request?.subtype === 'apply_flag_settings') {
+      if (isOld) refuse('Unsupported control request subtype: apply_flag_settings')
+      else {
+        if (typeof e.request.settings?.effortLevel === 'string') effort = e.request.settings.effortLevel
+        answer({})
+      }
+    }
+    if (e.request?.subtype === 'get_settings') answer({ effective: {}, applied: { model, effort } })
     if (e.request?.subtype === 'set_permission_mode') {
       out({ type: 'control_response', response: { subtype: 'success', request_id: e.request_id, response: { mode: e.request.mode } } })
       out({ type: 'system', subtype: 'status', status: null, permissionMode: e.request.mode })

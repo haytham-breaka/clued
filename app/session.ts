@@ -168,6 +168,9 @@ export type Kept = {
   forkOf?: { id: string; at: number; name?: string }
   /** Folders /add-dir added: Claude Code gets each (--add-dir) whenever it starts on this session. */
   addDirs?: string[]
+  /** The model and effort /model chose: Claude Code gets them (--model, --effort) whenever it starts on this session. */
+  model?: string
+  effort?: string
   /** The images your messages were sent with, by turn key: `[image N]` in its text is the Nth file. */
   images?: Record<string, string[]>
 }

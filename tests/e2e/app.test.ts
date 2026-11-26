@@ -298,23 +298,19 @@ describe('app', () => {
     })
   })
 
-  test('/clear starts a new session; /model restarts Claude Code with that model', () =>
+  test('/clear starts a new session, with the model /model chose', () =>
     withApp({}, async app => {
       await app.send('hello')
       await app.waitFor('Echo: hello')
-      await app.send('/model')
-      await app.waitFor('Usage: /model opus | sonnet | haiku | <model id>')
-      await app.send('/model sonnet')
-      await app.waitFor('Model: sonnet')
-      await app.waitFor(() => app.claudeLog().filter(e => e.args).length === 2)
-      assert.deepEqual(app.claudeLog().filter(e => e.args)[1].args.slice(-4), ['--resume', 's1', '--model', 'sonnet'])
+      await app.send('/model opal')
+      await app.waitFor('Model: Opal 2.0')
       await app.send('/clear')
       await app.waitFor('New session.')
       await app.waitFor(/clued {2}on Claude Code/)
-      await app.waitFor(() => app.claudeLog().filter(e => e.args).length === 3)
-      const third = app.claudeLog().filter(e => e.args)[2].args
-      assert.ok(!third.includes('--resume'))
-      assert.deepEqual(third.slice(-2), ['--model', 'sonnet'])
+      await app.waitFor(() => app.claudeLog().filter(e => e.args).length === 2)
+      const second = app.claudeLog().filter(e => e.args)[1].args
+      assert.ok(!second.includes('--resume'))
+      assert.deepEqual(second.slice(-2), ['--model', 'opal'])
     }))
 
   test('the slash menu: matches as you type, arrows and Tab pick, Esc clears; Claude Code\'s own commands go to Claude', () =>

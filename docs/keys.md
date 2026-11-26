@@ -25,6 +25,8 @@ Back to the [README](../README.md) · [Using clued](usage.md) · [Commands](comm
 
 On a question card, a number picks an option and Enter sends it. Esc dismisses the question, and also closes what a command like `/status` shows.
 
+On the `/model` card, ↑/↓ (or a number) picks a model, ←/→ changes the effort, and Enter or a click switches. Esc cancels.
+
 ## Selecting text
 
 Drag over the chat or the input box to select text; it's copied when you let go. A double-click selects a word, a path or a URL. With text selected, Ctrl+C copies it again and Esc drops it. In the input box, typing or Backspace replaces the selection.

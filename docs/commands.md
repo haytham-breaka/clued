@@ -31,7 +31,7 @@ Like `claude`, it works on the folder you start it in, and sessions are Claude C
 | `/clear` | new session |
 | `/btw <question>` | a quick side question: it sees the conversation but stays out of it, answered aside even while Claude works |
 | `/resume` | pick a session |
-| `/model <name>` | switch model |
+| `/model [name]` | pick a model: the list Claude Code offers, each with what it is for, the one in use ticked. ↑↓ to move, ←→ to change the effort (for models that have levels), Enter or a click to switch, Esc to cancel. `/model <name>` switches straight away, and the slash menu completes the names. The running Claude Code switches, with no restart, and the conversation goes on; the choice holds for this session, after a `/reload` too |
 | `/notify on\|always\|off\|test\|status\|uninstall` | notifications, with a sound, when Claude waits on you (status: how the last one went; uninstall: remove the Windows click handler) |
 | `/hold <seconds>` | time to take a message back |
 | `/queue on\|off` | hold messages while Claude works |
