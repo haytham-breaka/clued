@@ -22,6 +22,7 @@ describe('clued\'s own commands', () => {
       // Claude Code's, from its answer to the initialize request (descriptions and argument hints).
       app.keys('PageDown', 'PageDown', 'PageDown')
       s = await app.waitFor(/Esc closes this\.\n/)
+      assert.match(s, /↑ in an empty box \(or Ctrl\+Z\) takes your last message back/)
       assert.match(rowOf(s, '/compact <optional custom'), /Clear conversation history but keep a summary/)
       assert.match(rowOf(s, '/cost'), /Show the total cost and duration/)
       // A command clued runs itself is listed once, as clued's.

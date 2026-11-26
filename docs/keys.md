@@ -11,10 +11,11 @@ Back to the [README](../README.md) · [Using clued](usage.md) · [Commands](comm
 | Alt+→ / Alt+← | from a message to its reply, and back |
 | Alt+S | save the message Alt+↑/↓ picked to get back to later, or unsave it |
 | Ctrl+F | search your messages |
-| Ctrl+Z | take back the message you just sent, while it waits to go (back in the box) |
+| Ctrl+Z | take back the message you just sent, while it can still be taken back (back in the box, as ↑ in an empty box) |
 | Ctrl+N | next unread reply |
 | Ctrl+O | show or hide Claude's steps |
 | Shift+Tab | next permission mode (default, accept edits, plan, and bypass or auto when you started in it), shown under the status line |
+| ↑ in an empty box | take back your last message to edit, while Claude hasn't read it: in its hold time, in queue, or queued in Claude Code. Its text, images and reply come back in the box. Once Claude has it, ↑ goes to earlier messages |
 | ↑ / ↓ | move between rows of a long message; from the top row, earlier messages |
 | Ctrl+← / Ctrl+→ | jump words |
 | Ctrl+Backspace / Alt+Backspace (⌥⌫) | delete the word before the cursor (Ctrl+W: up to the last space) |

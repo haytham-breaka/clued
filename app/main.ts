@@ -1546,6 +1546,7 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
     // Without a quote it is a guess: if the reply's tag doesn't take it up, the question is open again.
     const guess = !quoted.length ? { answerGuessed: true as const } : {}
     S.kept.board = { ...S.kept.board, topics: S.kept.board.topics.map(t => (t.status === 'me' && answered.has(t.id) ? { ...t, status: 'claude' as const, updatedAt: now, ...guess } : t)) }
+    if (from) sentFrom.set(turn, { from, reopens: asked.filter(t => answered.has(t.id)).map(t => t.id), heard: [...S.heard], dismissed: [...dismissed] })
     const raised = raiseTopic(S.kept.board, { text, key: turn.key, replyTo: null }, now)
     turn.topicId = raised.topicId
     hidden = flatBrief(raised.board, raised.topicId, reply?.quotes ?? [])
@@ -1766,21 +1767,104 @@ function dropHeld(h: Held) {
  */
 function editHeld(h: Held) {
   if (!takeHeld(h)) return
-  const n = h.from.images.length
-  const rest = n ? S.text.replace(/\[image (\d+)\]/g, (_, d: string) => `[image ${Number(d) + n}]`) : S.text
-  S.images = [...h.from.images, ...S.images]
-  S.text = rest.trim() ? `${h.text}\n${rest}` : h.text
-  S.cursor = h.text.length
-  S.historyAt = -1
-  const quotes = [...(h.from.replyTo?.quotes ?? []), ...(S.replyTo?.quotes ?? [])].filter((q, i, all) => all.findIndex(x => x.key === q.key && x.anchor === q.anchor) === i)
-  S.replyTo = quotes.length ? { quotes } : null
-  if (h.from.about || h.from.agent || h.from.job) {
-    if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
-    S.requestView = h.from.about
-    S.agentView = h.from.agent
-    S.jobView = h.from.job
-  }
+  putBack(h.text, h.from)
   logSend('edit', { text: h.text, held: true })
+  draw()
+}
+
+/** A message taken back: in the box as you wrote it (see editHeld), the cursor at its end. */
+function putBack(text: string, from: From) {
+  const n = from.images.length
+  const rest = n ? S.text.replace(/\[image (\d+)\]/g, (_, d: string) => `[image ${Number(d) + n}]`) : S.text
+  S.images = [...from.images, ...S.images]
+  S.text = rest.trim() ? `${text}\n${rest}` : text
+  S.cursor = text.length
+  S.historyAt = -1
+  const quotes = [...(from.replyTo?.quotes ?? []), ...(S.replyTo?.quotes ?? [])].filter((q, i, all) => all.findIndex(x => x.key === q.key && x.anchor === q.anchor) === i)
+  S.replyTo = quotes.length ? { quotes } : null
+  if (from.about || from.agent || from.job) {
+    if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
+    S.requestView = from.about
+    S.agentView = from.agent
+    S.jobView = from.job
+  }
+}
+
+/**
+ * What a message you wrote changed as it went to Claude Code, to undo if it is taken back: where it
+ * was written, the questions it answered, and the reactions and dismissals its note carried.
+ */
+const sentFrom = new WeakMap<Turn, { from: From; reopens: string[]; heard: string[]; dismissed: string[] }>()
+
+/** Your newest message: a turn you wrote and sent (not a reaction, a command or the app's own). */
+const lastSent = () => S.turns.findLast(t => sentFrom.has(t))
+
+/** The message Already-with-Claude was said for, so ↑ says it once. */
+let toldLate = ''
+
+/**
+ * ↑ in an empty box, or Ctrl+Z: your newest message back in the box to edit, while it can still be
+ * taken back. A held one (in its hold, or in queue for Claude) at once, as ✎ edit does. One written
+ * to Claude Code but not taken in yet (✓ sent) when Claude Code drops it from its queue
+ * (cancel_async_message): then it is gone as if never sent, its turn and topic too. False: none can
+ * be (`sayLate`: say so, once, if it went only seconds ago).
+ */
+function takeBack(sayLate = false): boolean {
+  const h = S.held.at(-1)
+  if (h) {
+    editHeld(h)
+    toast('Took back your message: edit it and press Enter.')
+    return true
+  }
+  const turn = lastSent()
+  const claude = S.claude
+  if (turn && echoes && claude && turn.delivery === 'sent' && !turn.deleting && !turn.deleted && turn.uuid && turn.topicId) {
+    turn.deleting = true
+    claude.cancelQueued(turn.uuid, cancelled => {
+      delete turn.deleting
+      if (S.claude !== claude || !S.turns.includes(turn)) return draw()
+      if (!cancelled) return toast('Already with Claude: can\'t be edited.')
+      withdraw(turn)
+      toast('Took back your message: edit it and press Enter.')
+    })
+    draw()
+    return true
+  }
+  if (sayLate && turn && turn.key !== toldLate && Date.now() - turn.at < LATE_MS) {
+    toldLate = turn.key
+    toast('Already with Claude: can\'t be edited.')
+  }
+  return false
+}
+
+/** Within this long of sending, ↑ says why it can't take a message back. */
+const LATE_MS = 5000
+
+/** A message Claude Code dropped before Claude read it, taken back: no turn, no topic, back in the box. */
+function withdraw(turn: Turn) {
+  const was = sentFrom.get(turn)!
+  const id = turn.topicId!
+  S.turns.splice(S.turns.indexOf(turn), 1)
+  S.isWorking = S.turns.some(t => !t.isDone)
+  const b = S.kept.board
+  // Its topic number goes to the next message, as if this one never was (when none came since).
+  S.kept.board = {
+    ...b,
+    topics: b.topics.filter(t => t.id !== id).map(t => {
+      if (!was.reopens.includes(t.id) || t.status !== 'claude') return t
+      const { answerGuessed: _, ...open } = t
+      return { ...open, status: 'me' as const }
+    }),
+    turnTopics: b.turnTopics.filter(x => x !== id),
+    nextTopic: `T${b.nextTopic - 1}` === id ? b.nextTopic - 1 : b.nextTopic,
+  }
+  delete S.kept.links[turn.key]
+  if (S.kept.images?.[turn.key]) S.kept.images = Object.fromEntries(Object.entries(S.kept.images).filter(([k]) => k !== turn.key))
+  dismissed = [...was.dismissed, ...dismissed]
+  S.heard = [...was.heard, ...S.heard]
+  putBack(turn.text, was.from)
+  logSend('edit', { topic: id, text: turn.text, how: 'withdrawn' })
+  keep()
   draw()
 }
 
@@ -3325,6 +3409,8 @@ function key(k: string) {
       if (S.search) pickMessage(-1)
       else if (items.length) S.menuAt = Math.max(0, S.menuAt - 1)
       // Inside a message of several rows the arrows move between them; from the top row, your earlier messages.
+      // An empty box: your last message back to edit, while it can still be taken back.
+      else if (!S.text && S.historyAt < 0 && takeBack(true)) {}
       else if (moveRow(-1)) {}
       else if (S.history.length) {
         S.historyAt = S.historyAt < 0 ? S.history.length - 1 : Math.max(0, S.historyAt - 1)
@@ -3376,10 +3462,8 @@ function key(k: string) {
       break
     }
     case '\x1a': {
-      // Ctrl+Z: the last message you sent, while it is still held, back in the box to edit.
-      const h = S.held.at(-1)
-      if (h) editHeld(h)
-      else toast(holdMs() ? 'Nothing to take back: Ctrl+Z works while a message waits to go.' : 'Messages go at once: /hold 3 gives you 3 s to take one back.')
+      // Ctrl+Z: the last message you sent, while it can still be taken back, back in the box to edit (as ↑ in an empty box).
+      if (!takeBack()) toast(holdMs() ? 'Nothing to take back: Ctrl+Z works while a message waits to go.' : 'Messages go at once: /hold 3 gives you 3 s to take one back.')
       break
     }
     case '\x06':

@@ -35,7 +35,7 @@ Messages still in queue when the app closes are held again when you open the ses
 
 ## Taking a message back
 
-For 3 seconds after Enter a message hasn't gone yet: `◌ sending in 3s · ✎ edit · ✕ delete` under it, and Ctrl+Z puts the last one back in the box. `/hold <seconds>` changes the time, `/hold 0` sends at once.
+For 3 seconds after Enter a message hasn't gone yet: `◌ sending in 3s · ✎ edit · ✕ delete` under it, and ↑ in an empty box (or Ctrl+Z) puts the last one back in the box, also while it waits in queue or in Claude Code's queue. `/hold <seconds>` changes the time, `/hold 0` sends at once.
 
 A message that is `✓ sent` but not `✓✓` can still be deleted: Claude Code drops it from its queue when it can, and otherwise Claude is told to ignore it.
 

@@ -270,3 +270,137 @@ describe('holding a message while Claude works', () => {
     })
   })
 })
+
+describe('↑ in an empty box takes your last message back', () => {
+  test('within the hold: back in the box, cursor at its end, and nothing reaches Claude', () =>
+    withApp({ env: HOLD }, async app => {
+      await app.send('fix the tpyo')
+      await app.waitFor('◌ sending in')
+      app.keys('Up')
+      let s = await app.waitFor('Took back your message: edit it and press Enter.')
+      assert.match(s, /│ fix the tpyo/)
+      assert.ok(!s.includes('◌ sending in'))
+      app.type(' now')
+      await app.waitFor('│ fix the tpyo now')
+      await sleep(3300)
+      assert.equal(app.sent().length, 0)
+      assert.match(app.read('home/.clued/sent.log'), /edit \{"session":"[^"]*","text":"fix the tpyo","held":true\}/)
+    }))
+
+  test('with its image and what it replied to', () =>
+    withApp({ env: HOLD }, async app => {
+      app.type('/hold 0')
+      app.keys('Enter')
+      await app.waitFor('Messages go at once.')
+      await app.send('the first one')
+      await app.waitFor('Echo: the first one')
+      app.type('/hold 3')
+      app.keys('Enter')
+      await app.waitFor('Messages wait 3 s before they go')
+      await app.hover('Echo: the first one', { area: 'chat' })
+      await app.click('↩ reply', { area: 'chat' })
+      await app.waitFor('↩ Replying to Claude')
+      writeFileSync(join(app.dir, 'clip.png'), PNG)
+      app.keys('C-v')
+      await app.waitFor('│ [image 1]')
+      await app.send('look here')
+      let s = await app.waitFor('◌ sending in')
+      assert.ok(!s.includes('↩ Replying to Claude'))
+      app.keys('Up')
+      s = await app.waitFor('↩ Replying to Claude')
+      assert.match(s, /│ \[image 1\] look here/)
+      assert.ok(!s.includes('◌ sending in'))
+      // Sent again: the image and the reply go with it.
+      app.keys('Enter')
+      await app.waitFor('I got 1 image(s).', 10_000)
+      const last = app.sent().at(-1)!
+      assert.equal(last.text, '[image 1] look here')
+      assert.equal(last.images, 1)
+      assert.match(last.note, /Echo: the first one/)
+    }))
+
+  test('in queue while Claude works: taken back, it never goes', () =>
+    withApp({ env: { CLUED_QUEUE: '' } }, async app => {
+      await app.send('hold on')
+      await app.waitFor('Slow work')
+      await app.send('next please')
+      await app.waitFor('⏳ in queue')
+      app.keys('Up')
+      const s = await app.waitFor('Took back your message')
+      assert.match(s, /│ next please/)
+      assert.ok(!s.includes('⏳ in queue'))
+      app.keys('C-u')
+      app.release('slow')
+      await app.waitFor('The slow work is done.')
+      await sleep(300)
+      assert.deepEqual(app.sent().map(m => m.text), ['hold on'])
+    }))
+
+  test('queued in Claude Code, not taken in: Claude Code drops it, and it is back as if never sent', () =>
+    withApp({}, async app => {
+      await app.send('hold on')
+      await app.waitFor('Slow work')
+      writeFileSync(join(app.dir, 'clip.png'), PNG)
+      app.keys('C-v')
+      await app.waitFor('│ [image 1]')
+      await app.send('never mind this')
+      await app.waitFor('⏸ queued: Claude reads it at its next step')
+      app.keys('Up')
+      let s = await app.waitFor('Took back your message')
+      assert.match(s, /│ \[image 1\] never mind this/)
+      // No turn left: no bubble, no deleted line, nothing queued.
+      assert.ok(!s.includes('⏸ queued'))
+      assert.ok(!s.includes('✕ deleted'))
+      assert.ok(!s.includes('│ [image 1] never mind this │'))
+      const cancel = await app.waitLog(e => e.type === 'control_request' && e.request?.subtype === 'cancel_async_message')
+      assert.equal(cancel.request.message_uuid, app.claudeLog().filter(e => e.type === 'user').at(-1).uuid)
+      app.release('slow')
+      s = await app.waitFor('The slow work is done.')
+      assert.ok(!s.includes('Also got: never mind this'))
+      assert.ok(!app.sent().some(m => m.text.startsWith('The user deleted')))
+      // Sent again: it takes the topic number the taken-back one had, with its image.
+      app.keys('Enter')
+      await app.waitFor(s => s.includes('I got 1 image(s).'), 10_000)
+      const last = app.sent().at(-1)!
+      assert.equal(last.text, '[image 1] never mind this')
+      assert.match(last.note, /This message is topic T2\./)
+    }))
+
+  test('when Claude Code cannot drop it, it stays and ↑ says so', () =>
+    withApp({ env: { FAKE_NO_CANCEL: '1' } }, async app => {
+      await app.send('hold on')
+      await app.waitFor('Slow work')
+      await app.send('too late for this')
+      await app.waitFor('⏸ queued')
+      app.keys('Up')
+      const s = await app.waitFor('Already with Claude: can\'t be edited.')
+      // Still Claude's, still queued, and the box stays empty.
+      assert.match(s, /⏸ queued/)
+      assert.match(s, /│ Claude is working… you can still send a message/)
+      assert.ok(!app.sent().some(m => m.text.startsWith('The user deleted')))
+      app.release('slow')
+      await app.waitFor('Also got: too late for this')
+    }))
+
+  test('taken in already: ↑ says so once, and goes through your earlier messages as before', () =>
+    withApp({ env: { CLUED_TOAST_MS: '800' } }, async app => {
+      await app.send('first thing')
+      await app.waitFor('Echo: first thing')
+      await app.send('second thing')
+      await app.waitFor('Echo: second thing')
+      app.keys('Up')
+      let s = await app.waitFor('Already with Claude: can\'t be edited.')
+      assert.match(s, /│ second thing/)
+      // Not empty now: ↑ goes on through history, as today.
+      app.keys('Up')
+      await app.waitFor('│ first thing')
+      // ↓ back to an empty box, then ↑: history again, without saying it twice.
+      app.keys('Down', 'Down')
+      await app.waitFor('│ Message Claude')
+      await app.waitGone('Already with Claude')
+      app.keys('Up')
+      s = await app.waitFor('│ second thing')
+      assert.ok(!s.includes('Already with Claude'))
+      assert.equal(app.sent().length, 2)
+    }))
+})
