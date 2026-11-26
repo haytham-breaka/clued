@@ -39,6 +39,8 @@ export const C = {
   /** Claude's avatar (the terracotta of its mark) and name. */
   claude: 173,
   claudeName: 216,
+  /** A slash command you typed (/btw, /model, a skill's): periwinkle, as in Claude Code, on a dark or a light background. */
+  command: 105,
 } as const
 
 export const sgr = (s: Style = {}) =>

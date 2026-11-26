@@ -25,7 +25,9 @@ describe('/btw', () => {
       // Answered: its words come before its result, which brings ⧉ copy.
       let s = await app.waitFor(s => s.includes('I can see 1 messages of old-b.') && s.includes('⧉ copy · ✕ close'))
       // Marked as a side answer, the app's own markup gone; Claude is still at work on the main turn.
-      assert.match(rowOf(s, '╭ btw'), /╭ btw · what is a helper agent\?/)
+      assert.match(rowOf(s, '╭ /btw'), /╭ \/btw what is a helper agent\?/)
+      // Its header shows /btw as you typed it, in the colour of a command.
+      assert.match(app.styled().find(r => r.includes('/btw') && r.includes('what is a helper agent?')) ?? '', /38;5;105m\/btw/)
       assert.match(s, /a side answer: not part of the conversation · ⧉ copy · ✕ close/)
       assert.doesNotMatch(s, /<clued>|topics/)
       assert.doesNotMatch(s, /Streaming the answer slowly, now finished/)
@@ -42,21 +44,21 @@ describe('/btw', () => {
       app.release('stream')
       s = await app.waitFor('Streaming the answer slowly, now finished.')
       assert.ok(app.find('I can see 1 messages', { area: 'chat' })!.row > app.find('stream this', { area: 'chat' })!.row, 'the aside sits after the message it was asked after')
-      assert.equal(chatRowsWith(s, '╭ btw'), 1)
+      assert.equal(chatRowsWith(s, '╭ /btw'), 1)
       assert.doesNotMatch(app.read('home/.clued/sessions/old-b.json'), /helper agent\?/)
       assert.ok(!app.find('what is a helper', { area: 'panel' }), 'not in the panel')
       // A message sent now comes after it.
       await app.send('and next')
       await app.waitFor('Echo: and next')
       const row = (text: string) => app.find(text, { area: 'chat' })?.row ?? -1
-      assert.ok(row('╭ btw') > 0 && row('and next') > row('╭ btw'), 'the next message comes after it')
+      assert.ok(row('╭ /btw') > 0 && row('and next') > row('╭ /btw'), 'the next message comes after it')
       // The session file is as it was.
       assert.equal(readFileSync(sessionFile(app, 'old-b'), 'utf8'), before)
       // ⧉ copy takes the answer, ✕ closes it.
       await app.click('⧉ copy', { area: 'chat' })
       await app.waitClipboard('Side answer to “what is a helper agent?”: I can see 1 messages of old-b.')
       await app.click('✕ close', { area: 'chat' })
-      await app.waitGone('╭ btw')
+      await app.waitGone('╭ /btw')
     }))
 
   test('with no session yet it asks a fresh Claude Code; Esc closes the latest; a failure says so', () =>

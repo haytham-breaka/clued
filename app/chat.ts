@@ -2,6 +2,7 @@
 // Claude's answer in a bubble on the left, with reply and reactions under it.
 
 import { firstLine, stripTag } from '../hooks/model.ts'
+import { commandEnd, styleHead } from './command.ts'
 import { imageSpans } from './images.ts'
 import { markdown } from './markdown.ts'
 import type { Media } from './markdown.ts'
@@ -28,6 +29,8 @@ export type ChatCtx = {
   picked?: string
   kept: Kept
   isResultsOnly: boolean
+  /** Whether `name` is a slash command the app knows: a message starting with one shows it in its colour. */
+  isCommand?: (name: string) => boolean
   cwd: string
   now: number
   spin: string
@@ -464,7 +467,7 @@ export function chatLines(ctx: ChatCtx, width: number): { lines: Line[]; anchors
     } else {
       out.push([])
       const link = ctx.kept.links[turn.key]
-      const body = wrap(imageSpans(turn.text, ctx.image?.(turn)), meMax)
+      const body = wrap(styleHead(imageSpans(turn.text, ctx.image?.(turn)), ctx.isCommand ? commandEnd(turn.text, ctx.isCommand) : 0), meMax)
       // What it replies to: one line each (a click goes there), so a reply to several lists them all.
       const quotes = link ? (link.all?.length ? link.all : [{ anchor: link.anchor ?? `${link.who}:${link.key}`, text: link.text }]) : []
       const heads: Line[] = quotes.map(q => {

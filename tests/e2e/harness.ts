@@ -114,6 +114,8 @@ export async function launch(opts: LaunchOpts = {}) {
     return { isWhole: shown === 1 || y === h! - 1, screen: o.slice(nl + 1).replace(/\s+$/gm, '') }
   }
   const lines = () => screen().split('\n')
+  /** The screen with its colours: each row's SGR escapes as tmux keeps them. */
+  const styled = () => tmux('capture-pane', '-e', '-p').split('\n')
 
   let lastClick = { row: 0, col: 0, at: 0 }
   const app = {
@@ -123,6 +125,7 @@ export async function launch(opts: LaunchOpts = {}) {
     pid,
     screen,
     lines,
+    styled,
     /** Types text as keys, literally. */
     type(text: string) {
       tmux('send-keys', '-l', text)

@@ -144,7 +144,7 @@ describe('btw', () => {
     assert.equal(out.owners[out.anchors['me:k2']!], 'me:k2')
     assert.equal(out.owners[at('after one')], '')
     // Marked as aside, dimmed; one still asking says so.
-    assert.match(rows[at('after one')]!, /╭ btw · after one/)
+    assert.match(rows[at('after one')]!, /╭ \/btw after one/)
     assert.ok(rows.some(r => r.includes('⠋ thinking about it aside…')))
     assert.ok(rows.some(r => r.includes('a side answer, with no conversation yet to see · ⧉ copy · ✕ close')))
     const answer = out.lines.find(l => text(l).includes('Answer one.'))!

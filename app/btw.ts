@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { Claude } from './claude.ts'
 import type { ClaudeEvent, Options } from './claude.ts'
 import { stripMarks } from './inbox.ts'
+import { COMMAND } from './command.ts'
 import { markdown } from './markdown.ts'
 import { projectDir } from './session.ts'
 import { C, cells, clip, pad, wrap } from './text.ts'
@@ -180,7 +181,8 @@ export class Btw {
     const room = Math.max(8, width - 12)
     const out: Line[] = [[]]
     const q = clip(a.question.replace(/\s+/g, ' '), room)
-    out.push([pad(2), b('╭ '), { text: 'btw', style: { fg: C.gray, bold: true } }, b(' · '), { text: q, style: { fg: C.gray, italic: true } }, pad(Math.max(1, room - cells(q) + 1)), close])
+    // The question as you asked it: /btw in the colour of a command, as in the box and your messages.
+    out.push([pad(2), b('╭ '), { text: '/btw', style: COMMAND }, { text: ` ${q}`, style: { fg: C.gray, italic: true } }, pad(Math.max(1, room - cells(q) + 2)), close])
     const bodyW = Math.max(10, Math.min(80, width - 6))
     const body: Line[] =
       a.state === 'failed'

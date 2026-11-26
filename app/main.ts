@@ -63,6 +63,7 @@ import type { Work } from './session.ts'
 import type { Agent, AgentEntry } from './panel.ts'
 import type { Kept, SessionInfo, Turn } from './session.ts'
 import { C, cellText, cells, charCells, clip, clipLine, lineCells, markCells, pad, sgr, wrap } from './text.ts'
+import { COMMAND, commandEnd, styleHead, styleLaidHead } from './command.ts'
 import { bidiMode, bidiSpan, cursorCell, hasRtl, indexAt, inputRow, modeSequences, paragraphDir } from './bidi.ts'
 import type { Line, Span } from './text.ts'
 
@@ -2644,6 +2645,14 @@ function menuItems(): string[] {
   return all.filter(c => c.startsWith(m[1]!)).sort((a, b) => a.length - b.length).slice(0, 8)
 }
 
+/** The slash commands clued knows: its own, and Claude Code's (skills and plugin commands too). */
+let known: { from: unknown[]; names: Set<string> } | undefined
+function isCommand(name: string): boolean {
+  const from = [S.commands, local.facts.commands]
+  if (!known || known.from.some((x, i) => x !== from[i])) known = { from, names: new Set([...OUR_COMMANDS, ...LOCAL_COMMANDS, ...PLUGIN_COMMANDS, ...S.commands, ...local.facts.commands.map(c => c.name)]) }
+  return known.names.has(name)
+}
+
 function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: number }; textRow?: number; first?: number; count?: number; inner?: number } {
   const L: Line[] = []
   // Permission prompt
@@ -2694,7 +2703,7 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
     items.forEach((c, i) => {
       const model = c.startsWith('model ') ? S.models.find(x => `model ${x.value}` === c) : undefined
       L.push([
-        { text: ` /${c} `, style: i === S.menuAt ? { inverse: true, fg: C.cyan } : { fg: C.gray }, action: () => { S.text = `/${c} `; S.cursor = S.text.length; draw() } },
+        { text: ` /${c} `, style: i === S.menuAt ? { inverse: true, ...COMMAND } : { fg: C.gray }, action: () => { S.text = `/${c} `; S.cursor = S.text.length; draw() } },
         ...(model ? [{ text: clip(`  ${model.name}${model.about ? ` · ${model.about}` : ''}`, Math.max(0, w - cells(c) - 3)), style: { fg: C.faint } }] : []),
       ])
     })
@@ -2732,15 +2741,18 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const top = L.length
   const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = rowSpans(inner)
+  // A slash command the app knows, at the start of the text: drawn in its own colour, as Claude Code does.
+  const cmd = S.search ? 0 : commandEnd(S.text, isCommand)
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
-    let body: Line = [{ text, style: !S.text ? { fg: C.faint } : {} }]
     // The selected part of this row, in cells.
     const span = spans[first + i]
+    let body: Line = S.text && span ? styleHead([{ text }], cmd - span.start) : [{ text, style: !S.text ? { fg: C.faint } : {} }]
     const v = S.text && span ? rowView(span, inner, S.sel?.area === 'input' ? [Math.min(S.sel.a, S.sel.b), Math.max(S.sel.a, S.sel.b)] : undefined) : undefined
     if (v) {
       const room = pad(inner - v.lay.width)
-      L.push([{ text: '│ ', style: border }, ...(v.lay.rtl ? [room, ...v.lay.spans] : [...v.lay.spans, room]), { text: ' │', style: border }])
+      const laid = styleLaidHead(v.lay, cmd - span!.start)
+      L.push([{ text: '│ ', style: border }, ...(v.lay.rtl ? [room, ...laid] : [...laid, room]), { text: ' │', style: border }])
       return
     }
     if (span && S.sel?.area === 'input') {
@@ -2958,6 +2970,7 @@ function paint() {
       turns: S.turns,
       kept: S.kept,
       isResultsOnly: S.isResultsOnly,
+      isCommand,
       picked: S.picked,
       cwd,
       now: Date.now(),
