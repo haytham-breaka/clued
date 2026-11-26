@@ -1,6 +1,6 @@
 import { afterEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bidiLine, bidiMode, bidiSpan, bidiText, cursorCell, detectMode, hasRtl, indexAt, inputRow, isRtl, layout, lineDir, modeSequences, paragraphDir, setBidiMode, shape } from '../../app/bidi.ts'
+import { arabicMode, bidiLine, bidiMode, bidiSpan, bidiText, cursorCell, detectArabic, detectMode, hasRtl, indexAt, inputRow, isRtl, layout, lineDir, modeSequences, paragraphDir, setArabicMode, setBidiMode, shape } from '../../app/bidi.ts'
 import { cellText, cells, charCells, lineCells, markCells, wrap } from '../../app/text.ts'
 import type { Line } from '../../app/text.ts'
 import { markdown } from '../../app/markdown.ts'
@@ -11,7 +11,12 @@ const shown = (l: Line) => l.map(s => s.text).join('')
 const letters = (l: Line) => shown(l).normalize('NFKC')
 const rev = (s: string) => [...s].reverse().join('')
 
-afterEach(() => setBidiMode('app'))
+// Run inside Windows Terminal, the module starts in `terminal` Arabic mode: every test starts in `app`.
+setArabicMode('app')
+afterEach(() => {
+  setBidiMode('app')
+  setArabicMode('app')
+})
 
 describe('the mode', () => {
   test('CLUED_BIDI wins; else the terminals that reorder by themselves get the text as written', () => {
@@ -31,6 +36,19 @@ describe('the mode', () => {
     setBidiMode('terminal')
     assert.deepEqual(modeSequences({}), { start: '', end: '' })
     assert.equal(bidiMode(), 'terminal')
+  })
+})
+
+describe('who joins Arabic letters', () => {
+  test('CLUED_ARABIC wins; else Windows Terminal joins them, and clued does everywhere else', () => {
+    assert.equal(detectArabic({ CLUED_ARABIC: 'app', WT_SESSION: 'x' }), 'app')
+    assert.equal(detectArabic({ CLUED_ARABIC: ' Terminal ' }), 'terminal')
+    assert.equal(detectArabic({ WT_SESSION: '0b7c0b6e-0000-4000-8000-000000000001' }), 'terminal')
+    // iTerm2, kitty, VTE, VS Code, an unknown value, nothing.
+    for (const env of [{ TERM_PROGRAM: 'iTerm.app' }, { KITTY_WINDOW_ID: '1' }, { VTE_VERSION: '7600' }, { TERM_PROGRAM: 'vscode' }, { CLUED_ARABIC: 'maybe' }, {}])
+      assert.equal(detectArabic(env), 'app')
+    setArabicMode('terminal')
+    assert.equal(arabicMode(), 'terminal')
   })
 })
 
@@ -75,6 +93,108 @@ describe('Arabic shaping', () => {
     assert.deepEqual(shape([...'بـ']), ['\ufe91', 'ـ'])
     assert.deepEqual(shape([...'abc']), ['a', 'b', 'c'])
     assert.deepEqual(shape([...'שלום']), [...'שלום'])
+  })
+})
+
+describe('Arabic joined by the terminal', () => {
+  const t = (s: string) => shape([...s], 'terminal')
+  /** A line laid out for Windows Terminal: what it draws, left to right. */
+  const drawn = (s: string, base: 'auto' | 'rtl' = 'auto') => {
+    setArabicMode('terminal')
+    return shown(bidiLine([{ text: s }], base))
+  }
+  test('letters stay plain, with no presentation forms; other text is left alone', () => {
+    assert.deepEqual(t('ببب'), [...'ببب'])
+    assert.deepEqual(t('شَعْر پی بـ'), [...'شَعْر پی بـ'])
+    assert.deepEqual(t('abc שלום'), [...'abc שלום'])
+    assert.ok(!/[\ufb50-\ufdff\ufe70-\ufeff]/u.test(drawn('مرحبا بالعالم، كيف حالك؟')))
+  })
+  test('lam and alef make one ligature, isolated at the start of a word or after a letter that does not join', () => {
+    assert.deepEqual(t('لا'), ['\ufefb', ''])
+    assert.deepEqual(t('لأن'), ['\ufef7', '', 'ن'])
+    assert.deepEqual(t('لإ'), ['\ufef9', ''])
+    assert.deepEqual(t('لآ'), ['\ufef5', ''])
+    // ا, د, ر, و join only the letter before them: the lam after them starts again.
+    assert.deepEqual(t('الأنواع'), ['ا', '\ufef7', '', 'ن', 'و', 'ا', 'ع'])
+    assert.deepEqual(t('الإسلام').slice(0, 3), ['ا', '\ufef9', ''])
+    assert.deepEqual(t('دلا').slice(1), ['\ufefb', ''])
+    assert.deepEqual(t('ولا').slice(1), ['\ufefb', ''])
+  })
+  test('final after a letter that joins the one after it: beh, feh, seen, lam, yeh, tatweel, Persian letters', () => {
+    assert.deepEqual(t('فلا'), ['ف', '\ufefc', ''])
+    assert.deepEqual(t('بلا'), ['ب', '\ufefc', ''])
+    // In الإسلام the lam-alef after the seen is final.
+    assert.deepEqual(t('الإسلام').slice(3, 6), ['س', '\ufefc', ''])
+    for (const c of ['ت', 'ج', 'ح', 'خ', 'ش', 'ص', 'ط', 'ع', 'ق', 'ك', 'ل', 'م', 'ن', 'ه', 'ي', 'ى', 'ئ', 'ـ', 'پ', 'گ', 'ی', '\u200d'])
+      assert.equal(t(`${c}لأ`)[1], '\ufef8', c)
+    assert.equal(t('بلإ')[1], '\ufefa')
+    assert.equal(t('بلآ')[1], '\ufef6')
+    // Marks between them don't break it: on the feh, on the lam.
+    assert.deepEqual(t('فَلَا'), ['ف', 'َ', '\ufefc', 'َ', ''])
+    // A space, or a letter that doesn't join forward (ة, ء), does.
+    for (const c of [' ', 'ة', 'ء', 'a']) assert.equal(t(`${c}لا`)[1], '\ufefb', c)
+  })
+  test('reversed for the terminal: each letter with its marks after it, a lam-alef one character', () => {
+    // جيداً: the tanween stays after the alef it sits on, as one unit.
+    assert.equal(drawn('جيداً'), 'اًديج')
+    assert.equal(drawn('لا'), '\ufefb')
+    assert.equal(drawn('فلا'), '\ufefcف')
+    assert.equal(drawn('بلا شك'), 'كش \ufefcب')
+    assert.equal(drawn('الأنواع'), 'عاون\ufef7ا')
+    assert.equal(drawn('لأن'), 'ن\ufef7')
+    assert.equal(drawn('الإسلام'), 'م\ufefcس\ufef9ا')
+    // As the user saw it on Windows Terminal.
+    assert.equal(drawn('لماذا لا تتصل الحروف؟ لأن الخط لا يدعمها جيداً', 'rtl'), 'اًديج اهمعدي \ufefb طخلا ن\ufef7 ؟فورحلا لصتت \ufefb اذامل')
+  })
+  test('mixed lines: English, numbers, code and paths keep their order', () => {
+    assert.equal(drawn('الأنواع السهلة: SAT-2 وHorn ليها حل polynomial', 'rtl'), 'polynomial لح اهيل Hornو SAT-2 :ةلهسلا عاون\ufef7ا')
+    setArabicMode('terminal')
+    const l = bidiLine([{ text: 'شغّل ' }, { text: 'npm test', ltr: true }, { text: ' في app/main.ts بلا خطأ' }])
+    assert.equal(shown(l), 'أطخ \ufefcب app/main.ts يف npm test لغّش')
+    assert.ok(isRtl(l))
+  })
+  test('widths: marks take no cell, a lam-alef one in place of two, and the line copies as written', () => {
+    setArabicMode('terminal')
+    const s = 'فَلَا تَقُلْ لأحد'
+    const [l] = wrap([{ text: s }], 40)
+    // ف ﻼ space ت ق ل space ﻷ ح د
+    assert.equal(lineCells(l!), 10)
+    assert.equal(cellText(l!, 0, 99), s)
+    // The ligature's cell copies both letters, with their marks.
+    const la = bidiLine([{ text: 'فَلَا' }])
+    assert.equal(lineCells(la), 2)
+    assert.equal(cellText(la, 0, 1), 'لَا')
+    assert.equal(cellText(la, 1, 2), 'فَ')
+    // Drawn as it came: as many cells as written.
+    const b = bidiText('لا شك')
+    assert.equal(b, 'كش \ufefb ')
+    assert.equal(cells(b), cells('لا شك'))
+  })
+  test('the input box: the cursor and clicks know a lam-alef is one cell and marks none', () => {
+    setArabicMode('terminal')
+    const text = 'بلاً شك'
+    const lay = inputRow(text, 'rtl')
+    // Drawn: ك ش space ﻼً ب
+    assert.equal(shown(lay.spans), 'كش \ufefcًب')
+    assert.equal(lay.width, 5)
+    // Before ب: the rightmost cell; before the lam (and before the alef, inside the ligature): the ligature's.
+    assert.equal(cursorCell(lay, 0, text.length), 4)
+    assert.equal(cursorCell(lay, 1, text.length), 3)
+    assert.equal(cursorCell(lay, 2, text.length), 3)
+    assert.equal(cursorCell(lay, 4, text.length), 2)
+    assert.equal(cursorCell(lay, text.length, text.length), -1)
+    assert.equal(indexAt(lay, 3, text.length), 1)
+    assert.equal(indexAt(lay, 0, text.length), 6)
+    // A selection of the lam-alef draws the ligature selected.
+    const sel = inputRow(text, 'rtl', [1, 4]).spans.filter(s => s.style?.inverse).map(s => s.text).join('')
+    assert.equal(sel, '\ufefcً')
+  })
+  test('the markdown cache knows who joins', () => {
+    const a = shown(markdown('مرحبا بكم', 30)[0]!)
+    setArabicMode('terminal')
+    const b = shown(markdown('مرحبا بكم', 30)[0]!)
+    assert.notEqual(a, b)
+    assert.equal(b, 'مكب ابحرم')
   })
 })
 

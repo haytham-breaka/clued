@@ -121,9 +121,9 @@ The notification shows the question's words, so they can appear on a shared scre
 
 ## Arabic, Hebrew and other right-to-left text
 
-Most terminals draw each row left to right, in the order they get the characters, so Arabic or Hebrew comes out backwards and Arabic letters don't join. clued lays such text out itself:
+Most terminals draw each row left to right, in the order they get the characters, so Arabic or Hebrew comes out backwards, and many don't join Arabic letters. clued lays such text out itself:
 
-- Each line of a message, a reply, a table cell or a panel preview is put in reading order (the Unicode Bidirectional Algorithm, line by line after wrapping), and Arabic letters are drawn in their joined forms.
+- Each line of a message, a reply, a table cell or a panel preview is put in reading order (the Unicode Bidirectional Algorithm, line by line after wrapping). Arabic letters are joined, by clued or by the terminal's font (see [Joining Arabic letters](#joining-arabic-letters)).
 - A paragraph that starts with an Arabic or Hebrew letter reads right to left and sits on the right of its bubble. English words, numbers, inline code, URLs and paths in it stay left to right. Code blocks stay left to right too; an Arabic string in code reads right to left in its place.
 - Selecting and copying, `⧉ copy` and `/copy` give the text as written, not as drawn.
 - In the input box an Arabic line sits on the right, with the cursor where the next letter goes. ← and → move one character through the text; in a line that reads right to left, ← goes forward, as in any right-to-left text field.
@@ -138,10 +138,21 @@ What each terminal does, and what clued does there:
 
 To choose, set `CLUED_BIDI` before you start clued, for example `export CLUED_BIDI=terminal` in `~/.zshrc`: `app` (clued reorders), `terminal` (the terminal does) or `off` (text is drawn as it comes, and nothing goes on the right).
 
+### Joining Arabic letters
+
+When clued puts a line in order (`CLUED_BIDI=app`), something still has to join its Arabic letters. A second setting, `CLUED_ARABIC`, says who:
+
+- **`terminal`, the default in Windows Terminal:** clued sends the plain Arabic letters, in display order, and the terminal's font joins them. Windows Terminal does that well, even on text in display order. clued only keeps each mark (harakat, tanween, shadda) right after its letter, and sends a lam with its alef (لا، لأ، لإ، لآ) as the one lam-alef character, since a font can't join those two once they are reversed.
+- **`app`, the default everywhere else:** clued draws each letter in its joined form itself (Unicode's Presentation Forms), for terminals that don't join Arabic.
+
+For example `export CLUED_ARABIC=app` in `~/.zshrc`. With `CLUED_BIDI=terminal` or `off`, the terminal gets the text as written and `CLUED_ARABIC` does nothing. Either way, copying gives the text as written.
+
+**The font in Windows Terminal.** The font needs Arabic letters. Use **Cascadia Mono NF** or **Cascadia Code / Cascadia Mono 2111 or later** (from [GitHub](https://github.com/microsoft/cascadia-code/releases)), which have Arabic and join it. The Cascadia Code and Cascadia Mono built into Windows (version 2102) have no Arabic: Windows Terminal borrows each letter from another font, and the letters don't join well. Set the font in Settings → your profile → Appearance → Font face. In other terminals, with `app`, the font needs the Presentation Forms: DejaVu Sans Mono and most system fonts have them; otherwise the terminal borrows them from another font.
+
 The limits:
 
-- The font needs Arabic's joined forms (the Presentation Forms). Cascadia Code, DejaVu Sans Mono and most system fonts have them; otherwise the terminal borrows them from another font.
-- Letters Unicode has no joined forms for (a few rare ones) show unjoined, and only the lam-alef ligature is drawn.
+- With `app`, letters Unicode has no joined forms for (a few rare ones) show unjoined, and only the lam-alef ligature is drawn.
+- With `terminal`, the lam-alef character usually comes from another font than the letters around it.
 - A paragraph's direction comes from its first letter: a message that starts with an English word reads left to right, with its Arabic words in order inside it.
 - In mixed text the cursor goes through the text in reading order, so it can jump between an Arabic run and an English one.
 - Part of a mixed line selected copies the characters in those cells, in reading order.

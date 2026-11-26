@@ -1,5 +1,6 @@
 // Right-to-left text: an Arabic message and an Arabic reply in display order, on the right of their
 // bubbles; English, inline code, a path and a number in the right places; the input box; copying.
+// Arabic joined by clued (presentation forms), or in Windows Terminal left for its font to join.
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -83,6 +84,40 @@ describe('right-to-left text', () => {
       await app.waitFor(t => plain(t).includes(vis('اوكتب هنا')))
       app.keys('Right')
       await app.waitFor(() => app.cursor().col === right - 1)
+    }))
+
+  test('in Windows Terminal: plain letters in display order for its font to join, a lam-alef one ligature', () =>
+    withApp({ unfocused: true, env: { WT_SESSION: '0b7c0b6e-0000-4000-8000-000000000001' } }, async app => {
+      await app.send(MESSAGE)
+      const s = await app.waitIdle('npm test')
+      const rows = s.split('\n').map(l => [...l].slice(app.divider()).join(''))
+      // Yours, as it is on the screen: the letters reversed, each with its marks after it (the
+      // tanween of رداً after its alef), and no joined forms.
+      assert.ok(rows.some(r => r.endsWith(`│ ${vis(MESSAGE)} │`)), rows.join('\n'))
+      // Claude's: the lam-alef of أهلاً after a heh is the final ligature, its tanween after it.
+      const reply = '.ةيبرعلاب در اذه !كب \ufefcًهأ'
+      assert.ok(rows.some(r => r.endsWith(`${reply} │`)), rows.join('\n'))
+      // The bytes sent: the same, and no presentation form but the lam-alef ligatures.
+      const out = app.output()
+      assert.ok(out.includes(reply))
+      assert.ok(!/[\ufb50-\ufdff\ufe70-\ufef4\ufefd-\ufeff]/u.test(out))
+      // Still reordered by clued: VTE was told so.
+      assert.ok(out.includes('\x1b[8l'))
+      // The reply's first line (in the chat, below the panel's preview of it) copies as written, the
+      // ligature as its two letters.
+      const row = s.split('\n').findLastIndex(r => r.includes(reply))
+      const end = cells(s.split('\n')[row]!) - 2
+      await app.drag({ row: row + 1, col: end - cells(reply) + 1 }, { row: row + 1, col: end })
+      await app.waitClipboard('أهلاً بك! هذا رد بالعربية.')
+    }))
+
+  test('CLUED_ARABIC=app joins the letters in clued, in Windows Terminal too', () =>
+    withApp({ unfocused: true, env: { WT_SESSION: '0b7c0b6e-0000-4000-8000-000000000001', CLUED_ARABIC: 'app' } }, async app => {
+      await app.send(MESSAGE)
+      await app.waitIdle('npm test')
+      // مرحبا's meem, initial; the reply's lam-alef, final.
+      assert.ok(app.output().includes('\ufee3'))
+      assert.ok(app.output().includes('\ufefc'))
     }))
 
   test('in terminal mode the text goes as written, for a terminal that reorders it itself', () =>

@@ -4,7 +4,7 @@
 import { C, cells, clipLine, lineCells, pad, remember, wrap } from './text.ts'
 import type { Line, Span, Style } from './text.ts'
 import { clean, hardWrap, highlight, K, langOf } from './code.ts'
-import { bidiLine, bidiMode, isRtl } from './bidi.ts'
+import { arabicMode, bidiLine, bidiMode, isRtl } from './bidi.ts'
 import { localPath } from './inline-images.ts'
 
 /**
@@ -109,7 +109,7 @@ const rendered = new Map<string, Line[]>()
 export function markdown(src: string, width: number, copy?: (text: string) => void, media?: Media): Line[] {
   // The chat draws every reply on every frame: each text is rendered once per width. (A cached line's
   // copy action holds an earlier frame's copy function, which does the same.)
-  const key = `${width}${copy ? 'c' : ''}${bidiMode()}${media ? `|${media.key}` : ''}\0${src}`
+  const key = `${width}${copy ? 'c' : ''}${bidiMode()}${arabicMode()}${media ? `|${media.key}` : ''}\0${src}`
   // Callers add to the lines they get (the caret while a reply streams): each gets its own copy,
   // or the final reply, the same words, would keep the caret.
   const known = rendered.get(key)

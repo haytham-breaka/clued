@@ -4,10 +4,16 @@
 // (Windows Terminal, kitty, WezTerm, Alacritty, xterm, VS Code's), and join Arabic letters by
 // the order they get them in, if at all. So in `app` mode clued does it itself: the Unicode
 // Bidirectional Algorithm (UAX #9, from the vendored bidi-js) on each wrapped line, Arabic
-// letters in their joined forms (Presentation Forms, chosen from the letters around them in
-// reading order), and a line whose paragraph reads right to left aligned to the right.
+// letters joined, and a line whose paragraph reads right to left aligned to the right.
 // Terminals that reorder by themselves (macOS Terminal, Konsole, mlterm) get the text as
 // written instead (`terminal`), or else they would reverse it back. CLUED_BIDI sets it.
+//
+// Who joins the Arabic letters of a reordered line is a second choice, CLUED_ARABIC. In `app`
+// mode clued draws each letter in its joined form (Presentation Forms, chosen from the letters
+// around it in reading order). In `terminal` mode it sends the plain letters and lets the
+// terminal's font join them, as Windows Terminal does even on text in display order: clued only
+// turns a lam and its alef into their one ligature character, which a font can't do once they are
+// reversed. Either way each combining mark stays after the letter it sits on.
 //
 // Lines stay what they say: a span drawn reordered keeps, for each cell, the characters it
 // shows in reading order (`units`), so a selection copies the text as written.
@@ -35,6 +41,27 @@ let mode: BidiMode = detectMode()
 export const bidiMode = () => mode
 export const setBidiMode = (m: BidiMode) => {
   mode = m
+  seen.clear()
+}
+
+/** Who joins Arabic letters, when clued reorders: clued (`app`), or the terminal's font (`terminal`). */
+export type ArabicMode = 'app' | 'terminal'
+
+/**
+ * How Arabic letters are joined. CLUED_ARABIC=app|terminal wins; else `terminal` in Windows
+ * Terminal, whose fonts with Arabic (Cascadia Mono NF, Cascadia Code 2111 and later) join the
+ * plain letters, and `app` everywhere else.
+ */
+export function detectArabic(env: Record<string, string | undefined> = process.env): ArabicMode {
+  const set = env.CLUED_ARABIC?.trim().toLowerCase()
+  if (set === 'app' || set === 'terminal') return set
+  return env.WT_SESSION ? 'terminal' : 'app'
+}
+
+let arabic: ArabicMode = detectArabic()
+export const arabicMode = () => arabic
+export const setArabicMode = (m: ArabicMode) => {
+  arabic = m
   seen.clear()
 }
 
@@ -97,16 +124,37 @@ const joinsNext = (cp: number) => isJoiner(cp) || FORMS.get(cp)?.length === 4
 const joinsPrev = (cp: number) => isJoiner(cp) || FORMS.has(cp)
 
 /**
+ * The Arabic letters that join the letter after them (Joining_Type D, L or C in Unicode 18's
+ * ArabicShaping.txt, Arabic blocks only; tatweel and the zero width joiner among them): a lam after
+ * one takes the final form of the lam-alef ligature.
+ */
+const JOINS_NEXT =
+  /[\u0620\u0626\u0628\u062a-\u062e\u0633-\u0647\u0649\u064a\u066e\u066f\u0678-\u0687\u069a-\u06bf\u06c1\u06c2\u06cc\u06ce\u06d0\u06d1\u06fa-\u06fc\u06ff\u0750-\u0758\u075c-\u076a\u076d-\u0770\u0772\u0775-\u0777\u077a-\u077f\u0883-\u0886\u0889-\u088d\u088f\u08a0-\u08a9\u08af\u08b0\u08b3-\u08b8\u08ba-\u08c8\u200d\u{10ec3}\u{10ec4}\u{10ec6}\u{10ec7}\u{10ed9}-\u{10eee}]/u
+
+/**
  * Arabic letters in the forms their neighbours give them, in reading order: the glyph to draw for
  * each character, '' for an alef that a lam before it took into their ligature. Marks between
- * letters don't break a join; anything else that isn't a letter does.
+ * letters don't break a join; anything else that isn't a letter does. With `how` = `terminal` the
+ * letters stay plain, for the terminal's font to join, and only a lam-alef becomes its ligature.
  */
-export function shape(chars: string[]): string[] {
+export function shape(chars: string[], how: ArabicMode = arabic): string[] {
   const out = [...chars]
   const cps = chars.map(c => c.codePointAt(0)!)
   const near = (i: number, step: number) => {
     for (let j = i + step; j >= 0 && j < chars.length; j += step) if (!isMark(chars[j]!)) return j
     return -1
+  }
+  if (how === 'terminal') {
+    for (let i = 0; i < chars.length; i++) {
+      const n = cps[i] === LAM ? near(i, 1) : -1
+      const lig = n >= 0 ? LAM_ALEF[cps[n]!] : undefined
+      if (!lig) continue
+      const p = near(i, -1)
+      out[i] = String.fromCodePoint(lig[p >= 0 && JOINS_NEXT.test(chars[p]!) ? 1 : 0])
+      out[n] = ''
+      i = n
+    }
+    return out
   }
   for (let i = 0; i < chars.length; i++) {
     const forms = FORMS.get(cps[i]!)
@@ -190,7 +238,7 @@ export const paragraphDir = (text: string): Dir => lineDir([{ text }])
 
 /**
  * One line in display order, for a terminal that draws left to right: reordered (L1, L2), with
- * mirrored brackets in right-to-left runs (L4), Arabic joined, and each combining mark kept after
+ * mirrored brackets in right-to-left runs (L4), Arabic shaped (`shape`), and each combining mark kept after
  * the character it sits on. `rtl`: its paragraph reads right to left.
  */
 export function layout(line: Line, base: Dir | 'auto' = 'auto'): { spans: Line; clusters: Cluster[]; rtl: boolean; width: number } {
