@@ -376,7 +376,7 @@ describe('↑ in an empty box takes your last message back', () => {
       const s = await app.waitFor('Already with Claude: can\'t be edited.')
       // Still Claude's, still queued, and the box stays empty.
       assert.match(s, /⏸ queued/)
-      assert.match(s, /│ Claude is working… you can still send a message/)
+      assert.match(s, /│ Claude is working… you can still send messages/)
       assert.ok(!app.sent().some(m => m.text.startsWith('The user deleted')))
       app.release('slow')
       await app.waitFor('Also got: too late for this')

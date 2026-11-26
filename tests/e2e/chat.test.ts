@@ -88,7 +88,7 @@ describe('chat', () => {
       let s = await app.waitFor('Streaming the answer slowly▍')
       assert.match(s, /Claude is typing…/)
       assert.match(s, /● working/)
-      assert.match(s, /Claude is working… you can still send a message \(Esc to interrupt\)/)
+      assert.match(s, /Claude is working… you can still send messages \(Esc interrupts · Ctrl\+G to play\)/)
       assert.ok(rowOf(s, '╭─ ↩ “stream it”'), 'the live bubble quotes the message')
       app.release('stream')
       // The whole text can show a frame before the turn's end does (still with its caret): wait for the end.

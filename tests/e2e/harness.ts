@@ -134,6 +134,10 @@ export async function launch(opts: LaunchOpts = {}) {
     keys(...k: string[]) {
       tmux('send-keys', ...k)
     },
+    /** Makes the window `w` × `h` cells, as dragging its corner does. */
+    resize(w: number, h: number) {
+      tmux('resize-window', '-x', String(w), '-y', String(h))
+    },
     /** Raw bytes to the app (escape sequences: mouse, focus, paste). */
     raw(s: string) {
       tmux('send-keys', '-l', s)

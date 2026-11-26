@@ -186,7 +186,7 @@ export function helpLines(own: string[], f: Facts, width: number): Line[] {
   out.push([], [{ text: 'Claude Code', style: { bold: true, fg: C.claudeName } }, { text: '  sent to the session, as you type them', style: { fg: C.faint } }])
   if (theirs.length) out.push(...commandRows(theirs.map(c => ({ name: c.name, ...(c.argumentHint ? { args: c.argumentHint } : {}), ...(c.description ? { about: c.description } : {}) })), width))
   else out.push([{ text: 'Claude Code\'s commands show here once it has started: send a message first.', style: { fg: C.faint, italic: true } }])
-  out.push([], ...wrap([{ text: 'Every other slash command goes to Claude Code. Shift+Tab changes the permission mode. ↑ in an empty box (or Ctrl+Z) takes your last message back to edit, while Claude hasn\'t read it yet. Esc closes this.', style: { fg: C.faint } }], width))
+  out.push([], ...wrap([{ text: 'Every other slash command goes to Claude Code. Shift+Tab changes the permission mode. ↑ in an empty box (or Ctrl+Z) takes your last message back to edit, while Claude hasn\'t read it yet. Ctrl+G opens a game to play while Claude works. Esc closes this.', style: { fg: C.faint } }], width))
   return out
 }
 

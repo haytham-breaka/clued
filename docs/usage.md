@@ -33,6 +33,12 @@ Under each message, `✓ sent` means Claude Code has it, and `✓✓` means Clau
 
 Messages still in queue when the app closes are held again when you open the session.
 
+## A game while you wait
+
+Ctrl+G opens Comet in the chat's place, at any time; the box says so while Claude works. Steer the comet with the arrows or WASD to gather ✦ sparks: each one makes its tail longer, every fifth lights a ★ worth 5 for a few seconds, and the sky wraps round at its edges, so the run ends only when the comet flies into its own tail. Space pauses, and starts a new run after one ends. The sky fits the window and follows it as it changes size. The best score is kept in `~/.clued/panel.json`.
+
+It is a view like the others: `← back`, or Esc, goes back to the chat, and the run waits, paused, for the next Ctrl+G. While it is open your keys go to the game, never to the box, so an arrow can't take back a message. When Claude answers or asks you something, the game pauses and says so (`Claude answered: Esc back to the chat`). It stays open, as a key meant for the game must not land in the chat. The game's keys don't count as you being at the tab, so notifications still come while you play.
+
 ## Taking a message back
 
 For 3 seconds after Enter a message hasn't gone yet: `◌ sending in 3s · ✎ edit · ✕ delete` under it, and ↑ in an empty box (or Ctrl+Z) puts the last one back in the box, also while it waits in queue or in Claude Code's queue. `/hold <seconds>` changes the time, `/hold 0` sends at once.

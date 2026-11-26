@@ -48,6 +48,8 @@ import { imageSpans, openerFor } from './images.ts'
 import { InlineImages } from './inline-images.ts'
 import { cleanImages, limits, trimLogFile } from './retention.ts'
 import { Btw } from './btw.ts'
+import { bestOf, boardSize, GAME_NAME, gameBanner, gameLines, keyDir, newGame, pauseFor, resize, steer, step, TICK_MS, togglePause } from './game.ts'
+import type { Game } from './game.ts'
 import { ACTIVE_MS, failureNote, focusUri, linuxCommands, macCommand, NOTIFY_MODES, oscNotification, removeClickHandler, setupClickHandler, shouldNotify, tabId, tabTag, targetOf, toastFailure, toastScript, Waits } from './notify.ts'
 import type { HandlerIo, Notify, Ran, Setup } from './notify.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
@@ -132,7 +134,7 @@ function logSend(what: string, fields: Record<string, unknown>) {
 }
 const prefs = (() => {
   try {
-    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify; holdMs?: number; queue?: boolean }
+    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify; holdMs?: number; queue?: boolean; gameBest?: number }
   } catch {
     return {}
   }
@@ -253,6 +255,8 @@ const S = {
   shells: newShells(),
   jobView: '',
   mainScroll: 0,
+  /** The game (Ctrl+G) is open in the chat's place. */
+  isGameOpen: false,
 }
 
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -449,9 +453,12 @@ const holdMs = () => holdSet ?? (process.env.CLUED_HOLD_MS ? Number(process.env.
 let queueSet = typeof prefs.queue === 'boolean' ? prefs.queue : undefined
 const queueOn = () => queueSet ?? process.env.CLUED_QUEUE !== '0'
 
+/** The game's best score (Ctrl+G), kept in panel.json as gameBest. */
+let gameBest = typeof prefs.gameBest === 'number' && prefs.gameBest > 0 ? prefs.gameBest : 0
+
 function savePrefs() {
   mkdirSync(`${homedir()}/.clued`, { recursive: true })
-  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode, ...(holdSet != null ? { holdMs: holdSet } : {}), ...(queueSet != null ? { queue: queueSet } : {}) }))
+  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode, ...(holdSet != null ? { holdMs: holdSet } : {}), ...(queueSet != null ? { queue: queueSet } : {}), ...(gameBest ? { gameBest } : {}) }))
 }
 
 /** Questions you dismissed since your last message: the next one tells Claude not to wait for them. */
@@ -564,6 +571,7 @@ const CONTINUE_MS = 15_000
 
 function openAgent(id: string) {
   if (!S.agents.has(id)) return toast('That agent is no longer here.')
+  leaveGame()
   if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.requestView = ''
   S.jobView = ''
@@ -656,9 +664,10 @@ function openFor(): string[] {
 /** The agent an event of an agent's own belongs to: by its Agent call, or the SendMessage that continued it. */
 const agentOf = (parent: string) => S.agents.get(parent) ?? [...S.agents.values()].find(a => a.tasks.some(t => t.toolId === parent))
 
-/** Back to the main chat from an agent's or a request's view. */
+/** Back to the main chat from an agent's, a request's or the game's view. */
 function closeAgent() {
-  if (!S.agentView && !S.requestView && !S.jobView) return
+  if (!S.agentView && !S.requestView && !S.jobView && !S.isGameOpen) return
+  leaveGame()
   S.agentView = ''
   S.requestView = ''
   S.jobView = ''
@@ -666,9 +675,74 @@ function closeAgent() {
   draw()
 }
 
+// ---- The game: Comet, to play while Claude works (Ctrl+G) ----------------------------------
+
+/** The game, made at its first frame (its sky fits the chat), kept while its view is closed. */
+let game: Game | null = null
+
+/** Opens the game in the chat's place, as a view: ← back or Esc closes it. */
+function openGame() {
+  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
+  S.agentView = ''
+  S.requestView = ''
+  S.jobView = ''
+  S.isGameOpen = true
+  draw()
+}
+
+/** The game's view closes: a run being played pauses, to play on when it opens again. */
+function leaveGame() {
+  if (!S.isGameOpen) return
+  S.isGameOpen = false
+  if (game) pauseFor(game, '')
+  keepBest()
+}
+
+/** A new best score goes to panel.json. */
+function keepBest() {
+  if (!game || bestOf(game) <= gameBest) return
+  gameBest = bestOf(game)
+  savePrefs()
+}
+
+/**
+ * Claude answered, or waits on you: the game pauses and says so. Its view stays open: closing it
+ * would send your next arrow to the box, where ↑ takes back your last message.
+ */
+function gameHeadsUp(note: string) {
+  if (S.isGameOpen && game) pauseFor(game, `${note}: Esc back to the chat`)
+}
+
+/**
+ * A key while the game is open goes to the game, never to the box. Esc and Ctrl+G close it; Ctrl+C
+ * and Ctrl+D do what they always do (false: the app handles them). The game's own keys don't count
+ * as you being at this tab (lastInputAt): playing isn't reading, so notifications still come.
+ */
+function gameKey(k: string): boolean {
+  if (k === '\x03' || k === '\x04') return false
+  S.quitArmed = false
+  if (k === '\x1b' || k === '\x07') {
+    lastInputAt = Date.now()
+    closeAgent()
+    return true
+  }
+  // Plain text comes as one string when typed fast: each of its keys.
+  for (const one of k.startsWith('\x1b') ? [k] : [...k]) {
+    if (!game) break
+    if (one === ' ' || (one === '\r' && (game.state === 'over' || game.state === 'ready'))) game = togglePause(game)
+    else {
+      const d = keyDir(one)
+      if (d) steer(game, d)
+    }
+  }
+  draw()
+  return true
+}
+
 // ---- Inside a request: its chain -----------------------------------------------------------
 
 function openRequest(turn: Turn) {
+  leaveGame()
   if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.agentView = ''
   S.jobView = ''
@@ -727,6 +801,7 @@ function requestInfo(req: Turn): RequestInfo {
 
 function openJob(id: string) {
   if (!S.jobs.list.some(j => j.toolId === id) && !S.shells.list.some(x => x.id === id)) return toast('That job is no longer here.')
+  leaveGame()
   if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.agentView = ''
   S.requestView = ''
@@ -853,6 +928,7 @@ const MAIN = 'main'
 function openWork() {
   const t = S.turns.findLast(x => !x.isDone) ?? S.turns.findLast(x => x.steps.length)
   if (!t) return toast('Claude has not worked yet.')
+  leaveGame()
   if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
   S.requestView = ''
   S.jobView = ''
@@ -1394,6 +1470,7 @@ function onEvent(e: ClaudeEvent) {
       // you): it is still a turn, as the session file shows it, so the next one's key counts it.
       if (!t && unheard.length) followUpTurn()
       finishTurn(e.text, e.isError, e.durationMs)
+      gameHeadsUp('Claude answered')
       // A question still on the card when the turn ends (interrupted) can no longer be answered.
       S.asks = []
       S.costUsd = e.costUsd || S.costUsd
@@ -1409,6 +1486,7 @@ function onEvent(e: ClaudeEvent) {
       break
     case 'permission':
       S.permissions.push({ requestId: e.requestId, tool: e.tool, input: e.input })
+      gameHeadsUp(`Claude asks to use ${e.tool}`)
       notifyWait(`perm:${e.requestId}`, `Claude wants to use ${e.tool} · ${folder()}`, preview(String(e.input.description ?? e.input.command ?? e.input.file_path ?? e.input.url ?? ''), 200))
       break
     case 'mode':
@@ -1421,6 +1499,7 @@ function onEvent(e: ClaudeEvent) {
       // No question in it: ask about the tool like any other.
       if (!a) return onEvent({ kind: 'permission', requestId: e.requestId, tool: 'AskUserQuestion', input: e.input })
       S.asks.push(a)
+      gameHeadsUp('Claude asks you something')
       notifyWait(`ask:${e.requestId}`, `Claude asks you · ${folder()}`, preview(a.questions.map(q => q.question).join(' · '), 200))
       break
     }
@@ -1443,6 +1522,7 @@ function onEvent(e: ClaudeEvent) {
         S.isWorking = false
         S.claude = undefined
         S.asks = []
+        gameHeadsUp('Claude Code stopped')
         for (const a of S.agents.values())
           if (a.state === 'running') {
             endRun(a, 'stopped', Date.now())
@@ -2739,7 +2819,7 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : job ? ` ${jobMark(job)} about the scheduled job: ${clip(jobName(job), Math.max(6, w - 40))} ` : shell ? ` $ about the background command: ${clip(shellName(shell), Math.max(6, w - 44))} ` : ''
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : shell ? C.cyan : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
-  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const placeholder = S.isGameOpen ? `Playing ${GAME_NAME}: your keys go to the game   (Esc back to chat)` : S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : S.isWorking ? 'Claude is working… you can still send messages (Esc interrupts · Ctrl+G to play)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = rowSpans(inner)
   // A slash command the app knows, at the start of the text: drawn in its own colour, as Claude Code does.
   const cmd = S.search ? 0 : commandEnd(S.text, isCommand)
@@ -2929,7 +3009,17 @@ function paint() {
   const shell = shellView()
   if (S.jobView && !job && !shell) S.jobView = ''
   const jobFor = (job ?? shell)?.for.map(k => S.turns.findLast(t => t.key === k)).filter((t): t is Turn => !!t) ?? []
-  const banner: Line | undefined = shell
+  // The game's sky fits the chat's place, under its banner, and follows its size; with no room for one,
+  // a run pauses. The same seed lays the same sparks (CLUED_GAME_SEED, for the tests).
+  if (S.isGameOpen) {
+    const size = boardSize(cw - 2, Math.max(3, H - status.length - bottom.lines.length - 1))
+    if (size && !game) game = newGame(size.w, size.h, gameBest, Number(process.env.CLUED_GAME_SEED) || Date.now())
+    else if (size) resize(game!, size.w, size.h)
+    else if (game?.state === 'playing') game.state = 'paused'
+  }
+  const banner: Line | undefined = S.isGameOpen
+    ? [{ text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent }, { text: ' ', style: {} }, ...gameBanner(game)]
+    : shell
     ? [
         { text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent },
         { text: ' ', style: {} },
@@ -3020,9 +3110,10 @@ function paint() {
       },
   }
   const viewKey = `${cw}|${req?.key ?? ''}|${inside?.id ?? ''}|${S.agentView}|${job?.toolId ?? ''}|${shell?.id ?? ''}`
-  const reuse = spinOnly && chatCache?.key === viewKey && Date.now() - chatCache.at < 1000
+  const reuse = !S.isGameOpen && spinOnly && chatCache?.key === viewKey && Date.now() - chatCache.at < 1000
   spinOnly = false
-  if (!reuse)
+  // The game's frames lay out no chat: only the game, 10 times a second.
+  if (!reuse && !S.isGameOpen)
     chatCache = {
       key: viewKey,
       at: Date.now(),
@@ -3054,9 +3145,9 @@ function paint() {
         : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
     }
   // Side answers (/btw) sit in the chat itself, after the message that was last when asked.
-  const base = job || shell || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
+  const base = S.isGameOpen ? { lines: gameLines(game, cw - 2, chatRows), anchors: {}, owners: [] } : job || shell || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
   // Held messages last, in every view: they are the newest, and drawn fresh for their countdown.
-  const held = S.held.length
+  const held = S.held.length && !S.isGameOpen
     ? heldLines(S.held.map(h => {
         const qs = h.from.replyTo?.quotes ?? []
         const queued = waitsForClaude(h)
@@ -3112,7 +3203,7 @@ function paint() {
   // Images in view, drawn after the text (not under the ↓ tag); one already there isn't wiped.
   let picsOut = ''
   let picsBefore = ''
-  if (!S.turns.length && !btw.asides.length && !local.cards.list.length && !S.held.length) {
+  if (!S.turns.length && !btw.asides.length && !local.cards.list.length && !S.held.length && !S.isGameOpen) {
     const hello = [
       [{ text: 'clued', style: { bold: true, fg: C.cyan } }, { text: `  on Claude Code · ${cwd.replace(homedir(), '~')}`, style: { fg: C.gray } }],
       [{ text: 'Your messages sit on the right, Claude\'s answers on the left, its work folded into one line.', style: { fg: C.gray } }],
@@ -3150,7 +3241,7 @@ function paint() {
   for (const o of overlays) buf += `\x1b[${o.row};${o.col}H${o.text}`
   overlays.length = 0
   buf += picsOut
-  if (bottom.cursor && !S.permissions.length) {
+  if (bottom.cursor && !S.permissions.length && !S.isGameOpen) {
     const cr = top + chatRows + bottom.cursor.row + 1
     const cc = cx + 1 + bottom.cursor.col + 1
     buf += `\x1b[${cr};${cc}H\x1b[?25h`
@@ -3537,8 +3628,14 @@ function key(k: string) {
       S.isOnPanel = false
       draw()
     }
+    // And a game being played waits for you.
+    if (!S.isFocused && S.isGameOpen && game?.state === 'playing') {
+      pauseFor(game, '')
+      draw()
+    }
     return
   }
+  if (S.isGameOpen && !S.picker && gameKey(k)) return
   lastInputAt = Date.now()
   S.quitArmed = k === '\x03' ? S.quitArmed : false
   // With text selected: Ctrl+C copies it, Esc drops it, typing or Backspace replaces it in the input box.
@@ -3756,6 +3853,10 @@ function key(k: string) {
       if (!takeBack()) toast(holdMs() ? 'Nothing to take back: Ctrl+Z works while a message waits to go.' : 'Messages go at once: /hold 3 gives you 3 s to take one back.')
       break
     }
+    case '\x07':
+      // Ctrl+G: a game to play while Claude works.
+      openGame()
+      break
     case '\x06':
       // Ctrl+F: search your messages.
       startSearch()
@@ -3998,6 +4099,7 @@ function input(data: string) {
 let quitting = false
 function quit(code = 0) {
   quitting = true
+  keepBest()
   // Held messages: what would go now is written to Claude Code before it closes (as a message sent
   // just before quitting would be); what waits for Claude's turn is kept with the session (parkHeld).
   parkHeld()
@@ -4048,8 +4150,9 @@ process.on('uncaughtException', err => {
 setInterval(() => {
   if (S.isWorking || S.box.messages.some(m => m.active)) {
     S.spinAt++
-    // Only the spinner moved: the chat's layout from the last frame does (see paint).
-    if (!drawQueued) {
+    // Only the spinner moved: the chat's layout from the last frame does (see paint). A game being
+    // played draws 10 frames a second of its own, the spinner turned in them.
+    if (!drawQueued && !(S.isGameOpen && game?.state === 'playing')) {
       drawQueued = true
       spinOnly = true
       setImmediate(paint)
@@ -4057,6 +4160,12 @@ setInterval(() => {
   }
 }, 120)
 setInterval(refreshStatus, 15000)
+// The game's steps, while it is open and played.
+setInterval(() => {
+  if (!S.isGameOpen || game?.state !== 'playing') return
+  if (step(game) === 'over') keepBest()
+  draw()
+}, TICK_MS)
 /**
  * sent.log trimmed to its last days, and old pasted images no message is kept with deleted
  * (retention.ts): when the app starts, then every hour. The images in the box or held are spared.
