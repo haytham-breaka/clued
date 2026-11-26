@@ -110,7 +110,7 @@ The method, every table and the earlier results are in [eval/RESULTS.md](eval/RE
 
 **What happens to agents, background commands and scheduled jobs on exit or `/reload`?** They run inside Claude Code, so they stop with it. A background agent that was cut off shows ■ stopped, with ▶ continue to have Claude resume it. Background commands show as stopped, with ↻ run again. Scheduled jobs that live only in memory end; durable ones and cloud routines may still run. Messages still in queue are held again when you open the session.
 
-**Can I write in Arabic or Hebrew?** Yes. clued puts right-to-left text in reading order, since most terminals (Windows Terminal among them) don't, and puts such paragraphs on the right. Arabic letters are joined by clued, or in Windows Terminal by its font (use Cascadia Mono NF or Cascadia Code 2111 or later: the Cascadia built into Windows has no Arabic). `CLUED_BIDI=terminal` leaves the order to a terminal that does it ([details](docs/usage.md#arabic-hebrew-and-other-right-to-left-text)).
+**Can I write in Arabic or Hebrew?** Yes. clued puts right-to-left text in reading order, since most terminals (Windows Terminal among them) don't, and puts such paragraphs on the right. Arabic letters are joined by clued, or in Windows Terminal by its font (use Cascadia Mono NF or Cascadia Code 2111 or later: the Cascadia built into Windows has no Arabic; for لا to join, set the font face to `Cascadia Mono NF, Simplified Arabic Fixed`). `CLUED_BIDI=terminal` leaves the order to a terminal that does it ([details](docs/usage.md#arabic-hebrew-and-other-right-to-left-text)).
 
 **Is clued an official Anthropic product?** No. It's an independent open-source project that runs on Claude Code.
 
