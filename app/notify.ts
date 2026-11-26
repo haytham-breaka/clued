@@ -8,7 +8,7 @@
 // %LOCALAPPDATA%\clued\focus.ps1) finds the tab by its title through UI Automation, selects it and
 // brings its window to the front. The tab's title ends with an invisible tag (zero-width characters
 // made from WT_SESSION), so two clued tabs on the same folder are told apart. The handler is set up
-// with the first toast and removed with /notify uninstall.
+// apart from the toasts, once, as the app starts (setupClickHandler), and removed with /notify uninstall.
 
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -118,6 +118,7 @@ export function focusUri(id: string, where: string): string {
   return `${SCHEME}:?id=${id}&where=${encodeURIComponent(where)}`
 }
 
+const b64 = (t: string) => Buffer.from(t, 'utf8').toString('base64')
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 
 /** The toast: title and body, the default notification sound, and, with `launch`, the link a click opens. */
@@ -181,44 +182,135 @@ Add-Type -Namespace Clued -Name Win -MemberDefinition '[DllImport("user32.dll")]
 if ($best) { try { $best.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select() } catch {} }
 `
 
-/** The handler's version: the registry keeps it, so a changed handler is written again. */
-export const FOCUS_VERSION = createHash('sha1').update(FOCUS_PS).digest('hex').slice(0, 8)
+/**
+ * The command a click on a toast runs, kept in the registry: focus.ps1 with the link. conhost
+ * --headless, as the default terminal (Windows Terminal) would open a tab for a console program, and
+ * RemoteSigned, as Windows' default policy (Restricted) runs no script file: focus.ps1 is written on
+ * this machine, never downloaded, so RemoteSigned runs it. No -ExecutionPolicy Bypass, no hidden window
+ * flags, no encoded commands: antivirus (Bitdefender) blocks command lines that look like that.
+ */
+export function handlerCommand(systemRoot: string, ps1: string): string {
+  return `"${systemRoot}\\System32\\conhost.exe" --headless "${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "${ps1}" "%1"`
+}
 
-const b64 = (t: string) => Buffer.from(t, 'utf8').toString('base64')
-const KEY = `HKCU:\\Software\\Classes\\${SCHEME}`
+/** The handler's version: the registry keeps it, so a changed handler (or its command) is set up again. */
+export const FOCUS_VERSION = createHash('sha1').update(FOCUS_PS).update(handlerCommand('', '')).digest('hex').slice(0, 8)
+
+/** The scheme's key, for this user only. */
+export const HANDLER_KEY = `HKCU\\Software\\Classes\\${SCHEME}`
+
+/** reg.exe calls that register the clued-focus: scheme to run `command`, and note the version last. */
+export function registerCommands(command: string): Cmd[] {
+  return [
+    { cmd: 'reg.exe', args: ['add', HANDLER_KEY, '/ve', '/d', 'URL:clued focus', '/f'] },
+    { cmd: 'reg.exe', args: ['add', HANDLER_KEY, '/v', 'URL Protocol', '/d', '', '/f'] },
+    { cmd: 'reg.exe', args: ['add', `${HANDLER_KEY}\\shell\\open\\command`, '/ve', '/d', command, '/f'] },
+    { cmd: 'reg.exe', args: ['add', HANDLER_KEY, '/v', 'CluedVersion', '/d', FOCUS_VERSION, '/f'] },
+  ]
+}
+
+/** What a program gave back. `code`: its exit code, or the error's code when it didn't start (EACCES). */
+export type Ran = { ok: boolean; code: number | string | null; stdout: string; stderr: string }
+
+/** What setting up (or removing) the click handler needs of the system: the tests give fakes. */
+export type HandlerIo = {
+  exec: (cmd: string, args: string[]) => Promise<Ran>
+  /** A file's text, undefined when there is none. */
+  read: (path: string) => string | undefined
+  /** Writes a file, its folder made first. */
+  write: (path: string, text: string) => void
+  /** Removes a file, and its folder once empty. */
+  remove: (path: string) => void
+  isWsl: boolean
+  env: NodeJS.ProcessEnv
+}
+
+/** Where focus.ps1 goes: its Windows path (for the registry) and the one this process writes to. */
+export type HandlerPlace = { systemRoot: string; win: string; here: string }
+
+const lastLine = (r: Ran) => (r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`).split(/\r?\n/).at(-1)!.trim().slice(0, 200)
+const isDrivePath = (p: string) => /^[A-Za-z]:\\/.test(p)
 
 /**
- * Sets up the click handler when it isn't there yet (or is an older one): writes focus.ps1 to
- * %LOCALAPPDATA%\clued and registers the clued-focus: scheme for this user only. It runs headless
- * (conhost --headless), so no console window, nor a Windows Terminal tab, opens on a click.
+ * %LOCALAPPDATA%\clued\focus.ps1. From WSL, %LOCALAPPDATA% and %SystemRoot% come from a plain
+ * `cmd.exe /c echo`, and wslpath gives the folder's path here (/mnt/c/Users/…).
  */
-export function installScript(): string {
-  return [
-    `$k='${KEY}'; $f=Join-Path $env:LOCALAPPDATA 'clued\\focus.ps1'`,
-    `if ((Get-ItemProperty -Path $k -Name CluedVersion -ErrorAction SilentlyContinue).CluedVersion -ne '${FOCUS_VERSION}' -or -not (Test-Path $f)) {`,
-    `New-Item -ItemType Directory -Force -Path (Split-Path $f) > $null`,
-    `[IO.File]::WriteAllText($f, [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64(FOCUS_PS)}')))`,
-    `New-Item -Path "$k\\shell\\open\\command" -Force > $null`,
-    `Set-ItemProperty -Path $k -Name '(default)' -Value 'URL:clued focus'`,
-    `Set-ItemProperty -Path $k -Name 'URL Protocol' -Value ''`,
-    `Set-ItemProperty -Path "$k\\shell\\open\\command" -Name '(default)' -Value ('"' + $env:SystemRoot + '\\System32\\conhost.exe" --headless "' + $PSHOME + '\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $f + '" "%1"')`,
-    `Set-ItemProperty -Path $k -Name CluedVersion -Value '${FOCUS_VERSION}' }`,
-  ].join('; ')
+export async function handlerPlace(io: HandlerIo): Promise<HandlerPlace | string> {
+  let local = io.env.LOCALAPPDATA ?? ''
+  let systemRoot = io.env.SystemRoot ?? io.env.SYSTEMROOT ?? 'C:\\Windows'
+  if (io.isWsl) {
+    const r = await io.exec('cmd.exe', ['/d', '/c', 'echo', '%LOCALAPPDATA%;%SystemRoot%'])
+    ;[local = '', systemRoot = ''] = r.stdout.trim().split(';')
+    if (!r.ok || !isDrivePath(local) || !isDrivePath(systemRoot)) return `could not find %LOCALAPPDATA% through cmd.exe (${lastLine(r)})`
+  } else if (!isDrivePath(local)) return 'LOCALAPPDATA is not set'
+  const win = `${local}\\clued\\focus.ps1`
+  if (!io.isWsl) return { systemRoot, win, here: win }
+  const p = await io.exec('wslpath', ['-u', local])
+  if (!p.ok || !p.stdout.trim().startsWith('/')) return `wslpath could not convert ${local} (${lastLine(p)})`
+  return { systemRoot, win, here: `${p.stdout.trim()}/clued/focus.ps1` }
 }
 
-/** /notify uninstall: removes the scheme and focus.ps1 (and its folder, once empty). */
-export function uninstallScript(): string {
-  return [
-    `Remove-Item -Path '${KEY}' -Recurse -Force -ErrorAction SilentlyContinue`,
-    `$d=Join-Path $env:LOCALAPPDATA 'clued'; Remove-Item -Path (Join-Path $d 'focus.ps1') -Force -ErrorAction SilentlyContinue`,
-    `if ((Test-Path $d) -and -not (Get-ChildItem $d)) { Remove-Item $d }`,
-  ].join('; ')
+export type Setup = { ok: true; wrote: boolean; place: HandlerPlace } | { ok: false; error: string }
+
+/**
+ * Sets up the click handler when it isn't there yet (or is an older one), apart from any toast: writes
+ * focus.ps1 from this process and registers the scheme with plain reg.exe calls (no PowerShell, nothing
+ * encoded). A failure only means toasts go without a click to the tab.
+ */
+export async function setupClickHandler(io: HandlerIo): Promise<Setup> {
+  const place = await handlerPlace(io)
+  if (typeof place === 'string') return { ok: false, error: place }
+  const q = await io.exec('reg.exe', ['query', HANDLER_KEY, '/v', 'CluedVersion'])
+  if (q.ok && q.stdout.includes(FOCUS_VERSION) && io.read(place.here) === FOCUS_PS) return { ok: true, wrote: false, place }
+  try {
+    io.write(place.here, FOCUS_PS)
+  } catch (err: any) {
+    return { ok: false, error: `could not write ${place.win} (${err?.code ?? err})` }
+  }
+  for (const c of registerCommands(handlerCommand(place.systemRoot, place.win))) {
+    const r = await io.exec(c.cmd, c.args)
+    if (!r.ok) return { ok: false, error: `reg.exe add failed (${lastLine(r)})` }
+  }
+  return { ok: true, wrote: true, place }
 }
 
-/** The PowerShell that shows the toast; with `launch`, it sets up the click handler first. */
+/** /notify uninstall: removes the scheme (reg.exe delete) and focus.ps1 (and its folder, once empty). */
+export async function removeClickHandler(io: HandlerIo): Promise<{ ok: true } | { ok: false; error: string }> {
+  const place = await handlerPlace(io)
+  if (typeof place === 'string') return { ok: false, error: place }
+  const r = await io.exec('reg.exe', ['delete', HANDLER_KEY, '/f'])
+  try {
+    io.remove(place.here)
+  } catch {}
+  // Not there (never set up, or removed before) is fine.
+  return r.ok || /unable to find/i.test(r.stderr) ? { ok: true } : { ok: false, error: `reg.exe delete failed (${lastLine(r)})` }
+}
+
+/**
+ * Why a toast's powershell.exe failed. `blocked`: it never ran, which is what antivirus does to a
+ * command line it doesn't like (from WSL, "powershell.exe: Invalid argument"; on Windows, EACCES or
+ * EPERM), as against PowerShell running and failing.
+ */
+export function toastFailure(r: Ran): { blocked: boolean; detail: string } {
+  const detail = lastLine(r)
+  const blocked = r.code === 'EACCES' || r.code === 'EPERM' || r.code === 'EINVAL' || /Invalid argument|Permission denied|Access is denied|Operation not permitted/i.test(r.stderr)
+  return { blocked, detail }
+}
+
+/** The in-app warning, once, the first time a toast fails. */
+export function failureNote(blocked: boolean): string {
+  return blocked ? 'Windows notifications were blocked (antivirus?): see /notify status' : 'Windows notifications failed: see /notify status'
+}
+
+/** The longest a toast's command may be: it stays small and plain, whatever it says. */
+export const TOAST_MAX = 2000
+
+/**
+ * The PowerShell that shows the toast, and only that: never the handler's setup, which antivirus may
+ * block (setupClickHandler does it, once, apart). With `launch`, a click opens that link.
+ */
 export function toastScript(title: string, body: string, launch?: string): string {
   return [
-    ...(launch ? [`try { ${installScript()} } catch {}`] : []),
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null',
     `$d=New-Object Windows.Data.Xml.Dom.XmlDocument; $d.LoadXml([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64(toastXml(title, body, launch))}')))`,

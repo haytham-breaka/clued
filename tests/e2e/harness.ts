@@ -49,13 +49,18 @@ export async function launch(opts: LaunchOpts = {}) {
   // The fake Claude Code; its own process writes no coverage.
   script('claude', `unset NODE_V8_COVERAGE\nexec node --no-warnings ${q(FAKE)} "$@"`)
   // Windows toasts and clipboard (WSL), Linux and macOS notifications, sounds and clipboard: logged, never real.
-  for (const name of ['powershell.exe', 'notify-send', 'canberra-gtk-play', 'paplay'])
+  for (const name of ['notify-send', 'canberra-gtk-play', 'paplay'])
     script(name, `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\ncase "$*" in *GetImage*) [ -f ${q(join(dir, 'clip.png'))} ] && echo 'C:\\fake\\clip.png' ;; esac\nexit 0`)
+  // With a file named ps-blocked there, powershell.exe never starts, as when antivirus blocks it (WSL says "Invalid argument").
+  script('powershell.exe', `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\n[ -f ${q(join(dir, 'ps-blocked'))} ] && { echo "$0: Invalid argument" >&2; exit 1; }\ncase "$*" in *GetImage*) [ -f ${q(join(dir, 'clip.png'))} ] && echo 'C:\\fake\\clip.png' ;; esac\nexit 0`)
+  // Windows' %LOCALAPPDATA% (win/Local here, through wslpath -u) and the registry, for the click handler: logged.
+  script('cmd.exe', `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\nprintf 'C:\\\\fake\\\\Local;C:\\\\WINDOWS\\r\\n'`)
+  script('reg.exe', `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\n[ "$1" = query ] && { echo 'ERROR: The system was unable to find the specified registry key or value.' >&2; exit 1; }\nexit 0`)
   // macOS: the clipboard's PNG (clip.png, when there is one) written to the file in the script's
   // \`POSIX file "…"\`, as AppleScript would; anything else is a notification.
   script('osascript', `printf '%s\\n' "$0 $*" >> ${q(join(dir, 'notify.log'))}\ncase "$*" in *PNGf*) [ -f ${q(join(dir, 'clip.png'))} ] || exit 1; a="$*"; f="\${a#*POSIX file \\\"}"; cp ${q(join(dir, 'clip.png'))} "\${f%%\\\"*}" ;; esac\nexit 0`)
   // -w: a Windows path to the file, as WSL gives one (\\wsl.localhost\<distro>\…).
-  script('wslpath', `[ "$1" = -w ] && { printf '%s%s\\n' '\\\\wsl.localhost\\Fake' "$(printf %s "$2" | tr / '\\\\')"; exit 0; }\n[ "$1" = -u ] && shift; case "$1" in 'C:\\fake\\clip.png') echo ${q(join(dir, 'clip.png'))} ;; *) echo "$1" ;; esac`)
+  script('wslpath', `[ "$1" = -w ] && { printf '%s%s\\n' '\\\\wsl.localhost\\Fake' "$(printf %s "$2" | tr / '\\\\')"; exit 0; }\n[ "$1" = -u ] && shift; case "$1" in 'C:\\fake\\clip.png') echo ${q(join(dir, 'clip.png'))} ;; 'C:\\fake\\Local') echo ${q(join(dir, 'win', 'Local'))} ;; *) echo "$1" ;; esac`)
   script('wl-paste', `[ -f ${q(join(dir, 'clip.png'))} ] && cat ${q(join(dir, 'clip.png'))} || exit 1`)
   script('xclip', `exit 1`)
   // Opening a file in the system's viewer (macOS, Linux): logged, never real.

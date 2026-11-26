@@ -35,7 +35,7 @@ export const ABOUT: Record<string, { args?: string; about: string }> = {
   resume: { about: 'pick a session to go back to' },
   model: { args: '<name>', about: 'switch model: opus, sonnet, haiku or a model id' },
   btw: { args: '<question>', about: 'a quick side question: it sees the conversation but stays out of it' },
-  notify: { args: 'on|always|off|test|uninstall', about: 'a notification with a sound each time Claude waits on you' },
+  notify: { args: 'on|always|off|test|status|uninstall', about: 'a notification with a sound each time Claude waits on you' },
   hold: { args: '<seconds>', about: 'time to edit or delete a message before it goes' },
   queue: { args: 'on|off', about: 'hold messages sent while Claude works until its turn ends' },
   results: { about: 'hide Claude\'s steps and keep its results' },

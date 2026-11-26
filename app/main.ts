@@ -12,8 +12,9 @@
 import './migrate.ts'
 import { randomUUID } from 'node:crypto'
 import { execFile, spawn, spawnSync } from 'node:child_process'
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { dirname } from 'node:path'
 import {
   CHAIN_FAR,
   chainNote,
@@ -45,8 +46,8 @@ import { imageSpans, openerFor } from './images.ts'
 import { InlineImages } from './inline-images.ts'
 import { cleanImages, limits, trimLogFile } from './retention.ts'
 import { Btw } from './btw.ts'
-import { ACTIVE_MS, focusUri, linuxCommands, macCommand, NOTIFY_MODES, oscNotification, shouldNotify, tabId, tabTag, targetOf, toastScript, uninstallScript, Waits } from './notify.ts'
-import type { Notify } from './notify.ts'
+import { ACTIVE_MS, failureNote, focusUri, linuxCommands, macCommand, NOTIFY_MODES, oscNotification, removeClickHandler, setupClickHandler, shouldNotify, tabId, tabTag, targetOf, toastFailure, toastScript, Waits } from './notify.ts'
+import type { HandlerIo, Notify, Ran, Setup } from './notify.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
 import type { Card, Ctx as LocalCtx } from './local.ts'
 import { PLUGIN_COMMANDS, Plugins } from './plugin.ts'
@@ -309,22 +310,118 @@ function run(c: { cmd: string; args: string[] }, orElse?: () => void) {
   }
 }
 
+/** A program, run to its end: what it gave back, never a throw. */
+function exec(cmd: string, args: string[]): Promise<Ran> {
+  return new Promise(done => {
+    try {
+      execFile(cmd, args, { timeout: 20_000 }, (err: any, stdout, stderr) =>
+        done({ ok: !err, code: err ? (err.code ?? err.signal ?? null) : 0, stdout: String(stdout), stderr: String(stderr || (err && !Number.isInteger(err.code) ? err.message : '')) }),
+      )
+    } catch (err: any) {
+      done({ ok: false, code: err?.code ?? null, stdout: '', stderr: String(err?.message ?? err) })
+    }
+  })
+}
+
+/** What setting up the Windows click handler needs: reg.exe and cmd.exe through exec, focus.ps1 written from here. */
+const handlerIo = (): HandlerIo => ({
+  exec,
+  read: p => {
+    try {
+      return readFileSync(p, 'utf8')
+    } catch {
+      return undefined
+    }
+  },
+  write: (p, text) => {
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, text)
+  },
+  remove: p => {
+    rmSync(p, { force: true })
+    try {
+      rmdirSync(dirname(p))
+    } catch {}
+  },
+  isWsl: IS_WSL,
+  env: process.env,
+})
+
+/** The click handler (Windows Terminal only): set up once as the app starts, apart from any toast. */
+let handler: Promise<Setup> | undefined
+let handlerDone: Setup | undefined
+function clickHandler(): Promise<Setup> | undefined {
+  if (!TAB_ID || targetOf(process.env, process.platform, IS_WSL) !== 'windows') return undefined
+  return (handler ??= setupClickHandler(handlerIo()).then(r => {
+    handlerDone = r
+    if (!r.ok) logSend('notify-handler-failed', { error: r.error })
+    else if (r.wrote) logSend('notify-handler', { at: r.place.win })
+    return r
+  }))
+}
+
+/** The last Windows toast: when, and how it went. The first one to fail says so in the app, once. */
+let lastToast: { at: number; ok: true } | { at: number; ok: false; blocked: boolean; detail: string } | undefined
+let toastWarned = false
+function sendToast(title: string, body: string, launch?: string) {
+  void exec(IS_WSL ? 'powershell.exe' : 'powershell', ['-NoProfile', '-Command', toastScript(title, body, launch)]).then(r => {
+    if (r.ok) return void (lastToast = { at: Date.now(), ok: true })
+    const f = toastFailure(r)
+    lastToast = { at: Date.now(), ok: false, ...f }
+    logSend('notify-failed', { blocked: f.blocked, code: r.code, error: f.detail, click: !!launch })
+    if (!toastWarned) {
+      toastWarned = true
+      toast(failureNote(f.blocked))
+    }
+  })
+}
+
 /**
  * A system notification with a sound: from the terminal itself when it can (kitty, iTerm2, WezTerm,
  * Ghostty: a click opens this tab), else a Windows toast (from WSL too; in Windows Terminal a click
- * opens this tab), macOS Notification Center, or notify-send and a sound on Linux.
+ * opens this tab, once the click handler is set up), macOS Notification Center, or notify-send and a
+ * sound on Linux.
  */
 function notify(title: string, body: string) {
   const target = targetOf(process.env, process.platform, IS_WSL)
   if (target === 'kitty' || target === 'osc9') out.write(oscNotification(target, title, body))
-  else if (target === 'windows') run({ cmd: IS_WSL ? 'powershell.exe' : 'powershell', args: ['-NoProfile', '-Command', toastScript(title, body, TAB_ID ? focusUri(TAB_ID, folder()) : undefined)] })
-  else if (target === 'mac') run(macCommand(title, body))
+  else if (target === 'windows') {
+    const h = clickHandler()
+    if (!h) return sendToast(title, body)
+    // A toast sent while the handler is still being set up waits for it a moment, no more.
+    void Promise.race([h, new Promise<undefined>(r => setTimeout(r, 2000))]).then(r => sendToast(title, body, r?.ok ? focusUri(TAB_ID, folder()) : undefined))
+  } else if (target === 'mac') run(macCommand(title, body))
   else {
     const { show, sounds } = linuxCommands(title, body)
     run(show)
     const next = (i: number): void => void (sounds[i] && run(sounds[i]!, () => next(i + 1)))
     next(0)
   }
+}
+
+const clock = (t: number) => new Date(t).toTimeString().slice(0, 5)
+
+/** /notify status: where notifications go, and, on Windows, whether the last toast and the click handler worked. */
+function notifyStatus(): string[] {
+  const target = targetOf(process.env, process.platform, IS_WSL)
+  const where = { kitty: "kitty's own notifications", osc9: "the terminal's own notifications (OSC 9)", windows: `Windows toasts, through ${IS_WSL ? 'powershell.exe from WSL' : 'powershell'}`, mac: 'macOS Notification Center', linux: 'notify-send, with a sound' }[target]
+  const rows = [`Mode: ${notifyMode}. Notifications go to ${where}.`]
+  if (target !== 'windows') return rows
+  rows.push(
+    !lastToast ? 'Last toast: none yet since clued started (/notify test sends one).'
+    : lastToast.ok ? `Last toast: shown at ${clock(lastToast.at)}.`
+    : `Last toast: ${lastToast.blocked ? 'blocked' : 'failed'} at ${clock(lastToast.at)}: ${lastToast.detail}`,
+  )
+  if (!TAB_ID) rows.push('Click to the tab: only in Windows Terminal.')
+  else if (!handlerDone) rows.push('Click to the tab: being set up.')
+  else if (handlerDone.ok) rows.push(`Click to the tab: set up (${handlerDone.place.win}).`)
+  else rows.push(`Click to the tab: not set up, so toasts go without it: ${handlerDone.error}.`)
+  if (lastToast && !lastToast.ok && lastToast.blocked)
+    rows.push(
+      'powershell.exe was stopped before it ran. Antivirus does that (Bitdefender, say, which scans command lines): clued sends each toast as a small, plain PowerShell command, so allow powershell.exe or clued in the antivirus, then /notify test.',
+    )
+  rows.push('Each failure is in ~/.clued/sent.log (notify-failed). /notify uninstall removes the click handler.')
+  return rows
 }
 
 /** Each model's context size as Claude Code last reported it, for the status line before the first reply. */
@@ -3183,18 +3280,26 @@ function runCommand(text: string): boolean {
         toast('Sent a test notification.')
         return true
       }
+      if (arg.trim() === 'status') {
+        const ctx = localCtx()
+        ctx.shown(local.cards.add({ title: 'notify', about: 'where notifications go, and how the last one went', after: ctx.after, body: w => notifyStatus().flatMap(t => wrap([{ text: t }], w)) }))
+        return true
+      }
       const want = arg.trim() as Notify | 'uninstall'
       if (want === 'uninstall') {
         if (!IS_WSL && process.platform !== 'win32') return toast('Nothing to remove: only Windows has a click handler (clued-focus).'), true
-        run({ cmd: IS_WSL ? 'powershell.exe' : 'powershell', args: ['-NoProfile', '-Command', uninstallScript()] })
         notifyMode = 'off'
         savePrefs()
-        toast('Removed the click handler (clued-focus) and turned notifications off. /notify on sets them up again.')
+        void (handler ?? Promise.resolve()).then(() => removeClickHandler(handlerIo())).then(r => {
+          handler = handlerDone = undefined
+          toast(r.ok ? 'Removed the click handler (clued-focus) and turned notifications off. /notify on sets them up again.' : `Turned notifications off, but could not remove the click handler: ${r.error}`)
+        })
         draw()
         return true
       }
       notifyMode = NOTIFY_MODES.includes(want) ? want : NOTIFY_MODES[(NOTIFY_MODES.indexOf(notifyMode) + 1) % 3]!
       savePrefs()
+      if (notifyMode !== 'off') void clickHandler()
       toast(notifyMode === 'off' ? 'Notifications off.' : notifyMode === 'always' ? 'Notifications always: each time Claude waits on you, even while you type.' : "Notifications on: each time Claude waits on you, unless you're typing here.")
       draw()
       return true
@@ -3837,6 +3942,9 @@ setInterval(() => {
   tick(S.jobs, Date.now())
   if (!S.isWorking) draw()
 }, 15_000)
+
+// The Windows click handler is set up (when it isn't yet) as the app starts, apart from any toast.
+if (notifyMode !== 'off') void clickHandler()
 
 if (wantPicker) {
   const sessions = listSessions(cwd)

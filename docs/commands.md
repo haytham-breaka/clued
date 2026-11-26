@@ -32,7 +32,7 @@ Like `claude`, it works on the folder you start it in, and sessions are Claude C
 | `/btw <question>` | a quick side question: it sees the conversation but stays out of it, answered aside even while Claude works |
 | `/resume` | pick a session |
 | `/model <name>` | switch model |
-| `/notify on\|always\|off\|test\|uninstall` | notifications, with a sound, when Claude waits on you (uninstall: remove the Windows click handler) |
+| `/notify on\|always\|off\|test\|status\|uninstall` | notifications, with a sound, when Claude waits on you (status: how the last one went; uninstall: remove the Windows click handler) |
 | `/hold <seconds>` | time to take a message back |
 | `/queue on\|off` | hold messages while Claude works |
 | `/results` | hide Claude's steps and keep its results |

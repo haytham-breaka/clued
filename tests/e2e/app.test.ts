@@ -4,7 +4,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { keyOf } from '../../hooks/model.ts'
 import { withApp, writeSession } from './harness.ts'
@@ -194,9 +194,18 @@ describe('app', () => {
       assert.match(sent[0]!, /<audio src="ms-winsoundevent:Notification.Default"\/>/)
       assert.match(sent[0]!, /activationType="protocol" launch="clued-focus:\?id=[0-9a-f]{4}&amp;where=work"/)
       assert.match(sent[0]!, /<text>Which database should we use\? · Which extras do you want\?<\/text>/)
-      // The tab's title ends with its invisible tag, and the click handler is set up with the toast.
+      // The tab's title ends with its invisible tag. The click handler was set up as the app started,
+      // apart from the toast: focus.ps1 written from here, the scheme registered with reg.exe.
       assert.match(app.title(), /^✋ 1 · clued · work[\u200b\u2060]{16}$/)
-      assert.match(app.read('notify.log'), /CluedVersion/)
+      const log = app.read('notify.log')
+      assert.match(log, /cmd\.exe \/d \/c echo %LOCALAPPDATA%;%SystemRoot%/)
+      assert.match(log, /reg\.exe add HKCU\\Software\\Classes\\clued-focus\\shell\\open\\command \/ve \/d "C:\\WINDOWS\\System32\\conhost\.exe" --headless .* -ExecutionPolicy RemoteSigned -File "C:\\fake\\Local\\clued\\focus\.ps1" "%1" \/f/)
+      assert.match(log, /reg\.exe add HKCU\\Software\\Classes\\clued-focus \/v CluedVersion/)
+      assert.match(app.read('win/Local/clued/focus.ps1'), /^param\(\[string\]\$Uri/)
+      // The toast's own command is only the toast.
+      const ps = log.split('\n').filter(l => toasts(l).length)
+      assert.equal(ps.length, 1)
+      assert.ok(!/HKCU|WriteAllText|Bypass/.test(ps[0]!) && ps[0]!.length < 2000)
       // Typing right as Claude asks again: you are looking, no toast.
       app.type('1')
       app.keys('Enter')
@@ -211,8 +220,35 @@ describe('app', () => {
       app.keys('Escape')
       await app.send('/notify uninstall')
       await app.waitFor('Removed the click handler')
-      await app.waitFor(() => app.read('notify.log').includes("Remove-Item -Path 'HKCU:"))
+      assert.ok(app.read('notify.log').includes('reg.exe delete HKCU\\Software\\Classes\\clued-focus /f'))
       await app.waitFor(() => app.read('home/.clued/panel.json').includes('"notify":"off"'))
+      assert.ok(!existsSync(join(app.dir, 'win/Local/clued')))
+    }))
+
+  test('WSL: a toast antivirus blocks says so once, in the app and sent.log; later toasts still go, and /notify status explains', () =>
+    withApp({ env: { WSL_DISTRO_NAME: 'Fake', WT_SESSION: '0b7c0b6e-0000-4000-8000-000000000002' }, setup: ({ dir }) => writeFileSync(join(dir, 'ps-blocked'), '') }, async app => {
+      const tries = () => app.read('notify.log').split('\n').flatMap(toasts).length
+      await app.send('/notify test')
+      await app.waitFor('Windows notifications were blocked (antivirus?): see /notify status')
+      await app.waitFor(() => app.read('home/.clued/sent.log').includes('notify-failed'))
+      assert.match(app.read('home/.clued/sent.log'), /notify-failed .*"blocked":true.*powershell\.exe: Invalid argument/)
+      // The next toast still tries, and the warning isn't said again.
+      await app.send('/notify test')
+      await app.waitFor(() => tries() === 2)
+      await app.waitFor(() => app.read('home/.clued/sent.log').split('\n').filter(l => l.includes('notify-failed')).length === 2)
+      await new Promise(r => setTimeout(r, 300))
+      assert.ok(!app.screen().includes('were blocked'))
+      let s = await app.send('/notify status').then(() => app.waitFor('Last toast: blocked'))
+      assert.match(s, /powershell\.exe was stopped before it ran/)
+      assert.match(s, /Click to the tab: set up/)
+      // Allowed again: toasts go, and status says so.
+      rmSync(join(app.dir, 'ps-blocked'))
+      app.keys('Escape')
+      await app.send('/notify test')
+      await app.waitFor(() => tries() === 3)
+      await new Promise(r => setTimeout(r, 300))
+      s = await app.send('/notify status').then(() => app.waitFor('Last toast: shown at'))
+      assert.ok(!s.includes('stopped before it ran'))
     }))
 
   test('/resume lists this folder\'s sessions and opens one with its history', () =>
