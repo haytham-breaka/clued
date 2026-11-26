@@ -52,6 +52,8 @@ import { bestOf, boardSize, GAME_NAME, gameBanner, gameLines, keyDir, newGame, p
 import type { Game } from './game.ts'
 import { ACTIVE_MS, failureNote, focusUri, linuxCommands, macCommand, NOTIFY_MODES, oscNotification, removeClickHandler, setupClickHandler, shouldNotify, tabId, tabTag, targetOf, toastFailure, toastScript, Waits } from './notify.ts'
 import type { HandlerIo, Notify, Ran, Setup } from './notify.ts'
+import { faceHasCascadia, inWt, moveAt, NAMES as EXTRA_NAMES, plan as setupPlan, statuses as setupStatuses, systemIo, viewLines, wtFace } from './setup.ts'
+import type { NotifyHooks, SetupIo, View as SetupView } from './setup.ts'
 import { cluedVersion, Local, LOCAL_COMMANDS } from './local.ts'
 import type { Card, Ctx as LocalCtx } from './local.ts'
 import { PLUGIN_COMMANDS, Plugins } from './plugin.ts'
@@ -136,7 +138,7 @@ function logSend(what: string, fields: Record<string, unknown>) {
 }
 const prefs = (() => {
   try {
-    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify; holdMs?: number; queue?: boolean; gameBest?: number }
+    return JSON.parse(readFileSync(PREFS, 'utf8')) as { width?: number; folded?: boolean; windows?: Record<string, number>; notify?: Notify; holdMs?: number; queue?: boolean; gameBest?: number; hints?: string[] }
   } catch {
     return {}
   }
@@ -259,10 +261,12 @@ const S = {
   mainScroll: 0,
   /** The game (Ctrl+G) is open in the chat's place. */
   isGameOpen: false,
+  /** /setup's view, open in the chat's place. */
+  setupView: null as SetupView | null,
 }
 
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'hold', 'queue', 'demo', 'btw']
+const OUR_COMMANDS = ['clear', 'resume', 'model', 'reload', 'exit', 'results', 'panel', 'work', 'notify', 'setup', 'hold', 'queue', 'demo', 'btw']
 /** /btw side questions: their own Claude Code each, their answers asides in the chat. */
 const btw = new Btw(() => draw())
 /** clued's own /help, /status, /plan, /diff, /copy and /export (headless Claude Code refuses them): cards in the chat. */
@@ -460,7 +464,22 @@ let gameBest = typeof prefs.gameBest === 'number' && prefs.gameBest > 0 ? prefs.
 
 function savePrefs() {
   mkdirSync(`${homedir()}/.clued`, { recursive: true })
-  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode, ...(holdSet != null ? { holdMs: holdSet } : {}), ...(queueSet != null ? { queue: queueSet } : {}), ...(gameBest ? { gameBest } : {}) }))
+  writeFileSync(PREFS, JSON.stringify({ width: S.panelWidth, folded: S.isFolded, windows: knownWindows, notify: notifyMode, ...(holdSet != null ? { holdMs: holdSet } : {}), ...(queueSet != null ? { queue: queueSet } : {}), ...(gameBest ? { gameBest } : {}), ...(hintsBefore.size + hintsNow.size ? { hints: [...new Set([...hintsBefore, ...hintsNow])] } : {}) }))
+}
+
+/**
+ * One-time hints (a mermaid block with no mmdc, Arabic in Windows Terminal with no font for it): each
+ * shows the first time it would have helped, in this run only, and panel.json remembers it.
+ */
+const hintsBefore = new Set(Array.isArray(prefs.hints) ? prefs.hints : [])
+const hintsNow = new Set<string>()
+function hintOnce(name: string): boolean {
+  if (hintsBefore.has(name)) return false
+  if (!hintsNow.has(name)) {
+    hintsNow.add(name)
+    savePrefs()
+  }
+  return true
 }
 
 /** Questions you dismissed since your last message: the next one tells Claude not to wait for them. */
@@ -666,9 +685,9 @@ function openFor(): string[] {
 /** The agent an event of an agent's own belongs to: by its Agent call, or the SendMessage that continued it. */
 const agentOf = (parent: string) => S.agents.get(parent) ?? [...S.agents.values()].find(a => a.tasks.some(t => t.toolId === parent))
 
-/** Back to the main chat from an agent's, a request's or the game's view. */
+/** Back to the main chat from an agent's, a request's, the game's or /setup's view. */
 function closeAgent() {
-  if (!S.agentView && !S.requestView && !S.jobView && !S.isGameOpen) return
+  if (!S.agentView && !S.requestView && !S.jobView && !S.isGameOpen && !S.setupView) return
   leaveGame()
   S.agentView = ''
   S.requestView = ''
@@ -684,7 +703,8 @@ let game: Game | null = null
 
 /** Opens the game in the chat's place, as a view: ← back or Esc closes it. */
 function openGame() {
-  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
+  if (!S.agentView && !S.requestView && !S.jobView && !S.setupView) S.mainScroll = S.chatScroll
+  S.setupView = null
   S.agentView = ''
   S.requestView = ''
   S.jobView = ''
@@ -692,8 +712,10 @@ function openGame() {
   draw()
 }
 
-/** The game's view closes: a run being played pauses, to play on when it opens again. */
+/** The game's view closes (and /setup's, which no other view stays open with): a run being played pauses, to play on when it opens again. */
 function leaveGame() {
+  if (S.setupView) S.chatScroll = S.mainScroll
+  S.setupView = null
   if (!S.isGameOpen) return
   S.isGameOpen = false
   if (game) pauseFor(game, '')
@@ -739,6 +761,132 @@ function gameKey(k: string): boolean {
   }
   draw()
   return true
+}
+
+// ---- /setup: the optional extras, each installed only after a yes ---------------------------
+
+/** What /setup needs of the system (setup.ts), its own each time the view opens. */
+let setupIo!: SetupIo
+
+/** The click handler as the app knows it: it set it up as it started (notify.ts); unknown yet, setup.ts asks the registry. */
+const notifyHooks: NotifyHooks = {
+  status: () => {
+    if (!handlerDone) return undefined
+    return handlerDone.ok
+      ? { id: 'notify', name: EXTRA_NAMES.notify, state: 'ok', text: `A click on a notification opens its tab (${handlerDone.place.win})` }
+      : { id: 'notify', name: EXTRA_NAMES.notify, state: 'error', text: `Not set up: ${handlerDone.error}` }
+  },
+  install: async () => {
+    handler = handlerDone = undefined
+    const r = await clickHandler()
+    if (!r) return { ok: false, text: 'Only in Windows Terminal, with notifications going to Windows.' }
+    return r.ok ? { ok: true, text: `The click handler is set up (${r.place.win})${notifyMode === 'off' ? '; notifications are off: /notify on turns them on' : ''}.` } : { ok: false, text: `Could not set up the click handler: ${r.error}` }
+  },
+}
+
+const setupOpts = () => ({ protocol: inlineImages.protocol, notify: notifyHooks })
+
+/** Opens /setup in the chat's place, as a view: ← back or Esc closes it. */
+function openSetup() {
+  leaveGame()
+  if (!S.agentView && !S.requestView && !S.jobView) S.mainScroll = S.chatScroll
+  S.agentView = ''
+  S.requestView = ''
+  S.jobView = ''
+  S.chatScroll = 0
+  const v: SetupView = { at: 0, rows: undefined }
+  S.setupView = v
+  setupIo = systemIo(process.env, IS_WSL)
+  void refreshSetup(v)
+  draw()
+}
+
+/** Each extra's status, again (after an install). */
+async function refreshSetup(v: SetupView) {
+  const rows = await setupStatuses(setupIo, setupOpts())
+  v.rows = rows
+  // The first one that can be installed is picked, as you'd want it.
+  if (!v.busy && !v.confirm) v.at = Math.max(0, rows.findIndex(r => r.state === 'missing'))
+  draw()
+}
+
+/** Enter (or a click) on a row: what installing it does, to say yes or no to. */
+async function pickExtra(v: SetupView, i: number) {
+  v.at = i
+  const row = v.rows?.[i]
+  if (!row || v.planning || v.confirm) return draw()
+  if (v.busy && !v.busy.done) return toast(`${EXTRA_NAMES[v.busy.id]} is still being installed.`)
+  if (row.state === 'ok') return toast(`${row.name}: there already.`)
+  if (row.state === 'na' || row.state === 'info') return toast(`${row.name}: ${row.text}.`)
+  v.planning = row.id
+  delete v.busy
+  draw()
+  const p = await setupPlan(setupIo, row.id, setupOpts())
+  delete v.planning
+  if ('error' in p) toast(`${row.name}: ${p.error}.`)
+  else v.confirm = p
+  draw()
+}
+
+/** Yes on the confirmation: it installs, its progress in the view, its result in the chat. */
+function installExtra(v: SetupView) {
+  const p = v.confirm
+  if (!p) return
+  delete v.confirm
+  const busy: NonNullable<SetupView['busy']> = { id: p.id, lines: [] }
+  v.busy = busy
+  draw()
+  logSend('setup', { extra: p.id })
+  void p.run(line => {
+    busy.lines.push(line)
+    draw()
+  }).catch((e: Error) => ({ ok: false, text: `Failed: ${e.message}` })).then(r => {
+    busy.done = r
+    logSend('setup-done', { extra: p.id, ok: r.ok })
+    if (p.id === 'diagrams') inlineImages.renders.rescan()
+    const lines = [...busy.lines.slice(-6), r.text]
+    local.cards.add({ title: 'setup', about: `${EXTRA_NAMES[p.id]}: ${r.ok ? 'installed' : 'failed'}`, after: S.turns.at(-1)?.key ?? '', body: w => lines.flatMap((t, k) => wrap([{ text: t, style: k === lines.length - 1 ? { fg: r.ok ? C.green : C.red } : { fg: C.gray } }], w)) })
+    toast(r.ok ? `✓ ${r.text}` : `✗ ${r.text}`)
+    if (S.setupView === v) void refreshSetup(v)
+  })
+}
+
+/** Keys while /setup is open: it takes them all but Ctrl+C and Ctrl+D (false: the app handles those). */
+function setupKey(k: string): boolean {
+  const v = S.setupView!
+  if (k === '' || k === '') return false
+  lastInputAt = Date.now()
+  S.quitArmed = false
+  if (v.confirm) {
+    if (k === 'y' || k === 'Y' || k === '\r') installExtra(v)
+    else if (k === 'n' || k === 'N' || k === '\x1b') {
+      delete v.confirm
+      toast('Nothing installed.')
+    }
+    return draw(), true
+  }
+  if (k === '\x1b' || k === 'q') return closeAgent(), true
+  if (k === '\x1b[A') moveAt(v, -1)
+  else if (k === '\x1b[B') moveAt(v, 1)
+  else if (/^[1-9]$/.test(k)) void pickExtra(v, Math.min(Number(k), v.rows?.length ?? 1) - 1)
+  else if (k === '\r') void pickExtra(v, v.at)
+  draw()
+  return true
+}
+
+/**
+ * Arabic in Windows Terminal, and a font face without Cascadia Mono NF: once, a note in the chat
+ * says /setup installs it. Asked of settings.json once per run, the first time Arabic shows.
+ */
+let arabicChecked = false
+function arabicHint(text: string) {
+  if (arabicChecked || !inWt({ env: process.env, isWsl: IS_WSL }) || hintsBefore.has('arabic') || !hasRtl(text)) return
+  arabicChecked = true
+  void wtFace(systemIo(process.env, IS_WSL)).then(face => {
+    if (face === undefined || faceHasCascadia(face) || !hintOnce('arabic')) return
+    const say = `Arabic letters need a font that has them, and Windows Terminal draws with ${face ? `“${face}”` : 'its default font'}: /setup installs Cascadia Mono NF and sets the font face.`
+    local.cards.add({ title: 'setup', about: 'Arabic in Windows Terminal', after: S.turns.at(-1)?.key ?? '', body: w => wrap([{ text: say, style: { fg: C.gray, italic: true } }], w), actions: [{ label: 'open /setup', run: openSetup }] })
+  })
 }
 
 // ---- Inside a request: its chain -----------------------------------------------------------
@@ -1302,6 +1450,7 @@ function onEvent(e: ClaudeEvent) {
       if (t) {
         keepTail()
         t.pending = t.pending ? `${t.pending}\n\n${e.text}` : e.text
+        arabicHint(e.text)
         // The whole block is here: what streamed of it, on any open turn, is done with.
         for (const x of S.turns) if (!x.isDone) x.live = ''
         // A reply part with its own tag is finished: it shows now, not at Claude's next step.
@@ -1733,6 +1882,7 @@ function submit(text: string, opts: { reaction?: string; about?: string; agent?:
   const at = from ?? { ...here(), replyTo: null, images: [] }
   const now = Date.now()
   const turn = newTurn(text, now)
+  arabicHint(text)
   if (opts.reaction) turn.reaction = opts.reaction
   if (opts.retry) turn.retry = opts.retry
   if (opts.deletes) turn.deletes = opts.deletes
@@ -2697,7 +2847,7 @@ function openImage(path: string, name: string) {
 }
 
 /** Images and diagrams in Claude's replies, drawn in the chat (inline-images.ts); a click opens one. */
-const inlineImages = new InlineImages({ onChange: () => draw(), open: path => openImage(path, 'the image'), size: () => ({ cols: width(), rows: height() }) })
+const inlineImages = new InlineImages({ hint: () => hintOnce('diagrams'), onChange: () => draw(), open: path => openImage(path, 'the image'), size: () => ({ cols: width(), rows: height() }) })
 
 /** The click on `[image N]` in a message sent with these images (paths), when it has an Nth. */
 const imageClick = (paths: readonly string[] | undefined) => (n: number) => {
@@ -2821,7 +2971,7 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : job ? ` ${jobMark(job)} about the scheduled job: ${clip(jobName(job), Math.max(6, w - 40))} ` : shell ? ` $ about the background command: ${clip(shellName(shell), Math.max(6, w - 44))} ` : ''
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : shell ? C.cyan : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
-  const placeholder = S.isGameOpen ? `Playing ${GAME_NAME}: your keys go to the game   (Esc back to chat)` : S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : S.isWorking ? 'Claude is working… you can still send messages (Esc interrupts · Ctrl+G to play)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const placeholder = S.setupView ? 'Setup: ↑↓ choose · Enter install · Esc back to chat' : S.isGameOpen ? `Playing ${GAME_NAME}: your keys go to the game   (Esc back to chat)` : S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : S.isWorking ? 'Claude is working… you can still send messages (Esc interrupts · Ctrl+G to play)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = rowSpans(inner)
   // A slash command the app knows, at the start of the text: drawn in its own colour, as Claude Code does.
   const cmd = S.search ? 0 : commandEnd(S.text, isCommand)
@@ -3019,7 +3169,13 @@ function paint() {
     else if (size) resize(game!, size.w, size.h)
     else if (game?.state === 'playing') game.state = 'paused'
   }
-  const banner: Line | undefined = S.isGameOpen
+  const banner: Line | undefined = S.setupView
+    ? [
+        { text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent },
+        { text: ' ', style: {} },
+        { text: ' ⚙ Setup · optional extras ', style: { bg: C.cyan, fg: 16, bold: true } },
+      ]
+    : S.isGameOpen
     ? [{ text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent }, { text: ' ', style: {} }, ...gameBanner(game)]
     : shell
     ? [
@@ -3112,10 +3268,10 @@ function paint() {
       },
   }
   const viewKey = `${cw}|${req?.key ?? ''}|${inside?.id ?? ''}|${S.agentView}|${job?.toolId ?? ''}|${shell?.id ?? ''}`
-  const reuse = !S.isGameOpen && spinOnly && chatCache?.key === viewKey && Date.now() - chatCache.at < 1000
+  const reuse = !S.isGameOpen && !S.setupView && spinOnly && chatCache?.key === viewKey && Date.now() - chatCache.at < 1000
   spinOnly = false
   // The game's frames lay out no chat: only the game, 10 times a second.
-  if (!reuse && !S.isGameOpen)
+  if (!reuse && !S.isGameOpen && !S.setupView)
     chatCache = {
       key: viewKey,
       at: Date.now(),
@@ -3147,9 +3303,12 @@ function paint() {
         : inside ? agentLines(inside, S.turns.filter(t => t.aboutAgent === inside.id), ctx, cw - 2) : chatLines(ctx, cw - 2),
     }
   // Side answers (/btw) sit in the chat itself, after the message that was last when asked.
-  const base = S.isGameOpen ? { lines: gameLines(game, cw - 2, chatRows), anchors: {}, owners: [] } : job || shell || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
+  const setupView = S.setupView
+  const base = setupView
+    ? { lines: viewLines(setupView, cw - 2, { pick: i => void pickExtra(setupView, i), yes: () => installExtra(setupView), no: () => { delete setupView.confirm; draw() } }), anchors: {}, owners: [] }
+    : S.isGameOpen ? { lines: gameLines(game, cw - 2, chatRows), anchors: {}, owners: [] } : job || shell || req || inside ? chatCache!.out : local.cards.into(btw.into(chatCache!.out, S.turns.map(t => t.key), cw - 2, { copy: text => copyText(text), spin: ctx.spin }), S.turns.map(t => t.key), cw - 2)
   // Held messages last, in every view: they are the newest, and drawn fresh for their countdown.
-  const held = S.held.length && !S.isGameOpen
+  const held = S.held.length && !S.isGameOpen && !S.setupView
     ? heldLines(S.held.map(h => {
         const qs = h.from.replyTo?.quotes ?? []
         const queued = waitsForClaude(h)
@@ -3205,7 +3364,7 @@ function paint() {
   // Images in view, drawn after the text (not under the ↓ tag); one already there isn't wiped.
   let picsOut = ''
   let picsBefore = ''
-  if (!S.turns.length && !btw.asides.length && !local.cards.list.length && !S.held.length && !S.isGameOpen) {
+  if (!S.turns.length && !btw.asides.length && !local.cards.list.length && !S.held.length && !S.isGameOpen && !S.setupView) {
     const hello = [
       [{ text: 'clued', style: { bold: true, fg: C.cyan } }, { text: `  on Claude Code · ${cwd.replace(homedir(), '~')}`, style: { fg: C.gray } }],
       [{ text: 'Your messages sit on the right, Claude\'s answers on the left, its work folded into one line.', style: { fg: C.gray } }],
@@ -3243,7 +3402,7 @@ function paint() {
   for (const o of overlays) buf += `\x1b[${o.row};${o.col}H${o.text}`
   overlays.length = 0
   buf += picsOut
-  if (bottom.cursor && !S.permissions.length && !S.isGameOpen) {
+  if (bottom.cursor && !S.permissions.length && !S.isGameOpen && !S.setupView) {
     const cr = top + chatRows + bottom.cursor.row + 1
     const cc = cx + 1 + bottom.cursor.col + 1
     buf += `\x1b[${cr};${cc}H\x1b[?25h`
@@ -3557,6 +3716,9 @@ function runCommand(text: string): boolean {
       draw()
       return true
     }
+    case 'setup':
+      openSetup()
+      return true
     case 'btw': {
       if (!arg) return toast('Usage: /btw <question>: a quick side question. It sees the conversation, but stays out of it.'), true
       const m = passArgs.lastIndexOf('--model')
@@ -3638,6 +3800,7 @@ function key(k: string) {
     return
   }
   if (S.isGameOpen && !S.picker && gameKey(k)) return
+  if (S.setupView && !S.picker && setupKey(k)) return
   lastInputAt = Date.now()
   S.quitArmed = k === '\x03' ? S.quitArmed : false
   // With text selected: Ctrl+C copies it, Esc drops it, typing or Backspace replaces it in the input box.

@@ -149,6 +149,8 @@ export type Opts = {
   /** The terminal's size in cells. */
   size?: () => { cols: number; rows: number }
   renders?: Renders
+  /** A one-time hint may show (/setup installs the diagram tool): true the first time it would help. */
+  hint?: (name: 'diagrams') => boolean
 }
 
 export class InlineImages {
@@ -288,7 +290,10 @@ export class InlineImages {
     return [...out, caption(alt, shown, width, open, where)]
   }
 
-  /** A mermaid block: the diagram in its place once drawn; meanwhile, or without mmdc, a note under the code. */
+  /**
+   * A mermaid block: the diagram in its place once drawn; meanwhile a note under the code, and without
+   * mmdc, once (a hint), that /setup installs it.
+   */
   diagram(code: string, width: number): { lines: Line[]; replace: boolean } | undefined {
     const note = (text: string): { lines: Line[]; replace: boolean } => ({ lines: [[{ text: clip(text, width), style: { fg: C.gray, italic: true } }]], replace: false })
     const r = this.renders.diagram(code)
@@ -298,10 +303,11 @@ export class InlineImages {
       if (info?.type !== 'png' || this.broken.has(r.png)) return note('⚠ the diagram came out empty')
       return { lines: this.rows({ file: r.png, w: info.w, h: info.h, png: true }, 'diagram', r.png, width, false), replace: true }
     }
+    // With no images here, a drawn diagram is still a link that opens it: the hint helps there too.
+    if (r.state === 'missing') return this.opts.hint?.('diagrams') ? note('Diagrams need mmdc: /setup installs the diagram tool') : undefined
     if (this.protocol === 'off') return undefined
     if (r.state === 'drawing') return note('◌ drawing the diagram…')
-    if (r.state === 'failed') return note(`⚠ couldn't draw the diagram: ${r.error}`)
-    return note('To see diagrams drawn: npm i -g @mermaid-js/mermaid-cli')
+    return note(`⚠ couldn't draw the diagram: ${r.error}`)
   }
 
   /**

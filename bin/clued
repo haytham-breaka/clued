@@ -2,6 +2,7 @@
 # clued: a chat app on top of a real Claude Code session (run headless underneath).
 #   clued                 new session          clued -c           continue the last one
 #   clued --resume [id]   pick or open one     any other flag     passed to claude
+#   clued setup           install the optional extras (y/N for each)   clued setup --check  only their status
 # /reload inside the app restarts it on the same session (the app exits 75; this loop starts it again).
 # The older tmux layout (Claude Code's own screen with a threads panel beside it): clued-classic
 # Runs on macOS's own bash 3.2 too: there an empty array expanded under set -u is an "unbound
@@ -14,6 +15,10 @@ while [ -L "$self" ]; do
   case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
 done
 here="$(cd "$(dirname "$self")/.." && pwd)"
+if [ "${1:-}" = setup ]; then
+  shift
+  exec node --no-warnings "$here/app/setup-cli.ts" "$@"
+fi
 args=("$@")
 while true; do
   node --no-warnings "$here/app/main.ts" ${args[@]+"${args[@]}"}

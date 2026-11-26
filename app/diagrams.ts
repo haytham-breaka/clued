@@ -79,6 +79,12 @@ export class Renders {
     return this.tools.get(key)
   }
 
+  /** Looks for the tools on PATH again (one was just installed: /setup). */
+  rescan() {
+    this.tools.clear()
+    this.onDone()
+  }
+
   /** Whether mmdc is on PATH. */
   get hasMermaid() {
     return !!this.tool(['mmdc'])

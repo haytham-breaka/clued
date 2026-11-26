@@ -26,6 +26,8 @@ Back to the [README](../README.md) · [Using clued](usage.md) · [Commands](comm
 
 On a question card, a number picks an option and Enter sends it. Esc dismisses the question, and also closes what a command like `/status` shows.
 
+In `/setup`, ↑↓ (or a number) picks an extra, Enter shows what installing it does, `y` installs it and `n` or Esc doesn't; Esc or `← back` goes back to the chat.
+
 In the game (Ctrl+G), the arrows or WASD steer, Space pauses and plays on (or starts a new run after one ends), and Enter starts a new run too. Every other key goes to the game and does nothing, so nothing reaches the input box; Esc, Ctrl+G or `← back` goes back to the chat. Ctrl+C still interrupts Claude.
 
 On the `/model` card, ↑/↓ (or a number) picks a model, ←/→ changes the effort, and Enter or a click switches. Esc cancels.

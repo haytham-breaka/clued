@@ -36,6 +36,7 @@ export const ABOUT: Record<string, { args?: string; about: string }> = {
   model: { args: '[name]', about: 'pick a model and its effort (↑↓, ←→, Enter), or switch to one by name: no restart, the conversation goes on' },
   btw: { args: '<question>', about: 'a quick side question: it sees the conversation but stays out of it' },
   notify: { args: 'on|always|off|test|status|uninstall', about: 'a notification with a sound each time Claude waits on you' },
+  setup: { about: 'the optional extras: the diagram tool, the font for Arabic in Windows Terminal, the notification click; each installed after a yes' },
   hold: { args: '<seconds>', about: 'time to edit or delete a message before it goes' },
   queue: { args: 'on|off', about: 'hold messages sent while Claude works until its turn ends' },
   results: { about: 'hide Claude\'s steps and keep its results' },

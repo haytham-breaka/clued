@@ -11,7 +11,7 @@
   "scripts": {
     "test": "node --test --test-concurrency=4 \"tests/unit/*.test.ts\" \"tests/e2e/*.test.ts\"",
     "coverage": "c8 --check-coverage --lines 80 --branches 80 --functions 80 npm test",
-    "typecheck": "tsc --ignoreConfig --types node --noEmit --strict --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2023 --skipLibCheck app/main.ts hooks/model.ts tests/unit/*.ts tests/e2e/*.ts"
+    "typecheck": "tsc --ignoreConfig --types node --noEmit --strict --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2023 --skipLibCheck app/main.ts app/setup-cli.ts hooks/model.ts tests/unit/*.ts tests/e2e/*.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.6",

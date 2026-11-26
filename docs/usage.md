@@ -86,7 +86,7 @@ What your terminal can draw, and how clued draws there:
 
 To choose, set `CLUED_IMAGES` before you start clued: `iterm`, `kitty`, `sixel` or `off` (`auto`, the default, picks from the terminal). clued asks the terminal for its cell size in pixels, to keep an image's shape; if images come out squashed, set it yourself, for example `CLUED_IMAGE_CELL=10x20` (width × height in pixels).
 
-**Diagrams** need the Mermaid CLI, `mmdc`, on your PATH: `npm i -g @mermaid-js/mermaid-cli` (it brings a headless Chrome the first time). Each diagram is drawn once, on a clear background, in clued's look: dark boxes with rounded corners and teal edges, soft blue curved arrows, in Lato or another clean sans-serif font (its config is `cache/mermaid/theme.json` and `theme.css`, rewritten at each drawing), and kept under `~/.clued/cache/mermaid/` by its source; until it is ready the code shows with `◌ drawing the diagram…` under it. Without `mmdc` the code shows as before, with a line saying how to get diagrams; if `mmdc` fails, the line says why.
+**Diagrams** need the Mermaid CLI, `mmdc`, on your PATH: [`/setup`](#setup-the-optional-extras) installs it (`npm i -g @mermaid-js/mermaid-cli`, about 150 MB with the headless Chromium it draws with). Each diagram is drawn once, on a clear background, in clued's look: dark boxes with rounded corners and teal edges, soft blue curved arrows, in Lato or another clean sans-serif font (its config is `cache/mermaid/theme.json` and `theme.css`, rewritten at each drawing), and kept under `~/.clued/cache/mermaid/` by its source; until it is ready the code shows with `◌ drawing the diagram…` under it. Without `mmdc` the code shows as before, and the first time, a line under it says `/setup installs the diagram tool`; if `mmdc` fails, the line says why.
 
 The limits:
 
@@ -95,6 +95,22 @@ The limits:
 - An image scrolled partly out of view is cropped to its rows still in view (a JPEG in iTerm2 shows a placeholder until all of it is). Images show in the chat and a request's view; an agent's view, a reply still being written and the panel show the link.
 - Selecting text across an image copies the words around it, not the image.
 - You can delete `~/.clued/cache` at any time.
+
+## Setup: the optional extras
+
+clued works without anything more, but a few extras make it better, and `/setup` installs them. It opens a view in the chat's place (`← back` or Esc closes it) listing each one with its status: ✓ there, — missing (with what it gives you), · not for this terminal, ℹ information only.
+
+- **Diagrams:** `mmdc`, from `npm i -g @mermaid-js/mermaid-cli`. It downloads about 150 MB (the headless Chromium it draws with) into npm's global folder; if that folder isn't yours, the confirmation says so before npm fails.
+- **Arabic font** (Windows Terminal, from WSL): Cascadia Mono NF, for your Windows user only. Only its two Cascadia Mono NF fonts are downloaded (about 2.5 MB) out of the pinned [Cascadia Code 2407.24](https://github.com/microsoft/cascadia-code/releases/tag/v2407.24) zip, each checked against its SHA-256, copied to `%LOCALAPPDATA%\Microsoft\Windows\Fonts` and registered under `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Fonts` with plain `reg.exe` (no PowerShell, which antivirus may block). Restart Windows Terminal to see it.
+- **Font face** (Windows Terminal): sets `profiles.defaults.font.face` in Windows Terminal's `settings.json` (or your profile's own face, when it sets one) to `Cascadia Mono NF, Simplified Arabic Fixed`, or `Cascadia Mono NF, Courier New` when Simplified Arabic Fixed isn't installed (see [the font in Windows Terminal](#joining-arabic-letters)). The file is copied to `settings.json.bak-clued-<date>` first, and only the face's own text changes: comments and the rest stay. A different face you set is named in the confirmation before it is replaced.
+- **Notification click** (Windows Terminal): the click handler [notifications](#notifications) use; its status, and set up again if it isn't there.
+- **Inline images:** which [image protocol](#images-and-diagrams-in-replies) this terminal gets, and what to do when it gets none. Nothing to install.
+
+↑↓ choose (or a number), Enter shows exactly what installing it does: what is downloaded and how much, the files written, the registry values, the settings changed. `y` installs, `n` or Esc doesn't. Its progress shows in the view, and the result in the chat.
+
+From the shell, `clued setup` walks the same extras with a `y/N` for each, and `clued setup --check` only prints their statuses.
+
+Nothing is ever installed without your yes. Instead, the first time an extra would have helped, clued says so once: under a Mermaid block when `mmdc` is missing, and in the chat when Arabic shows in Windows Terminal and its font face has no Cascadia Mono NF. `~/.clued/panel.json` remembers which hints were shown.
 
 ## Permissions
 
@@ -155,7 +171,7 @@ When clued puts a line in order (`CLUED_BIDI=app`), something still has to join 
 
 For example `export CLUED_ARABIC=app` in `~/.zshrc`. With `CLUED_BIDI=terminal` or `off`, the terminal gets the text as written and `CLUED_ARABIC` does nothing. Either way, copying gives the text as written.
 
-**The font in Windows Terminal.** The font needs Arabic letters. Use **Cascadia Mono NF** or **Cascadia Code / Cascadia Mono 2111 or later** (from [GitHub](https://github.com/microsoft/cascadia-code/releases)), which have Arabic and join it. The Cascadia Code and Cascadia Mono built into Windows (version 2102) have no Arabic: Windows Terminal borrows each letter from another font, and the letters don't join well. Set the font in Settings → your profile → Appearance → Font face. Cascadia has no glyph for lam-alef (لا), which clued writes as one character, so Windows borrows it from another font, and the borrowed one may not join the letter before it (خلا, ثلا). Name a second font for Windows to borrow from, after a comma: `Cascadia Mono NF, Simplified Arabic Fixed` (or `Courier New`, on every Windows). Cascadia still draws everything it has. In other terminals, with `app`, the font needs the Presentation Forms: DejaVu Sans Mono and most system fonts have them; otherwise the terminal borrows them from another font.
+**The font in Windows Terminal.** The font needs Arabic letters. Use **Cascadia Mono NF** or **Cascadia Code / Cascadia Mono 2111 or later** (from [GitHub](https://github.com/microsoft/cascadia-code/releases)), which have Arabic and join it. The Cascadia Code and Cascadia Mono built into Windows (version 2102) have no Arabic: Windows Terminal borrows each letter from another font, and the letters don't join well. [`/setup`](#setup-the-optional-extras) installs Cascadia Mono NF and sets the font face; to do it yourself, Settings → your profile → Appearance → Font face. Cascadia has no glyph for lam-alef (لا), which clued writes as one character, so Windows borrows it from another font, and the borrowed one may not join the letter before it (خلا, ثلا). Name a second font for Windows to borrow from, after a comma: `Cascadia Mono NF, Simplified Arabic Fixed` (or `Courier New`, on every Windows). Cascadia still draws everything it has. In other terminals, with `app`, the font needs the Presentation Forms: DejaVu Sans Mono and most system fonts have them; otherwise the terminal borrows them from another font.
 
 The limits:
 

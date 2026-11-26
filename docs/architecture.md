@@ -27,7 +27,7 @@ The chat comes from Claude Code's own session file (under `~/.claude/projects/`)
 ## What clued keeps in `~/.clued/`
 
 - `sessions/<session id>.json`, one per session: which reply answers which message, reactions, read marks, saved messages (with their words), replies Claude wrote mid-turn, messages still in queue when the app closed, the folders `/add-dir` added, and which images each message was sent with.
-- `panel.json`: the panel's width and whether it's folded, and the `/notify`, `/hold` and `/queue` settings.
+- `panel.json`: the panel's width and whether it's folded, the `/notify`, `/hold` and `/queue` settings, the game's best score, and which one-time `/setup` hints were shown.
 - `sent.log`: every message you send, with its hidden note and the time, one line each, plus edits, deletions and answers to Claude's questions. It's there to debug timing problems; the app never reads it back. When the app starts, and every hour after, it drops the entries older than 7 days and keeps the file to its newest 5 MB.
 - `images/`: images you pasted from the clipboard, saved as PNG files. One a message was sent with stays as long as that session's file names it, so a click on its `[image N]` still opens it. One that no session's file names (pasted and never sent, or its message deleted while held) is deleted once it is 30 days old. An image you attach by its path stays where it is, and clued never deletes it.
 - `cache/`: Mermaid diagrams drawn by `mmdc` (`cache/mermaid/`) and images turned into PNG to draw them (`cache/images/`), each named by what it was made from. Safe to delete at any time.

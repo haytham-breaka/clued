@@ -3,7 +3,7 @@
 // When NODE_V8_COVERAGE is set (c8 sets it), the app writes its coverage there as it exits.
 
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,6 +24,11 @@ export type LaunchOpts = {
   /** Runs before the app starts: write session files, settings, images. */
   setup?: (app: { dir: string; home: string; work: string }) => void
   env?: Record<string, string>
+  /**
+   * PATH is only the fakes, node, /usr/bin and /bin: none of this machine's own tools (an mmdc
+   * installed next to node, say) or Windows' (WSL's /mnt/c/…).
+   */
+  isolatePath?: boolean
 }
 
 export type App = Awaited<ReturnType<typeof launch>>
@@ -70,8 +75,15 @@ export async function launch(opts: LaunchOpts = {}) {
   const W = opts.width ?? 120
   const H = opts.height ?? 34
   const cov = process.env.NODE_V8_COVERAGE
+  let path = `${bin}:${process.env.PATH}`
+  if (opts.isolatePath) {
+    const nodeBin = join(dir, 'node-bin')
+    mkdirSync(nodeBin)
+    symlinkSync(process.execPath, join(nodeBin, 'node'))
+    path = `${bin}:${nodeBin}:/usr/bin:/bin`
+  }
   const env: Record<string, string> = {
-    PATH: `${bin}:${process.env.PATH}`,
+    PATH: path,
     HOME: home,
     CLUED_CLIPBOARD: 'osc52',
     // Messages go at once (no hold to edit or delete them first) unless a test sets it: '' is the app's default.

@@ -228,14 +228,17 @@ export type HandlerIo = {
 /** Where focus.ps1 goes: its Windows path (for the registry) and the one this process writes to. */
 export type HandlerPlace = { systemRoot: string; win: string; here: string }
 
-const lastLine = (r: Ran) => (r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`).split(/\r?\n/).at(-1)!.trim().slice(0, 200)
+export const lastLine = (r: Ran) => (r.stderr.trim() || r.stdout.trim() || `exit ${r.code}`).split(/\r?\n/).at(-1)!.trim().slice(0, 200)
 const isDrivePath = (p: string) => /^[A-Za-z]:\\/.test(p)
 
+/** %LOCALAPPDATA% and %SystemRoot% as Windows paths, and %LOCALAPPDATA% as a path this process can write to. */
+export type WindowsDirs = { local: string; systemRoot: string; localHere: string }
+
 /**
- * %LOCALAPPDATA%\clued\focus.ps1. From WSL, %LOCALAPPDATA% and %SystemRoot% come from a plain
- * `cmd.exe /c echo`, and wslpath gives the folder's path here (/mnt/c/Users/…).
+ * Windows' own folders. From WSL, %LOCALAPPDATA% and %SystemRoot% come from a plain `cmd.exe /c
+ * echo`, and wslpath gives the folder's path here (/mnt/c/Users/…). /setup uses them too.
  */
-export async function handlerPlace(io: HandlerIo): Promise<HandlerPlace | string> {
+export async function windowsDirs(io: Pick<HandlerIo, 'exec' | 'isWsl' | 'env'>): Promise<WindowsDirs | string> {
   let local = io.env.LOCALAPPDATA ?? ''
   let systemRoot = io.env.SystemRoot ?? io.env.SYSTEMROOT ?? 'C:\\Windows'
   if (io.isWsl) {
@@ -243,14 +246,34 @@ export async function handlerPlace(io: HandlerIo): Promise<HandlerPlace | string
     ;[local = '', systemRoot = ''] = r.stdout.trim().split(';')
     if (!r.ok || !isDrivePath(local) || !isDrivePath(systemRoot)) return `could not find %LOCALAPPDATA% through cmd.exe (${lastLine(r)})`
   } else if (!isDrivePath(local)) return 'LOCALAPPDATA is not set'
-  const win = `${local}\\clued\\focus.ps1`
-  if (!io.isWsl) return { systemRoot, win, here: win }
+  if (!io.isWsl) return { local, systemRoot, localHere: local }
   const p = await io.exec('wslpath', ['-u', local])
   if (!p.ok || !p.stdout.trim().startsWith('/')) return `wslpath could not convert ${local} (${lastLine(p)})`
-  return { systemRoot, win, here: `${p.stdout.trim()}/clued/focus.ps1` }
+  return { local, systemRoot, localHere: p.stdout.trim() }
+}
+
+/** %LOCALAPPDATA%\clued\focus.ps1. */
+export async function handlerPlace(io: HandlerIo): Promise<HandlerPlace | string> {
+  const d = await windowsDirs(io)
+  if (typeof d === 'string') return d
+  const win = `${d.local}\\clued\\focus.ps1`
+  return { systemRoot: d.systemRoot, win, here: io.isWsl ? `${d.localHere}/clued/focus.ps1` : win }
 }
 
 export type Setup = { ok: true; wrote: boolean; place: HandlerPlace } | { ok: false; error: string }
+
+/** The registry names this handler's version, and focus.ps1 is this one. */
+async function isCurrent(io: HandlerIo, place: HandlerPlace): Promise<boolean> {
+  const q = await io.exec('reg.exe', ['query', HANDLER_KEY, '/v', 'CluedVersion'])
+  return q.ok && q.stdout.includes(FOCUS_VERSION) && io.read(place.here) === FOCUS_PS
+}
+
+/** Whether the click handler is set up as this clued would set it up: nothing is written (/setup's status). */
+export async function clickHandlerState(io: HandlerIo): Promise<{ ok: boolean; at: string } | { error: string }> {
+  const place = await handlerPlace(io)
+  if (typeof place === 'string') return { error: place }
+  return { ok: await isCurrent(io, place), at: place.win }
+}
 
 /**
  * Sets up the click handler when it isn't there yet (or is an older one), apart from any toast: writes
@@ -260,8 +283,7 @@ export type Setup = { ok: true; wrote: boolean; place: HandlerPlace } | { ok: fa
 export async function setupClickHandler(io: HandlerIo): Promise<Setup> {
   const place = await handlerPlace(io)
   if (typeof place === 'string') return { ok: false, error: place }
-  const q = await io.exec('reg.exe', ['query', HANDLER_KEY, '/v', 'CluedVersion'])
-  if (q.ok && q.stdout.includes(FOCUS_VERSION) && io.read(place.here) === FOCUS_PS) return { ok: true, wrote: false, place }
+  if (await isCurrent(io, place)) return { ok: true, wrote: false, place }
   try {
     io.write(place.here, FOCUS_PS)
   } catch (err: any) {

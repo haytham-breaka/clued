@@ -71,6 +71,24 @@ describe(`launchers (${execFileSync(BASH, ['-c', 'echo "bash $BASH_VERSION"'], {
     }
   })
 
+  test('clued setup runs the setup command, with its flags, and not the app', () => {
+    const s = sandbox()
+    try {
+      let r = s.run('clued', ['setup', '--check'], { FAKE_EXIT: '0' })
+      assert.equal(r.stderr, '')
+      assert.equal(r.status, 0)
+      assert.deepEqual(r.calls, [`node [--no-warnings] [${REPO}/app/setup-cli.ts] [--check]`])
+      r = s.run('clued', ['setup'], { FAKE_EXIT: '1' })
+      assert.equal(r.status, 1)
+      assert.deepEqual(r.calls, [`node [--no-warnings] [${REPO}/app/setup-cli.ts]`])
+      // Only as the first word: anything else goes to claude as before.
+      r = s.run('clued', ['-c', 'setup'])
+      assert.deepEqual(r.calls, [`${MAIN} [-c] [setup]`])
+    } finally {
+      s.done()
+    }
+  })
+
   test('/reload starts it again on the same session, with the other flags', () => {
     const s = sandbox()
     try {

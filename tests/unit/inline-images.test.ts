@@ -243,7 +243,14 @@ describe('InlineImages: diagrams', () => {
       m.flush()
       assert.equal(note(img.diagram('graph LR', 60)), "⚠ couldn't draw the diagram: boom: it failed")
       const bare = renders(join(f.dir, 'x'), [], () => undefined)
-      assert.equal(note(make('kitty', { renders: bare.r }).diagram('graph TD', 60)), 'To see diagrams drawn: npm i -g @mermaid-js/mermaid-cli')
+      // Without mmdc: the hint that /setup installs it, when it may show (once: the app remembers it), else nothing.
+      let may = true
+      const hinted = make('kitty', { renders: bare.r, hint: () => may })
+      assert.equal(note(hinted.diagram('graph TD', 60)), 'Diagrams need mmdc: /setup installs the diagram tool')
+      assert.equal(note(make('off', { renders: bare.r, hint: () => true }).diagram('graph TD', 60)), 'Diagrams need mmdc: /setup installs the diagram tool')
+      may = false
+      assert.equal(hinted.diagram('graph TD', 60), undefined)
+      assert.equal(make('kitty', { renders: bare.r }).diagram('graph TD', 60), undefined)
       // Images off: the code as it is, and once drawn, a link to the picture under it.
       const off = make('off', { renders: m.r })
       assert.equal(off.diagram('graph XY', 40), undefined)
@@ -457,7 +464,8 @@ describe('InlineImages: the terminal', () => {
       assert.equal(m.open, open)
       assert.equal(m.image!('x', f.png, 30)!.length, 6)
       assert.equal(make('off').media().open, undefined)
-      assert.equal(make('sixel').media().diagram!('graph', 30)!.replace, false)
+      // No mmdc (an empty PATH): the hint, under the code.
+      assert.equal(make('sixel', { renders: new Renders(join(f.dir, 'c'), () => {}, { path: '' }), hint: () => true }).media().diagram!('graph', 30)!.replace, false)
     } finally {
       f.done()
     }
