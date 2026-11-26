@@ -2584,7 +2584,7 @@ function bottomLines(w: number): { lines: Line[]; cursor?: { row: number; col: n
   const label = S.search ? ' ⌕ search your messages ' : req ? ` ▣ in request ${req.topicId ?? ''}: ${clip(preview(req.text, 60), Math.max(6, w - 30))} ` : inside ? ` ◇ to ${who(inside, S.agents.values())}: ${clip(inside.name, Math.max(6, w - 40))} ` : job ? ` ${jobMark(job)} about the scheduled job: ${clip(jobName(job), Math.max(6, w - 40))} ` : shell ? ` $ about the background command: ${clip(shellName(shell), Math.max(6, w - 44))} ` : ''
   L.push(label ? [{ text: '╭─', style: border }, { text: label, style: { fg: S.search || job ? C.yellow : req ? C.blue : shell ? C.cyan : C.magenta, bold: true } }, { text: '─'.repeat(Math.max(0, w - 4 - cells(label))) + '╮', style: border }] : [{ text: '╭' + '─'.repeat(w - 2) + '╮', style: border }])
   const top = L.length
-  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
+  const placeholder = S.search ? 'Type to search your messages   (↑↓ through the matches · Enter go to it · Esc done)' : req ? 'Add to this request, or ask about it   (Esc back to chat)' : inside ? 'Ask Claude about this agent, or have it continue   (Esc back to chat)' : job ? 'Ask Claude about this job, or to change it   (Esc back to chat)' : shell ? 'Ask Claude about this command   (Esc back to chat)' : ask ? 'Pick an answer above, or type your own here   (Enter sends · Esc dismisses the question)' : S.isWorking ? 'Claude is working… you can still send a message (Esc to interrupt)' : 'Message Claude   (/ commands · Alt+Enter new line · Esc cancels a reply)'
   const spans = rowSpans(inner)
   shown.forEach((r, i) => {
     const text = !S.text && i === 0 ? clip(placeholder, inner) : r
@@ -2773,36 +2773,36 @@ function paint() {
   const jobFor = (job ?? shell)?.for.map(k => S.turns.findLast(t => t.key === k)).filter((t): t is Turn => !!t) ?? []
   const banner: Line | undefined = shell
     ? [
+        { text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent },
+        { text: ' ', style: {} },
         { text: ` $ Background · ${clip(shellName(shell, 40), 40)} `, style: { bg: C.cyan, fg: 16, bold: true } },
         { text: `  ${shellState(shell)}`, style: { fg: shell.state === 'failed' ? C.red : C.cyan, bold: true } },
         ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, ...messageLink(jobFor[0], 40)] : []),
-        { text: '  · ', style: { fg: C.faint } },
-        { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
     : job
     ? [
+        { text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent },
+        { text: ' ', style: {} },
         { text: ` ${jobMark(job)} Scheduled · ${clip(jobName(job, 40), 40)} `, style: { bg: C.yellow, fg: 16, bold: true } },
         { text: `  ${stateLabel(job)}`, style: { fg: C.cyan, bold: true } },
         ...(jobFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, ...messageLink(jobFor[0], 40)] : []),
-        { text: '  · ', style: { fg: C.faint } },
-        { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
     : req && reqInfo
     ? [
+        { text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent },
+        { text: ' ', style: {} },
         { text: ` ▣ Request ${req.topicId ?? ''} `, style: { bg: C.blue, fg: 16, bold: true } },
         { text: ` ${reqInfo.mark} ${reqInfo.state}  `, style: { fg: reqInfo.isStale ? C.gray : C.cyan, bold: true } },
         ...messageLink(req, 50),
-        { text: '  · ', style: { fg: C.faint } },
-        { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
     : inside
     ? [
+        { text: '← back', style: { fg: C.cyan, bold: true }, action: closeAgent },
+        { text: ' ', style: {} },
         isMain
           ? { text: ` ✻ Claude, live${inside.state === 'running' ? '' : ` · ${inside.state}`} `, style: { bg: C.claude, fg: 231, bold: true } }
           : { text: ` ◇ ${who(inside, S.agents.values())} · ${clip(inside.name, 40)} `, style: { bg: C.magenta, fg: 16, bold: true } },
         ...(insideFor[0] ? [{ text: '  ↳ ', style: { fg: C.gray } }, ...messageLink(insideFor[0], 50)] : []),
-        { text: '  · ', style: { fg: C.faint } },
-        { text: '← back to chat', style: { fg: C.cyan, bold: true }, action: closeAgent },
       ]
     : undefined
   const top = banner ? 1 : 0
@@ -3120,7 +3120,7 @@ function localCtx(): LocalCtx {
       refreshStatus()
     },
     shown: (card: Card) => {
-      if (S.agentView || S.requestView || S.jobView) toast(`/${card.title} is in the chat: ← back to chat.`)
+      if (S.agentView || S.requestView || S.jobView) toast(`/${card.title} is in the chat: ← back, or Esc.`)
       else S.pendingJump = `card:${card.id}`
       draw()
     },
@@ -3203,7 +3203,7 @@ function runCommand(text: string): boolean {
       if (!arg) return toast('Usage: /btw <question>: a quick side question. It sees the conversation, but stays out of it.'), true
       const m = passArgs.lastIndexOf('--model')
       btw.ask(arg, { sessionId: S.sessionId, model: m >= 0 ? passArgs[m + 1] ?? '' : S.model, cwd, after: S.turns.at(-1)?.key ?? '' })
-      if (S.agentView || S.requestView || S.jobView) toast('The side answer is in the chat: ← back to chat.')
+      if (S.agentView || S.requestView || S.jobView) toast('The side answer is in the chat: ← back, or Esc.')
       else S.chatScroll = 0
       return true
     }
@@ -3511,10 +3511,11 @@ function key(k: string) {
         S.cursor = 0
         // The next menu starts at its first item, not where this one was left.
         S.menuAt = 0
-      } else if (asking) dismissAsk()
-      else if (S.replyTo) S.replyTo = null
-      else if (S.picked) S.picked = ''
+      } else if (S.replyTo) S.replyTo = null
+      // A view (agent, request, job, command) closes before anything else: Esc is how you get back.
       else if (S.agentView || S.requestView || S.jobView) closeAgent()
+      else if (asking) dismissAsk()
+      else if (S.picked) S.picked = ''
       else if (local.cards.dismissLast() || btw.dismissLast()) {}
       else if (S.isWorking) {
         S.claude?.interrupt()

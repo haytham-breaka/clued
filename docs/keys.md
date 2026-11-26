@@ -5,7 +5,7 @@ Back to the [README](../README.md) · [Using clued](usage.md) · [Commands](comm
 | Key | Does |
 |---|---|
 | Enter / Alt+Enter | send / new line |
-| Esc | cancel a reply, dismiss Claude's question, or interrupt Claude |
+| Esc | back to the chat from an agent's, request's, job's or command's view (also `← back` at the start of its title line); else cancel a reply, dismiss Claude's question, or interrupt Claude |
 | Ctrl+C | clear the input or interrupt; twice to quit |
 | Alt+↑ / Alt+↓ | go through your recent messages; the chat scrolls to each |
 | Alt+→ / Alt+← | from a message to its reply, and back |

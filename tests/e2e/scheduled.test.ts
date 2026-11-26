@@ -55,7 +55,7 @@ describe('scheduled jobs', () => {
       assert.match(s, /cron +\d+ \d+ \d+ \d+ \* +\(once, \d+ \w+ \d\d:\d\d/)
       await app.click('◇ James (planner)', { area: 'chat' })
       await app.waitFor('Plan the release.')
-      await app.click('← back to chat', { area: 'chat' })
+      await app.click('← back', { area: 'chat' })
 
       // The wakeup: its reason and prompt.
       await app.click('waiting for CI', { area: 'panel' })
