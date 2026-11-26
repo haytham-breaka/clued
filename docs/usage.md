@@ -75,7 +75,7 @@ Ctrl+V adds the image on the clipboard. This works with the Windows clipboard fr
 
 ## Images and diagrams in replies
 
-Claude can show you an image, a chart or a diagram right in its reply. It writes a PNG file and puts `![what it is](/absolute/path.png)` on its own line (the app's guide tells it how; for a chart it renders a PNG, for example with matplotlib if it's installed). The image is drawn in the reply, under its paragraph, as wide as the bubble allows and at most 20 rows high, its shape kept. Under it is `[image: what it is]` with the file's path: a click on either opens it in your image viewer, full size. A ```` ```mermaid ```` block is drawn as a diagram in place of its code, with `⧉ copy` for its source.
+Claude can show you an image, a chart or a diagram right in its reply. It writes a PNG file and puts `![what it is](/absolute/path.png)` on its own line (the app's guide tells it how, and to do it unasked when a picture explains better than text: a flow, an architecture, a comparison, a chart; for a chart it renders a PNG, for example with matplotlib if it's installed). The image is drawn in the reply, under its paragraph, as wide as the bubble allows and at most 20 rows high, its shape kept. Under it is `[image: what it is]` with the file's path: a click on either opens it in your image viewer, full size. A ```` ```mermaid ```` block is drawn as a diagram in place of its code, with `⧉ copy` for its source.
 
 What your terminal can draw, and how clued draws there:
 
@@ -86,7 +86,7 @@ What your terminal can draw, and how clued draws there:
 
 To choose, set `CLUED_IMAGES` before you start clued: `iterm`, `kitty`, `sixel` or `off` (`auto`, the default, picks from the terminal). clued asks the terminal for its cell size in pixels, to keep an image's shape; if images come out squashed, set it yourself, for example `CLUED_IMAGE_CELL=10x20` (width × height in pixels).
 
-**Diagrams** need the Mermaid CLI, `mmdc`, on your PATH: `npm i -g @mermaid-js/mermaid-cli` (it brings a headless Chrome the first time). Each diagram is drawn once, in a dark theme on a clear background, and kept under `~/.clued/cache/mermaid/` by its source; until it is ready the code shows with `◌ drawing the diagram…` under it. Without `mmdc` the code shows as before, with a line saying how to get diagrams; if `mmdc` fails, the line says why.
+**Diagrams** need the Mermaid CLI, `mmdc`, on your PATH: `npm i -g @mermaid-js/mermaid-cli` (it brings a headless Chrome the first time). Each diagram is drawn once, on a clear background, in clued's look: dark boxes with rounded corners and teal edges, soft blue curved arrows, in Lato or another clean sans-serif font (its config is `cache/mermaid/theme.json` and `theme.css`, rewritten at each drawing), and kept under `~/.clued/cache/mermaid/` by its source; until it is ready the code shows with `◌ drawing the diagram…` under it. Without `mmdc` the code shows as before, with a line saying how to get diagrams; if `mmdc` fails, the line says why.
 
 The limits:
 

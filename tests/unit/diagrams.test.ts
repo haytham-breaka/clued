@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { onPath, Renders } from '../../app/diagrams.ts'
+import { MERMAID_CONFIG, MERMAID_CSS, onPath, Renders } from '../../app/diagrams.ts'
 import type { Run } from '../../app/diagrams.ts'
 
 /** A temp folder with a bin/ of empty programs named `tools`, and a cache folder. */
@@ -68,7 +68,11 @@ describe('Renders.diagram', () => {
       // One at a time: the second waits for the first.
       r.diagram('graph LR\n C-->D')
       assert.equal(f.calls.length, 1)
-      assert.deepEqual(f.calls[0]!.args.slice(-7), ['-t', 'dark', '-b', 'transparent', '-s', '2', '-q'])
+      // Drawn in clued's look: its config and CSS, written next to the diagram, then a clear background.
+      const mm = join(s.cache, 'mermaid')
+      assert.deepEqual(f.calls[0]!.args.slice(-9), ['-c', join(mm, 'theme.json'), '-C', join(mm, 'theme.css'), '-b', 'transparent', '-s', '2', '-q'])
+      assert.deepEqual(JSON.parse(readFileSync(join(mm, 'theme.json'), 'utf8')), MERMAID_CONFIG)
+      assert.equal(readFileSync(join(mm, 'theme.css'), 'utf8'), MERMAID_CSS)
       f.flush()
       assert.equal(f.calls.length, 2)
       f.flush()

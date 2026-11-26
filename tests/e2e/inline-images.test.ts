@@ -112,7 +112,7 @@ describe('inline images', () => {
       await app.send('draw a diagram')
       await app.waitIdle('[image: diagram]  ⧉ copy')
       assert.doesNotMatch(app.screen(), /graph TD/)
-      assert.match(app.read('mmdc.log'), /-t dark -b transparent/)
+      assert.match(app.read('mmdc.log'), /-c \S+theme\.json -C \S+theme\.css -b transparent/)
       await waitOutput(app, /\x1bP0;1;0q"1;1;200;100/g)
       await app.click('⧉ copy', { area: 'chat' })
       await app.waitClipboard('graph TD\n  A --> B')

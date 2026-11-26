@@ -104,6 +104,8 @@ const APP_GUIDE = [
   '"🎉" good news. A reaction may also come with a reply when the reply adds something. None on praise alone.',
   'To show an image, chart or diagram, write a PNG and put ![what it is](/absolute/path.png) on its own line: the app',
   'draws it (render charts to PNG, e.g. with matplotlib if available); a ```mermaid block is drawn as a diagram.',
+  'Use them on your own, unasked, when a picture explains better than text: a flow, an architecture, a comparison, a',
+  'chart of numbers; keep plain text for the rest.',
 ].join(' ')
 
 // ---- State -----------------------------------------------------------------------

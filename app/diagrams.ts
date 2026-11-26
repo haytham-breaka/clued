@@ -36,8 +36,26 @@ const runDefault: Run = (cmd, args, done) => {
   })
 }
 
-/** The theme diagrams are drawn in: dark, on a clear background, as the app's own colours are. */
-const MERMAID_ARGS = ['-t', 'dark', '-b', 'transparent', '-s', '2', '-q']
+/**
+ * The look diagrams are drawn in, on a clear background: dark boxes with rounded corners and teal
+ * edges (clued's cyan), soft blue curved arrows, and Lato or another clean sans-serif font.
+ */
+export const MERMAID_CONFIG = {
+  theme: 'base',
+  fontFamily: 'Lato, "Segoe UI", "Helvetica Neue", "DejaVu Sans", sans-serif',
+  flowchart: { curve: 'basis', padding: 18, nodeSpacing: 40, rankSpacing: 55 },
+  themeVariables: {
+    darkMode: true, background: 'transparent', fontSize: '17px',
+    primaryColor: '#16232c', primaryBorderColor: '#4fc3d0', primaryTextColor: '#e8eef2', lineColor: '#6f8fa8',
+    secondaryColor: '#1d1830', tertiaryColor: '#1b2620', edgeLabelBackground: 'transparent',
+    clusterBkg: '#141b22', clusterBorder: '#33505f',
+  },
+}
+/** What the config can't say: rounded boxes, and arrow labels with no box behind them. */
+export const MERMAID_CSS = '.node rect,.node polygon{rx:10px;ry:10px} .edgeLabel,.edgeLabel p,.labelBkg{background-color:transparent !important;color:#9fb3c3} .edgeLabel rect{opacity:0}'
+const MERMAID_ARGS = ['-b', 'transparent', '-s', '2', '-q']
+/** Everything that changes how a diagram looks, so a new look draws diagrams anew rather than reusing old ones. */
+const MERMAID_LOOK = JSON.stringify(MERMAID_CONFIG) + '\0' + MERMAID_CSS + '\0' + MERMAID_ARGS.join(' ')
 
 export class Renders {
   private known = new Map<string, Render>()
@@ -90,7 +108,7 @@ export class Renders {
 
   /** A Mermaid diagram as a PNG: drawn once per source, then from the cache. */
   diagram(code: string): Render {
-    const hash = createHash('sha256').update(MERMAID_ARGS.join(' ') + '\0' + code).digest('hex').slice(0, 32)
+    const hash = createHash('sha256').update(MERMAID_LOOK + '\0' + code).digest('hex').slice(0, 32)
     const out = join(this.dir, 'mermaid', `${hash}.png`)
     const key = `m:${hash}`
     const known = this.known.get(key)
@@ -105,6 +123,9 @@ export class Renders {
         const src = join(this.dir, 'mermaid', `${hash}.mmd`)
         const tmp = join(this.dir, 'mermaid', `${hash}.tmp.png`)
         writeFileSync(src, code)
+        const look = ['-c', join(this.dir, 'mermaid', 'theme.json'), '-C', join(this.dir, 'mermaid', 'theme.css')]
+        writeFileSync(look[1]!, JSON.stringify(MERMAID_CONFIG))
+        writeFileSync(look[3]!, MERMAID_CSS)
         const done = (err?: string) => {
           rmSync(src, { force: true })
           if (!err && existsSync(tmp)) renameSync(tmp, out)
@@ -112,12 +133,12 @@ export class Renders {
           next()
         }
         const run = this.opts.run ?? runDefault
-        run(mmdc, ['-i', src, '-o', tmp, ...MERMAID_ARGS], err => {
+        run(mmdc, ['-i', src, '-o', tmp, ...look, ...MERMAID_ARGS], err => {
           // Chrome's sandbox can't start in some Linux setups (as root, or AppArmor's limits): once more without it.
           if (!err || !/sandbox/i.test(err)) return done(err)
           const cfg = join(this.dir, 'mermaid', 'no-sandbox.json')
           writeFileSync(cfg, JSON.stringify({ args: ['--no-sandbox'] }))
-          run(mmdc, ['-i', src, '-o', tmp, '-p', cfg, ...MERMAID_ARGS], done)
+          run(mmdc, ['-i', src, '-o', tmp, '-p', cfg, ...look, ...MERMAID_ARGS], done)
         })
       } catch (e) {
         this.finish(key, out, (e as Error).message)
